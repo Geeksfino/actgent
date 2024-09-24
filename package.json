@@ -3,9 +3,12 @@
   "version": "1.0.0",
   "main": "src/index.ts",
   "dependencies": {
+    "@grpc/grpc-js": "^1.11.3",
     "bottleneck": "^2.19.5",
     "bree": "^9.2.4",
-    "nats": "^2.28.2"
+    "nats": "^2.28.2",
+    "openai": "^4.63.0",
+    "uuidv4": "^6.2.13"
   },
   "devDependencies": {
     "bun-types": "latest"

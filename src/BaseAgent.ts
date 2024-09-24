@@ -1,126 +1,186 @@
-import { AgentConfig, Tool, LLMConfig, CommunicationConfig, MemoryConfig } from './interfaces';
-import { Goal } from './Goal';
+import { AgentConfig, Tool, LLMConfig, CommunicationConfig, MemoryConfig, CapabilityDescription } from './interfaces';
 import { Communication } from './Communication';
 import { Memory } from './Memory';
 import { PromptManager } from './PromptManager';
-import { PriorityInbox } from './PriorityInbox'; 
+import { PriorityInbox } from './PriorityInbox';
 import { Message } from './Message';
+import { AgentRegistry } from './AgentRegistry';
 import Bree from 'bree';
+import { Worker, parentPort } from 'worker_threads';
+import path from 'path';
 
 const defaultMemoryConfig: MemoryConfig = {
   type: 'sqlite',
-  dbFilePath: 'actgent.db',
+  dbFilePath: 'agent.db',
 };
 
-const defaultCommunicationConfig: CommunicationConfig = {
-  type: 'nats',
-  url: 'nats://localhost:4222',
-};
+const defaultCommunicationConfig: CommunicationConfig = {};
 
 export class BaseAgent {
-  private id: string;
+  public id: string;
+  public name: string;
+  public communication: Communication;
+  private capabilities: CapabilityDescription[];
   private inbox: PriorityInbox;
   private memory: Memory;
   private tools: { [key: string]: Tool };
-  private goals: Goal[];
-  private communication: Communication;
+  private goal: string;
   private promptManager: PromptManager;
   private llmConfig: LLMConfig | null;
   private scheduler: Bree;
   private memoryCache: { [key: string]: any } = {};
-  
+  private isProxy: boolean = false;
+  private worker: Worker | null = null;
+  private isNetworkService: boolean;
+
   constructor(config: AgentConfig) {
-    this.id = config.id;
-    this.memory = new Memory(config.memoryConfig || defaultMemoryConfig); 
+    console.log('BaseAgent constructor called');
+    this.id = ""; // No id until registered
+    this.name = config.name;
+    this.capabilities = config.capabilities;
+    this.memory = new Memory(config.memoryConfig || defaultMemoryConfig);
     this.tools = config.tools || {};
-    this.goals = config.goals || [];
-    this.communication = new Communication(config.communicationConfig || defaultCommunicationConfig); 
+    this.goal = config.goal || "";
+    this.communication = new Communication(config.communicationConfig || defaultCommunicationConfig);
     this.promptManager = new PromptManager();
     this.llmConfig = config.llmConfig || null;
     this.inbox = new PriorityInbox();
     this.scheduler = new Bree({ jobs: [] });
-
-    this.initializeAgent();
+    this.isProxy = false;
+    this.isNetworkService = config.isNetworkService || false;
+    this.initializeAgent(config);
   }
 
-  private async initializeAgent(): Promise<void> {
-    this.startDecisionMakingLoop();
-    this.startHTTPServer(8080);
-    this.startGRPCServer('path/to/proto/file.proto', 50051);
+  private initializeAgent(config: AgentConfig): void {
+    console.log('initializeAgent called');
+    if (this.isNetworkService) {
+      // Set up message handling for network service
+      this.communication.onMessage = this.handleIncomingMessage.bind(this);
+    }
+
+    this.worker = new Worker(`
+      const { parentPort } = require('worker_threads');
+      const { BaseAgent } = require(${JSON.stringify(path.resolve(__dirname, './BaseAgent'))});
+      (${startDecisionMakingLoop.toString()})(parentPort);
+    `, { eval: true });
+
+    this.worker.on('message', this.handleWorkerMessage.bind(this));
+
+    // Serialize the config to JSON string
+    const configJSON = JSON.stringify(this.toJSON());
+    this.worker.postMessage({ type: 'initialize', config: configJSON });
   }
 
-  private async startHTTPServer(port: number): Promise<void> {
-    const server = Bun.serve({
-      port,
-      fetch: async (req) => {
-        if (req.method === 'POST' && req.url === '/queue-task') {
-          const { taskDescription, priority } = await req.json() as { taskDescription: string; priority: string }; 
-
-          const message: Message = new Message(taskDescription);
-          this.inbox.enqueue(message, priority);
-          return new Response('Task queued', { status: 200 });
-        }
-
-        // if (req.method === 'POST' && req.url === '/interact') {
-        //   const { promptName, variables } = await req.json();
-        //   const result = await this.interactWithLLM(promptName, variables);
-        //   return new Response(JSON.stringify({ result }), { status: 200 });
-        // }
-
-        return new Response('Not Found', { status: 404 });
-      },
-    });
-
-    console.log(`Agent HTTP server running on port ${port}`);
+  private handleIncomingMessage(message: Message): void {
+    console.log('handleIncomingMessage called with message:', message);
+    console.log("Received incoming message:", message);
+    this.sendTask(message.payload.input);
   }
 
-  private startGRPCServer(protoPath: string, port: number): void {
-    // gRPC server logic (requires additional setup)
-  }
-
-  // Override the planning logic
-  async planNextAction(): Promise<void> {
-    try {
-      while (this.inbox.hasPendingMessages()) {
-        const message = this.inbox.dequeue();
-
-        if (message) { 
-            const customPlan = this.generateCustomPlan(message);
-            await this.executeCustomPlan(customPlan);
-        }
+  private handleWorkerMessage(message: any): void {
+    console.log('handleWorkerMessage called with message:', message);
+    console.log('Received message from worker:', message);
+    // Handle different types of messages from the worker
+    if (message.type === 'task_completed') {
+      // Handle task completion
+      if (this.isNetworkService) {
+        // Send response back through Communication if needed
+        this.communication.sendHttpMessage({ type: 'task_completed', result: message.result });
       }
-    } catch (error) {
-      console.error("Error in CustomAgent planNextAction:", error);
+    } else if (message.type === 'communication_request') {
+      // Handle communication with other agents
+      if (this.isNetworkService) {
+        this.communication.sendHttpMessage(message.data);
+      } else {
+        // Handle local communication
+      }
     }
   }
 
-  generateCustomPlan(message: Message) {
-    return `Plan for task: ${message}`;
-  }
-
-  async executeCustomPlan(plan: string) {
-    console.log(`Executing plan: ${plan}`);
-    // Add custom logic for executing the plan
-  }
-  
-  private async processMessage(message: any): Promise<void> {
+  public async processMessage(message: Message): Promise<void> {
+    console.log('processMessage called with message:', message);
     console.log("Processing message:", message);
-    // Process message logic, interact with tools, LLM, etc.
+    const subtasks = await this.decomposeTask(message.payload.input);
+    for (const subtask of subtasks) {
+      await this.handleSubtask(subtask);
+    }
+    await this.checkGoalAchievement();
   }
 
-  private startDecisionMakingLoop(): void {
-    this.scheduler.add({
-      name: 'decision-making-loop',
-      interval: '5s', 
-    });
-    this.scheduler.start();
+  private async decomposeTask(task: string): Promise<string[]> {
+    console.log('decomposeTask called with task:', task);
+    const prompt = `System: ${this.goal}\nTask: ${task}\nDecompose this task into subtasks:`;
+    const response = await this.callLLM(prompt);
+    return response.split('\n');
+  }
+
+  private async handleSubtask(subtask: string): Promise<void> {
+    console.log('handleSubtask called with subtask:', subtask);
+    const helperAgent = await this.findHelperAgent(subtask);
+    if (helperAgent) {
+      await helperAgent.chat(subtask); // Use chat for multi-round conversation with helper agent
+    } else {
+      await this.completeSubtaskLocally(subtask);
+    }
+  }
+
+  private async findHelperAgent(subtask: string): Promise<BaseAgent | null> {
+    console.log('findHelperAgent called with subtask:', subtask);
+    return await AgentRegistry.getInstance().findAgentByCapabilities(subtask); // Find agent using registry
+  }
+
+  getCapabilities(): CapabilityDescription[] {
+    return this.capabilities;
+  }
+
+  // Implementing multi-round chat with another agent
+  public async chat(message: string): Promise<void> {
+    console.log('chat called with message:', message);
+    const maxRounds = 5; // Limit the number of conversation rounds
+    let round = 0;
+    let currentMessage = message;
+
+    while (round < maxRounds) {
+      console.log(`Round ${round + 1}: Initiating chat with agent`);
+      const response = await this.interactWithLLM("multi_round_chat", { message: currentMessage });
+      console.log(`Received response from agent: ${response}`);
+      currentMessage = this.processResponse(response);
+      round++;
+      
+      // If the conversation ends (based on response), break early
+      if (this.isConversationOver(response)) break;
+    }
+  }
+
+  private processResponse(response: string): string {
+    console.log('processResponse called with response:', response);
+    // Process the received response and return the next message
+    return `Processed response: ${response}`;
+  }
+
+  private isConversationOver(response: string): boolean {
+    console.log('isConversationOver called with response:', response);
+    // Logic to determine if the conversation has ended
+    return response.includes("Task completed") || response.includes("No further actions");
+  }
+
+  private async completeSubtaskLocally(subtask: string): Promise<void> {
+    console.log('completeSubtaskLocally called with subtask:', subtask);
+    // Implement local subtask completion logic
+    console.log(`Completing subtask locally: ${subtask}`);
+  }
+
+  private async checkGoalAchievement(): Promise<void> {
+    console.log('checkGoalAchievement called');
+    const prompt = `System: ${this.goal}\nHas the goal been achieved? Respond with Yes or No.`;
+    const response = await this.callLLM(prompt);
+    if (response.toLowerCase() === 'no') {
+      // Implement retry or further decomposition logic
+    }
   }
 
   public async interactWithLLM(promptName: string, variables: { [key: string]: string }): Promise<string> {
-    if (!this.llmConfig) {
-      throw new Error("LLM configuration not provided");
-    }
-
+    console.log('interactWithLLM called with promptName:', promptName, 'and variables:', variables);
     const cacheKey = `${promptName}-${JSON.stringify(variables)}`;
     const cachedResponse = await this.getFromMemory(cacheKey);
     if (cachedResponse) return cachedResponse;
@@ -133,48 +193,88 @@ export class BaseAgent {
   }
 
   private async callLLM(prompt: string): Promise<string> {
-    // Call the LLM API here (this should be implemented)
+    console.log('callLLM called with prompt:', prompt);
     console.log(`Interacting with LLM using prompt: ${prompt}`);
-    return "LLM response placeholder"; // Placeholder response
-  }
-
-  public addGoal(goal: Goal): void {
-    this.goals.push(goal);
-  }
-
-  public addTool(tool: Tool): void {
-    this.tools[tool.name] = tool;
+    return "LLM response placeholder";
   }
 
   public async saveToMemory(key: string, value: any): Promise<void> {
+    console.log('saveToMemory called with key:', key, 'and value:', value);
     this.memoryCache[key] = value;
-    //await this.memory.save(key, value);
   }
 
-  // don't know what's needed. implement later
   public async getFromMemory(key: string): Promise<any> {
-    if (this.memoryCache[key]) return this.memoryCache[key];
-    //const value = await this.memory.get(key); 
-    //this.memoryCache[key] = value;
-    //return value;
+    console.log('getFromMemory called with key:', key);
+    return this.memoryCache[key];
   }
 
   public scheduleProactivity(interval: string): void {
+    console.log('scheduleProactivity called with interval:', interval);
     this.scheduler.add({
-      name: 'proactivity',
-      interval,
+      name: 'proactivity-loop',
+      interval
     });
     this.scheduler.start();
   }
 
-  public async useTool(toolName: string, args: any): Promise<any> {
-    const tool = this.tools[toolName];
-    if (!tool) throw new Error(`Tool ${toolName} not found`);
-    return tool.execute(args);
+  public async sendTask(task: string): Promise<void> {
+    console.log('sendTask called with task:', task);
+    const message = new Message(task);
+    this.inbox.enqueue(message);
+    if (this.worker) {
+      this.worker.postMessage({ type: 'new_task', task: message });
+    }
+    if (this.isNetworkService && this.isProxy) {
+      // Send the message to the remote agent
+      await this.communication.sendHttpMessage(message);
+    }
   }
 
-  public async shutdown(): Promise<void> {
-    await this.scheduler.stop();
+  public shutdown(): void {
+    console.log('shutdown called');
+    if (this.worker) {
+      this.worker.terminate();
+    }
+    this.scheduler.stop();
+    if (this.isNetworkService) {
+      // Shutdown communication servers
+      this.communication.shutdown();
+    }
     console.log("Agent shutdown complete.");
   }
+
+  public toJSON(): any {
+    console.log('toJSON called');
+    return {
+      id: this.id,
+      name: this.name,
+      capabilities: this.capabilities,
+      goal: this.goal,
+      tools: this.tools,
+      communication: this.communication,
+    }
+  }
+
+  public static fromJSON(json: any): BaseAgent {
+    console.log('fromJSON called with json:', json);
+    return new BaseAgent(json);
+  }
+}
+
+// Worker thread function
+function startDecisionMakingLoop(port: any) {
+  console.log('startDecisionMakingLoop called');
+  let agent: BaseAgent | null = null;
+
+  port.on('message', async (message: any) => {
+    console.log('Worker received message:', message);
+    if (message.type === 'initialize') {
+      // Deserialize the config from JSON string
+      const config = JSON.parse(message.config);
+      agent = BaseAgent.fromJSON(config);
+    } else if (message.type === 'new_task' && agent) {
+      await agent.processMessage(message.task);
+      port.postMessage({ type: 'task_completed', taskId: message.task.id });
+    }
+  });
 }

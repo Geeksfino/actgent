@@ -8,13 +8,13 @@ enum PayloadType {
 
 class Message {
   private id: string;
-  private payload: {
+  public payload: {
     input: string;
     inputType: PayloadType;
     parameters: Record<string, any>;
     context: Record<string, any>;
   };
-  private metadata?: {
+  public metadata?: {
     sender: string;
     timestamp: string;
     priority: string;
@@ -43,6 +43,23 @@ class Message {
       priority: priority,
       correlationId: correlationId,
     };
+  }
+
+  public static isValidMessage(content: any): content is Message {
+    return (
+      typeof content.input === 'string' &&
+      typeof content.inputType === 'string' &&
+      Array.isArray(content.parameters) &&
+      typeof content.context === 'object' &&
+      typeof content.sender === 'string' &&
+      typeof content.priority === 'number' &&
+      typeof content.correlationId === 'string'
+    );
+  }
+
+  public static fromJSON(json: string): Message {
+    const message = JSON.parse(json);
+    return new Message(message.payload.input, message.payload.inputType, message.payload.parameters, message.payload.context, message.metadata.sender, message.metadata.priority, message.metadata.correlationId);
   }
 
   toJSON() {

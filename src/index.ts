@@ -1,39 +1,21 @@
+import { AgentRegistry } from './AgentRegistry';
 import { BaseAgent } from './BaseAgent';
-import { Goal } from './Goal';
 
-export { BaseAgent } from './BaseAgent';
-export { Goal } from './Goal';
-export { Communication } from './Communication';
-export { Memory } from './Memory';
-export { PromptManager } from './PromptManager';
-export * from './interfaces';
+const grpcPort = parseInt(process.env.REGISTRY_GRPC_PORT || '1146');
+const httpPort = parseInt(process.env.REGISTRY_HTTP_PORT || '1147');
+const llmApiKey = process.env.LLM_API_KEY || '';
+const llmProviderUrl = process.env.LLM_PROVIDER_URL || '';
 
-// Example usage
-const myAgent = new BaseAgent({
-  id: "agent1",
-  tools: {
-    add: {
-      name: "add",
-      description: "Adds two numbers",
-      execute: async (a: number, b: number) => a + b,
-    },
-    multiply: {
-      name: "multiply",
-      description: "Multiplies two numbers",
-      execute: async (a: number, b: number) => a * b,
-    },
-  },
-  goals: [
-    new Goal(
-      "Example Goal",
-      (agent) => true, // Always evaluate to true for this example
-      async (agent) => console.log("Executing example goal action")
-    )
-  ],
-  llmConfig: {
-    apiKey: "your-api-key",
-    model: "gpt-3.5-turbo",
-  }
+AgentRegistry.init({ httpPort, grpcPort, apiKey: llmApiKey, baseURL: llmProviderUrl });
+
+const chatter = new BaseAgent({
+  name: 'Chatter',
+  capabilities: [{ name: 'gossip', description: 'Can engage in casual conversation and assist new agents' }],
+  goal: 'Assist other agents joining the network for testing purposes',
+  llmConfig: { apiKey: llmApiKey, model: 'gpt-4' },
 });
 
-console.log("Actgent framework initialized");
+const chatterId = AgentRegistry.getInstance() .registerAgent(chatter);
+console.log(`Chatter agent registered with ID: ${chatterId}`);
+
+

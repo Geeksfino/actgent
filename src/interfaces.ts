@@ -1,20 +1,25 @@
-import { Goal } from './Goal';
-
  export interface AgentConfig {
-  id: string;                             // Unique agent identifier
+  name: string;                             // Aggent name
+  capabilities: CapabilityDescription[];  // Capabilities the agent has
   tools?: { [key: string]: Tool };        // Custom tools the agent can use
-  goals?: Goal[];                         // Long-term and short-term goals for the agent
+  goal: string;                         // Long-term and short-term goals for the agent
   llmConfig?: LLMConfig;                  // Configuration for large language model interaction
   inboxConfig?: InboxConfig;              // Configuration for task inbox settings (priority, queue, etc.)
   memoryConfig?: MemoryConfig;            // Configuration for memory persistence (in-memory, DB, etc.)
   communicationConfig?: CommunicationConfig; // Communication options (NATS, HTTP, gRPC)
   decisionInterval?: string;              // Interval for decision-making loop (used by Bree or other schedulers)
   proactiveInterval?: string;             // Interval for scheduling proactive actions
+  isNetworkService?: boolean;           // Whether the agent is a network service or a worker
   customHandlers?: {                      // Optional custom logic hooks for agent's lifecycle
     onMessageReceived?: (message: any) => void; // Custom handler for incoming messages
-    onActionPlanned?: (goal: Goal) => void;     // Custom logic when a new action is planned
+    onActionPlanned?: (goal: string) => void;     // Custom logic when a new action is planned
     onLLMResponse?: (response: string) => void; // Handler for processing LLM responses
   };
+}
+
+export interface CapabilityDescription {
+  name: string; 
+  description: string;
 }
 
 export interface LLMConfig {
@@ -44,8 +49,10 @@ export interface MemoryConfig {
 }
 
 export interface CommunicationConfig {
-  type: string;
-  url: string;
+  host?: string;
+  natsUrl?: string;
+  httpPort?: number;
+  grpcPort?: number;
 }
 
 export interface InboxConfig {
