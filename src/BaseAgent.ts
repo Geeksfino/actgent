@@ -1,4 +1,3 @@
-import { connect as connectNATS, Msg, NatsConnection } from 'nats';
 import { AgentConfig, Tool, LLMConfig, CommunicationConfig, MemoryConfig } from './interfaces';
 import { Goal } from './Goal';
 import { Communication } from './Communication';
