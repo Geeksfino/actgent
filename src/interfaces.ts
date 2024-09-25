@@ -7,7 +7,7 @@
   inboxConfig?: InboxConfig;              // Configuration for task inbox settings (priority, queue, etc.)
   memoryConfig?: MemoryConfig;            // Configuration for memory persistence (in-memory, DB, etc.)
   communicationConfig?: CommunicationConfig; // Communication options (NATS, HTTP, gRPC)
-  promptLibrary?: { [key: string]: PromptTemplate }; // Library of prompts for the agent
+  promptLibrary?: { [key: string]: string }; // Library of prompts for the agent
   decisionInterval?: string;              // Interval for decision-making loop (used by Bree or other schedulers)
   proactiveInterval?: string;             // Interval for scheduling proactive actions
   isNetworkService?: boolean;           // Whether the agent is a network service or a worker
@@ -26,11 +26,15 @@ export interface CapabilityDescription {
 export interface LLMConfig {
   apiKey: string;
   model: string;
+  baseURL?: string;
 }
 
 export interface Task {
-  type: string;
-  data: any;
+  owner: string;
+  taskId: string;
+  description: string;
+  parentTaskId?: string;  // Optional reference to the parent task
+  subtasks?: Task[];  
 }
 
 export interface Tool {
@@ -59,5 +63,4 @@ export interface InboxConfig {
 export interface PromptTemplate {
   id: string;
   template: string;
-  description?: string; // A brief description of when to use this prompt
 }

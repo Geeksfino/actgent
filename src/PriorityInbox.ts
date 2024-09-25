@@ -24,13 +24,12 @@ export class PriorityInbox {
         // Map priority levels to numbers (0: high, 1: normal, 2: low)
         const priorityValue = this.getPriorityValue(priority);
 
-        // Schedule the message processing with a priority
-        this.limiter.schedule({ priority: priorityValue }, async () => {
-            await this.processMessage(message);
-        }).finally(() => {
-            // Decrease the pending message count once the message is processed
-            this.pendingMessages--;
-        });
+        // this.limiter.schedule({ priority: priorityValue }, async () => {
+        //     await this.processMessage(message);
+        // }).finally(() => {
+        //     // Decrease the pending message count once the message is processed
+        //     this.pendingMessages--;
+        // });
     }
 
     dequeue(): Message | null {
@@ -57,6 +56,6 @@ export class PriorityInbox {
 
     private async processMessage(message: Message) {
         // Implement message processing logic here
-        console.log('Processing message:', message);
+        console.log('PriorityInbox Processing message:', message);
     }
 }

@@ -9,17 +9,19 @@ export class AgentRegistry {
 	private agents: Map<string, BaseAgent> = new Map();
 	private capabilitiesContext: string = "";
 	private openai: OpenAI;
+    private model: string;
 	private httpPort: number;
 	private grpcPort: number;
 
-	private constructor(config: { httpPort: number, grpcPort: number, apiKey: string, baseURL: string }) {
+	private constructor(config: { httpPort: number, grpcPort: number, apiKey: string, model: string, baseURL: string }) {
 		this.httpPort = config.httpPort;
 		this.grpcPort = config.grpcPort;
 		this.openai = new OpenAI({ apiKey: config.apiKey, baseURL: config.baseURL });
+		this.model = config.model;
 		this.initializeRemoteAccess();
 	}
 
-	public static init(config: { httpPort: number, grpcPort: number, apiKey: string, baseURL: string }) {
+	public static init(config: { httpPort: number, grpcPort: number, apiKey: string, model: string, baseURL: string }) {
 		AgentRegistry.instance = new AgentRegistry(config);
 	}
 
@@ -57,7 +59,7 @@ export class AgentRegistry {
 		const prompt = `${this.capabilitiesContext}\n\nRequested capabilities: ${capabilities}\n\nBased on the above information, which agent ID is the best match for the requested capabilities? Respond with only the agent ID.`;
 		
 		const response = await this.openai.chat.completions.create({
-			model: "gpt-4o",
+			model: this.model,
 			messages: [
                 {
                     role: "system",
@@ -162,12 +164,11 @@ export class AgentRegistry {
 		});
 	}
 
-	public static fromJSON(json: string): AgentRegistry {
+	public fromJSON(json: string): AgentRegistry {
 		const data = JSON.parse(json);
 		const registry = AgentRegistry.getInstance();
 		registry.capabilitiesContext = data.capabilitiesContext;
 		registry.agents = new Map(data.agents.map(([id, agentData]: [string, any]) => [id, BaseAgent.fromJSON(agentData)]));
 		return registry;
 	}
-
 }

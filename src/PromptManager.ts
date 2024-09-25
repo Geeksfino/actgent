@@ -1,32 +1,49 @@
 import { PromptTemplate } from './interfaces';
+import { TaskContext } from './TaskContext';
 
 export class PromptManager {
-  private promptLibrary: { [key: string]: PromptTemplate };
+  private promptLibrary: { [key: string]: string };
+  private goal: string = "";
 
-  constructor(promptLibrary: { [key: string]: PromptTemplate }) {
+  constructor(promptLibrary: { [key: string]: string }) {
     this.promptLibrary = promptLibrary;
   }
 
+  public setGoal(goal: string): void {
+    this.goal = goal;
+  }
+
+  public getSystemPrompt(): string {
+    return this.renderPrompt(null, "system_goal_prompt", { goal: this.goal });
+  }
+
+  public getAssistantPrompt(): string {
+    return this.renderPrompt(null, "assistant_prompt", {});
+  }
+
   // Render a prompt with dynamic data
-  public renderPrompt(promptId: string, variables: { [key: string]: string }): string {
-    const promptTemplate = this.promptLibrary[promptId];
+  public renderPrompt(taskContext: TaskContext | null, promptId: string, variables: { [key: string]: string }): string {
+    let promptTemplate = this.promptLibrary[promptId];
+    //console.log("Prompt template===>", promptTemplate);
     if (!promptTemplate) {
       throw new Error(`Prompt with id ${promptId} not found`);
     }
 
-    let prompt = promptTemplate.template;
-
     // Replace placeholders with actual values
     Object.keys(variables).forEach((key) => {
       const placeholder = `{${key}}`;
-      prompt = prompt.replace(new RegExp(placeholder, 'g'), variables[key]);
+      //console.log("Replacing placeholder:", placeholder, "with value:", variables[key]);
+      promptTemplate = promptTemplate.replace(new RegExp(placeholder, 'g'), variables[key]);
     });
 
-    return prompt;
+    if (taskContext) {
+      const history = taskContext.getHistory().join('\n');
+      //console.log("History===>", history);
+      promptTemplate = history + promptTemplate ;
+    } 
+
+    //console.log("Final prompt ===>", promptTemplate);
+    return promptTemplate;
   }
 
-  // Add or update a prompt
-  public addOrUpdatePrompt(id: string, template: string, description: string = ""): void {
-    this.promptLibrary[id] = { id, template, description };
-  }
 }
