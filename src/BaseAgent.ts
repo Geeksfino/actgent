@@ -5,9 +5,8 @@ import { PromptManager } from './PromptManager';
 import { PriorityInbox } from './PriorityInbox';
 import { Message } from './Message';
 import { AgentRegistry } from './AgentRegistry';
-import Bree from 'bree';
-import { Worker, parentPort } from 'worker_threads';
-import path from 'path';
+import { interval, from } from 'rxjs';
+import { switchMap } from 'rxjs/operators';
 
 const defaultMemoryConfig: MemoryConfig = {
   type: 'sqlite',
@@ -16,21 +15,58 @@ const defaultMemoryConfig: MemoryConfig = {
 
 const defaultCommunicationConfig: CommunicationConfig = {};
 
+const basePromptLibrary = {
+  "decompose_task": {
+    id: "decompose_task",
+    template: "System: {goal}\nTask: {task}\nDecompose this task into subtasks.",
+    description: "Asks the LLM to decompose a given task into smaller subtasks."
+  },
+  "multi_round_chat": {
+    id: "multi_round_chat",
+    template: "Message: {message}\nEngage in a conversation until the task is clarified or resolved.",
+    description: "Handles multi-round conversations with other agents or LLM until a subtask is resolved."
+  },
+  "goal_completion": {
+    id: "goal_completion",
+    template: "System: {goal}\nHas the goal been achieved? Respond with Yes or No.",
+    description: "Asks the LLM whether the specified goal has been achieved."
+  },
+  "clarification": {
+    id: "clarification",
+    template: "Message: {message}\nClarify the task or resolve ambiguities over multiple rounds of conversation.",
+    description: "Clarifies a given message or instruction in a multi-round conversation."
+  },
+  "generic_task": {
+    id: "generic_task",
+    template: "Task: {task}\nPlease provide insights, steps, or advice to complete this task.",
+    description: "Handles generic task-based interaction with the LLM."
+  },
+  "local_task_completion": {
+    id: "local_task_completion",
+    template: "Subtask: {subtask}\nProvide any necessary steps or advice to complete this subtask.",
+    description: "Helps the agent complete a subtask locally by interacting with the LLM for guidance."
+  },
+  "proactive_action": {
+    id: "proactive_action",
+    template: "Current context: {context}\nWhat proactive action should the agent take next?",
+    description: "Asks the LLM what proactive steps the agent should take based on the current context."
+  }
+};
+
+
 export class BaseAgent {
   public id: string;
   public name: string;
+  public goal: string;
   public communication: Communication;
-  private capabilities: CapabilityDescription[];
+  public capabilities: CapabilityDescription[];
   private inbox: PriorityInbox;
   private memory: Memory;
   private tools: { [key: string]: Tool };
-  private goal: string;
   private promptManager: PromptManager;
   private llmConfig: LLMConfig | null;
-  private scheduler: Bree;
   private memoryCache: { [key: string]: any } = {};
   private isProxy: boolean = false;
-  private worker: Worker | null = null;
   private isNetworkService: boolean;
 
   constructor(config: AgentConfig) {
@@ -42,10 +78,9 @@ export class BaseAgent {
     this.tools = config.tools || {};
     this.goal = config.goal || "";
     this.communication = new Communication(config.communicationConfig || defaultCommunicationConfig);
-    this.promptManager = new PromptManager();
     this.llmConfig = config.llmConfig || null;
+    this.promptManager = new PromptManager(config.promptLibrary || basePromptLibrary);
     this.inbox = new PriorityInbox();
-    this.scheduler = new Bree({ jobs: [] });
     this.isProxy = false;
     this.isNetworkService = config.isNetworkService || false;
     this.initializeAgent(config);
@@ -58,17 +93,28 @@ export class BaseAgent {
       this.communication.onMessage = this.handleIncomingMessage.bind(this);
     }
 
-    this.worker = new Worker(`
-      const { parentPort } = require('worker_threads');
-      const { BaseAgent } = require(${JSON.stringify(path.resolve(__dirname, './BaseAgent'))});
-      (${startDecisionMakingLoop.toString()})(parentPort);
-    `, { eval: true });
+    // Set up RxJS interval to check the inbox
+    interval(1000).pipe(
+      switchMap(() => from(this.checkPriorityInbox()))
+    ).subscribe({
+      next: (result) => console.log(result),
+      error: (err) => console.error('Error:', err),
+      complete: () => console.log('Completed')
+    });
+  }
 
-    this.worker.on('message', this.handleWorkerMessage.bind(this));
-
-    // Serialize the config to JSON string
-    const configJSON = JSON.stringify(this.toJSON());
-    this.worker.postMessage({ type: 'initialize', config: configJSON });
+  private async checkPriorityInbox(): Promise<string> {
+    console.log('Checking priority inbox...');
+    // Your logic to check the priority inbox
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve('Inbox checked');
+        const message = this.inbox.dequeue();
+        if (message) {
+          this.processMessage(message);
+        }
+      }, 1000); // Simulate async operation
+    });
   }
 
   private handleIncomingMessage(message: Message): void {
@@ -77,29 +123,9 @@ export class BaseAgent {
     this.sendTask(message.payload.input);
   }
 
-  private handleWorkerMessage(message: any): void {
-    console.log('handleWorkerMessage called with message:', message);
-    console.log('Received message from worker:', message);
-    // Handle different types of messages from the worker
-    if (message.type === 'task_completed') {
-      // Handle task completion
-      if (this.isNetworkService) {
-        // Send response back through Communication if needed
-        this.communication.sendHttpMessage({ type: 'task_completed', result: message.result });
-      }
-    } else if (message.type === 'communication_request') {
-      // Handle communication with other agents
-      if (this.isNetworkService) {
-        this.communication.sendHttpMessage(message.data);
-      } else {
-        // Handle local communication
-      }
-    }
-  }
-
   public async processMessage(message: Message): Promise<void> {
     console.log('processMessage called with message:', message);
-    console.log("Processing message:", message);
+    
     const subtasks = await this.decomposeTask(message.payload.input);
     for (const subtask of subtasks) {
       await this.handleSubtask(subtask);
@@ -109,8 +135,8 @@ export class BaseAgent {
 
   private async decomposeTask(task: string): Promise<string[]> {
     console.log('decomposeTask called with task:', task);
-    const prompt = `System: ${this.goal}\nTask: ${task}\nDecompose this task into subtasks:`;
-    const response = await this.callLLM(prompt);
+    const prompt = this.promptManager.renderPrompt("decompose_task", { goal: this.goal, task });
+    const response = await this.interactWithLLM("decompose_task", { goal: this.goal, task });
     return response.split('\n');
   }
 
@@ -172,8 +198,8 @@ export class BaseAgent {
 
   private async checkGoalAchievement(): Promise<void> {
     console.log('checkGoalAchievement called');
-    const prompt = `System: ${this.goal}\nHas the goal been achieved? Respond with Yes or No.`;
-    const response = await this.callLLM(prompt);
+    const prompt = this.promptManager.renderPrompt("goal_completion", { goal: this.goal });
+    const response = await this.interactWithLLM("goal_completion", { goal: this.goal });
     if (response.toLowerCase() === 'no') {
       // Implement retry or further decomposition logic
     }
@@ -210,20 +236,15 @@ export class BaseAgent {
 
   public scheduleProactivity(interval: string): void {
     console.log('scheduleProactivity called with interval:', interval);
-    this.scheduler.add({
-      name: 'proactivity-loop',
-      interval
-    });
-    this.scheduler.start();
+    // Implement proactivity scheduling if needed
   }
 
   public async sendTask(task: string): Promise<void> {
     console.log('sendTask called with task:', task);
     const message = new Message(task);
     this.inbox.enqueue(message);
-    if (this.worker) {
-      this.worker.postMessage({ type: 'new_task', task: message });
-    }
+    // Process the task immediately
+    await this.processMessage(message);
     if (this.isNetworkService && this.isProxy) {
       // Send the message to the remote agent
       await this.communication.sendHttpMessage(message);
@@ -232,10 +253,6 @@ export class BaseAgent {
 
   public shutdown(): void {
     console.log('shutdown called');
-    if (this.worker) {
-      this.worker.terminate();
-    }
-    this.scheduler.stop();
     if (this.isNetworkService) {
       // Shutdown communication servers
       this.communication.shutdown();
@@ -259,22 +276,4 @@ export class BaseAgent {
     console.log('fromJSON called with json:', json);
     return new BaseAgent(json);
   }
-}
-
-// Worker thread function
-function startDecisionMakingLoop(port: any) {
-  console.log('startDecisionMakingLoop called');
-  let agent: BaseAgent | null = null;
-
-  port.on('message', async (message: any) => {
-    console.log('Worker received message:', message);
-    if (message.type === 'initialize') {
-      // Deserialize the config from JSON string
-      const config = JSON.parse(message.config);
-      agent = BaseAgent.fromJSON(config);
-    } else if (message.type === 'new_task' && agent) {
-      await agent.processMessage(message.task);
-      port.postMessage({ type: 'task_completed', taskId: message.task.id });
-    }
-  });
 }

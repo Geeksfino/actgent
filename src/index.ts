@@ -18,4 +18,7 @@ const chatter = new BaseAgent({
 const chatterId = AgentRegistry.getInstance() .registerAgent(chatter);
 console.log(`Chatter agent registered with ID: ${chatterId}`);
 
+chatter.sendTask('Hello, how are you?');
+chatter.chat('chat with agent');
+
 

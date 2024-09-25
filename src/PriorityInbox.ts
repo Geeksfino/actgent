@@ -35,9 +35,13 @@ export class PriorityInbox {
 
     dequeue(): Message | null {
       return this.messageQueue.length > 0 ? this.messageQueue.shift() || null : null;
-  }
+    }
     hasPendingMessages(): boolean {
         return this.pendingMessages > 0;
+    }
+
+    size(): number {
+        return this.messageQueue.length;
     }
 
     private getPriorityValue(priority: string) {

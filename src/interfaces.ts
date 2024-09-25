@@ -7,6 +7,7 @@
   inboxConfig?: InboxConfig;              // Configuration for task inbox settings (priority, queue, etc.)
   memoryConfig?: MemoryConfig;            // Configuration for memory persistence (in-memory, DB, etc.)
   communicationConfig?: CommunicationConfig; // Communication options (NATS, HTTP, gRPC)
+  promptLibrary?: { [key: string]: PromptTemplate }; // Library of prompts for the agent
   decisionInterval?: string;              // Interval for decision-making loop (used by Bree or other schedulers)
   proactiveInterval?: string;             // Interval for scheduling proactive actions
   isNetworkService?: boolean;           // Whether the agent is a network service or a worker
@@ -38,11 +39,6 @@ export interface Tool {
   execute: (...args: any[]) => Promise<any>;
 }
 
-export interface Prompt {
-  name: string;
-  template: string;
-}
-
 export interface MemoryConfig {
   type: string;
   dbFilePath: string;
@@ -58,4 +54,10 @@ export interface CommunicationConfig {
 export interface InboxConfig {
   type: string;
   priority: string;
+}
+
+export interface PromptTemplate {
+  id: string;
+  template: string;
+  description?: string; // A brief description of when to use this prompt
 }

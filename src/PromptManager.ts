@@ -1,25 +1,32 @@
-import { Prompt } from './interfaces';
+import { PromptTemplate } from './interfaces';
 
 export class PromptManager {
-  private prompts: Map<string, Prompt> = new Map();
+  private promptLibrary: { [key: string]: PromptTemplate };
 
-  addPrompt(prompt: Prompt): void {
-    this.prompts.set(prompt.name, prompt);
+  constructor(promptLibrary: { [key: string]: PromptTemplate }) {
+    this.promptLibrary = promptLibrary;
   }
 
-  getPrompt(name: string): Prompt | undefined {
-    return this.prompts.get(name);
+  // Render a prompt with dynamic data
+  public renderPrompt(promptId: string, variables: { [key: string]: string }): string {
+    const promptTemplate = this.promptLibrary[promptId];
+    if (!promptTemplate) {
+      throw new Error(`Prompt with id ${promptId} not found`);
+    }
+
+    let prompt = promptTemplate.template;
+
+    // Replace placeholders with actual values
+    Object.keys(variables).forEach((key) => {
+      const placeholder = `{${key}}`;
+      prompt = prompt.replace(new RegExp(placeholder, 'g'), variables[key]);
+    });
+
+    return prompt;
   }
 
-  renderPrompt(name: string, variables: { [key: string]: string }): string {
-    const prompt = this.getPrompt(name);
-    if (!prompt) {
-      throw new Error(`Prompt "${name}" not found`);
-    }
-    let renderedPrompt = prompt.template;
-    for (const [key, value] of Object.entries(variables)) {
-      renderedPrompt = renderedPrompt.replace(new RegExp(`{{${key}}}`, 'g'), value);
-    }
-    return renderedPrompt;
+  // Add or update a prompt
+  public addOrUpdatePrompt(id: string, template: string, description: string = ""): void {
+    this.promptLibrary[id] = { id, template, description };
   }
 }
