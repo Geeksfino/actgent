@@ -1,5 +1,5 @@
- export interface AgentConfig {
-  name: string;                             // Aggent name
+export interface AgentConfig {
+  name: string;                             // Agent name
   capabilities: CapabilityDescription[];  // Capabilities the agent has
   tools?: { [key: string]: Tool };        // Custom tools the agent can use
   goal: string;                         // Long-term and short-term goals for the agent
@@ -10,12 +10,6 @@
   promptLibrary?: { [key: string]: string }; // Library of prompts for the agent
   decisionInterval?: string;              // Interval for decision-making loop (used by Bree or other schedulers)
   proactiveInterval?: string;             // Interval for scheduling proactive actions
-  isNetworkService?: boolean;           // Whether the agent is a network service or a worker
-  customHandlers?: {                      // Optional custom logic hooks for agent's lifecycle
-    onMessageReceived?: (message: any) => void; // Custom handler for incoming messages
-    onActionPlanned?: (goal: string) => void;     // Custom logic when a new action is planned
-    onLLMResponse?: (response: string) => void; // Handler for processing LLM responses
-  };
 }
 
 export interface CapabilityDescription {
@@ -29,12 +23,12 @@ export interface LLMConfig {
   baseURL?: string;
 }
 
-export interface Task {
+export interface Session {
   owner: string;
-  taskId: string;
+  sessionId: string;
   description: string;
-  parentTaskId?: string;  // Optional reference to the parent task
-  subtasks?: Task[];  
+  parentSessionId?: string;  // Optional reference to the parent session
+  subtasks?: Session[];  
 }
 
 export interface Tool {

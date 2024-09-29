@@ -1,12 +1,12 @@
-import { BaseAgent } from './BaseAgent';
 import { OpenAI } from 'openai';
 import { v4 as uuidv4 } from 'uuid';
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
+import { AgentCore } from './AgentCore';
 
 export class AgentRegistry {
 	private static instance: AgentRegistry;
-	private agents: Map<string, BaseAgent> = new Map();
+	private agents: Map<string, AgentCore> = new Map();
 	private capabilitiesContext: string = "";
 	private openai: OpenAI;
     private model: string;
@@ -29,7 +29,7 @@ export class AgentRegistry {
 		return AgentRegistry.instance;
 	}
 
-	registerAgent(agent: BaseAgent): string {
+	registerAgent(agent: AgentCore): string {
 		const agentId = uuidv4();
 		agent.id = agentId; // Assuming BaseAgent has an 'id' property
 		this.agents.set(agentId, agent);
@@ -37,14 +37,14 @@ export class AgentRegistry {
 		return agentId;
 	}
 
-	getAllAgents(): BaseAgent[] {
+	getAllAgents(): AgentCore[] {
 		return Array.from(this.agents.values());
 	}
 
 	private updateCapabilitiesContext(): void {
 		// Regenerate the entire capabilities context
 		this.capabilitiesContext = Array.from(this.agents.values())
-			.map((agent: BaseAgent) => {
+			.map((agent: AgentCore) => {
 				const capabilities = agent.getCapabilities().map((cap: { name: string; description: string }) => `${cap.name}: ${cap.description}`).join('\n');
 				return `Agent ${agent.id} has capabilities:\n${capabilities}`;
 			})
@@ -55,7 +55,7 @@ export class AgentRegistry {
 		return this.capabilitiesContext;
 	}
 
-	public async findAgentByCapabilities(capabilities: string): Promise<BaseAgent | null> {
+	public async findAgentByCapabilities(capabilities: string): Promise<AgentCore | null> {
 		const prompt = `${this.capabilitiesContext}\n\nRequested capabilities: ${capabilities}\n\nBased on the above information, which agent ID is the best match for the requested capabilities? Respond with only the agent ID.`;
 		
 		const response = await this.openai.chat.completions.create({
@@ -124,9 +124,8 @@ export class AgentRegistry {
 	}
 
 	private async httpRegisterAgent(request: Request): Promise<Response> {
-		const agent: BaseAgent = await request.json() as BaseAgent; 
+		const agent: AgentCore = await request.json() as AgentCore; 
         const host = request.headers.get("host") || new URL(request.url).host;
-        agent.communication.host = host;
 		const id = this.registerAgent(agent);
 		return new Response(JSON.stringify({ id }), {
 			headers: { 'Content-Type': 'application/json' },
@@ -168,7 +167,7 @@ export class AgentRegistry {
 		const data = JSON.parse(json);
 		const registry = AgentRegistry.getInstance();
 		registry.capabilitiesContext = data.capabilitiesContext;
-		registry.agents = new Map(data.agents.map(([id, agentData]: [string, any]) => [id, BaseAgent.fromJSON(agentData)]));
+		registry.agents = new Map(data.agents.map(([id, agentData]: [string, any]) => [id, AgentCore.fromJSON(agentData)]));
 		return registry;
 	}
 }

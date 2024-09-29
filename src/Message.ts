@@ -7,9 +7,9 @@ enum PayloadType {
 };
 
 class Message {
-  private id: string;
-  public taskId: string;
-  public parentTaskId?: string;  
+  public id: string;
+  public sessionId: string;
+  public parentSessionId?: string;  
   public payload: {
     input: string;
     inputType: PayloadType;
@@ -24,7 +24,7 @@ class Message {
   };
 
   constructor(
-    taskId: string,
+    sessionId: string,
     content: string,
     inputType = "text",
     parameters = {},
@@ -32,11 +32,11 @@ class Message {
     sender = "Unknown",
     priority = "normal",
     correlationId = null,
-    parentTaskId?: string 
+    parentSessionId?: string 
 ) {
     this.id = crypto.randomUUID();
-    this.taskId = taskId;
-    this.parentTaskId = parentTaskId;
+    this.sessionId = sessionId;
+    this.parentSessionId = parentSessionId;
     this.payload = {
       input: content,
       inputType: inputType as PayloadType,
@@ -51,42 +51,6 @@ class Message {
     };
   }
 
-  public setTaskId(taskId: string): void {
-    this.taskId = taskId;
-  }
-
-  public getTaskId(): string {
-    return this.taskId;
-  }
-
-  public getParentTaskId(): string | undefined {
-    return this.parentTaskId;
-  }
-
-  public static isValidMessage(content: any): content is Message {
-    return (
-      typeof content.input === 'string' &&
-      typeof content.inputType === 'string' &&
-      Array.isArray(content.parameters) &&
-      typeof content.context === 'object' &&
-      typeof content.sender === 'string' &&
-      typeof content.priority === 'number' &&
-      typeof content.correlationId === 'string'
-    );
-  }
-
-  public static fromJSON(json: string): Message {
-    const message = JSON.parse(json);
-    return new Message(message.payload.input, message.payload.inputType, message.payload.parameters, message.payload.context, message.metadata.sender, message.metadata.priority, message.metadata.correlationId);
-  }
-
-  toJSON() {
-    return {
-      id: this.id,
-      payload: this.payload,
-      metadata: this.metadata,
-    };
-  }
 }
 
 export { Message };

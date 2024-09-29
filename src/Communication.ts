@@ -39,8 +39,8 @@ export class Communication {
         if (req.method === 'POST' && req.url === '/queue-task') {
           const content = await req.json(); // Assuming the content is sent as JSON
           
-          if (Message.isValidMessage(content)) {
-            this.handleMessage(content); 
+          if (this.isValidMessage(content)) {
+            this.handleMessage(content as Message); 
             return new Response('Task queued', { status: 200 });
           } else {
             return new Response('Invalid message format', { status: 400 });
@@ -50,6 +50,10 @@ export class Communication {
       },
     });
     console.log(`Agent HTTP server running on port ${port}`);
+  }
+
+  private isValidMessage(message: any): boolean {
+    return true
   }
 
   private startGRPCServer(port: number): void {
@@ -115,7 +119,7 @@ export class Communication {
     if (this.onMessage) {
       this.onMessage(message);
     } else {
-      console.log("Received message:", message.toJSON());
+      console.log("Received message:", message);
     }
   }
 

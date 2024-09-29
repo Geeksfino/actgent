@@ -1,13 +1,13 @@
-import { Task } from "./interfaces";
+import { Session } from "./interfaces";
 
-export class TaskContext {
-    private task: Task;
+export class SessionContext {
+    private session: Session;
     private conversationHistory: string[] = [];
     private state: { [key: string]: any } = {};
-    private subtasks: TaskContext[] = [];
+    private subtasks: SessionContext[] = [];
   
-    constructor(task: Task) {
-      this.task = task;
+    constructor(session: Session) {
+      this.session = session;
       this.conversationHistory = [];
       this.state = {};
     }
@@ -16,16 +16,20 @@ export class TaskContext {
       this.conversationHistory.push(response);
     }
   
-    public getTaskId(): string {
-      return this.task.taskId;
+    public getSession(): Session {
+      return this.session;
+    }
+
+    public getSessionId(): string {
+      return this.session.sessionId;
     }
 
     public getHistory(): string[] {
       return this.conversationHistory;
     }
   
-    public getTaskVariables(): { [key: string]: string } {
-      return { taskId: this.task.taskId, history: this.conversationHistory.join('\n') };
+    public getSessionVariables(): { [key: string]: string } {
+      return { sessionId: this.session.sessionId, history: this.conversationHistory.join('\n') };
     }
   
     public updateState(newState: { [key: string]: any }): void {
@@ -36,11 +40,11 @@ export class TaskContext {
       return this.state;
     }
 
-    public addSubtaskContext(subtaskContext: TaskContext): void {
+    public addSubtaskContext(subtaskContext: SessionContext): void {
         this.subtasks.push(subtaskContext);
       }
     
-      public getSubtasks(): TaskContext[] {
+      public getSubtasks(): SessionContext[] {
         return this.subtasks;
       }
     
@@ -48,8 +52,7 @@ export class TaskContext {
         return this.subtasks.length > 0;
       }
   
-      public getParentTaskId(): string | undefined {
-        return this.task.parentTaskId;
+      public getParentSessionId(): string | undefined {
+        return this.session.parentSessionId;
       }
   }
-  

@@ -1,21 +1,52 @@
 import { Message } from "./Message";
 import Bottleneck from "bottleneck";
+import { interval, from } from 'rxjs';
+import { switchMap } from 'rxjs/operators';
 
 export class PriorityInbox {
     private limiter: Bottleneck;
     private pendingMessages: number; // Tracks the number of pending messages
     private messageQueue: Message[]; 
+    private processMessage: (message: Message) => Promise<void>;
 
     constructor() {
         this.pendingMessages = 0; // Initialize with no pending messages
         this.messageQueue = [];
-
+        this.processMessage = this.defaultProcessMessage;
         // Initialize Bottleneck with desired settings
         this.limiter = new Bottleneck({
             maxConcurrent: 1, // Only one message processed at a time
             minTime: 100,     // Minimum time between tasks in milliseconds
         });
     }
+
+    public init(processMessage: (message: Message) => Promise<void>): void {
+        console.log('initializing priority inbox');
+        this.processMessage = processMessage;
+
+        // Set up RxJS interval to check the inbox
+        interval(1000).pipe(
+          switchMap(() => from(this.checkPriorityInbox()))
+        ).subscribe({
+          next: (result) => console.log(result),
+          error: (err) => console.error('Error:', err),
+          complete: () => console.log('Completed')
+        });
+      }
+    
+      private async checkPriorityInbox(): Promise<string> {
+        console.log('Checking priority inbox...');
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            resolve('Inbox checked');
+            const message: Message | null = this.dequeue();
+            if (message) {
+              this.processMessage(message);
+            }
+          }, 1000);
+        });
+      }
+    
 
     enqueue(message: Message, priority = 'normal') {
         // Increase the pending message count
@@ -54,7 +85,7 @@ export class PriorityInbox {
         }
     }
 
-    private async processMessage(message: Message) {
+    private async defaultProcessMessage(message: Message): Promise<void> {
         // Implement message processing logic here
         console.log('PriorityInbox Processing message:', message);
     }

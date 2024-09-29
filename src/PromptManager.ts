@@ -1,12 +1,11 @@
-import { PromptTemplate } from './interfaces';
-import { TaskContext } from './TaskContext';
+import { AgentPromptTemplate } from './AgentPromptTemplate';
+import { SessionContext } from './SessionContext'; 
 
 export class PromptManager {
-  private promptLibrary: { [key: string]: string };
   private goal: string = "";
 
-  constructor(promptLibrary: { [key: string]: string }) {
-    this.promptLibrary = promptLibrary;
+  constructor(private promptTemplate: AgentPromptTemplate) {
+    this.promptTemplate = promptTemplate;
   }
 
   public setGoal(goal: string): void {
@@ -14,36 +13,41 @@ export class PromptManager {
   }
 
   public getSystemPrompt(): string {
-    return this.renderPrompt(null, "system_goal_prompt", { goal: this.goal });
+    return this.renderPrompt(null, this.promptTemplate.getSystemPrompt(), { goal: this.goal });
   }
 
   public getAssistantPrompt(): string {
-    return this.renderPrompt(null, "assistant_prompt", {});
+    return this.renderPrompt(null, this.promptTemplate.getAssistantPrompt(), {});
+  }
+
+  public getMessageClassificationPrompt(message: string): string {
+    console.log("Message classification prompt===>", this.promptTemplate.getMessageClassificationPrompt(message));
+    return this.renderPrompt(null, this.promptTemplate.getMessageClassificationPrompt(message), {});
   }
 
   // Render a prompt with dynamic data
-  public renderPrompt(taskContext: TaskContext | null, promptId: string, variables: { [key: string]: string }): string {
-    let promptTemplate = this.promptLibrary[promptId];
-    //console.log("Prompt template===>", promptTemplate);
-    if (!promptTemplate) {
-      throw new Error(`Prompt with id ${promptId} not found`);
+  public renderPrompt(sessionContext: SessionContext | null, template: string, variables: { [key: string]: string }): string {
+
+    let prompt = template;
+
+    if (!this.promptTemplate) {
+      throw new Error(`Prompt template for agent not set`);
     }
 
     // Replace placeholders with actual values
     Object.keys(variables).forEach((key) => {
       const placeholder = `{${key}}`;
-      //console.log("Replacing placeholder:", placeholder, "with value:", variables[key]);
-      promptTemplate = promptTemplate.replace(new RegExp(placeholder, 'g'), variables[key]);
+      console.log("Replacing placeholder:", placeholder, "with value:", variables[key]);
+      prompt = prompt.replace(new RegExp(placeholder, 'g'), variables[key]);
     });
 
-    if (taskContext) {
-      const history = taskContext.getHistory().join('\n');
+    if (sessionContext) {
+      const history = sessionContext.getHistory().join('\n');
       //console.log("History===>", history);
-      promptTemplate = history + promptTemplate ;
+      prompt = history + prompt;
     } 
 
-    //console.log("Final prompt ===>", promptTemplate);
-    return promptTemplate;
+    return prompt || "";
   }
 
 }
