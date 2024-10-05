@@ -26,9 +26,9 @@ class Message {
   constructor(
     sessionId: string,
     content: string,
-    inputType = "text",
-    parameters = {},
-    context = {},
+    inputType = PayloadType.TEXT,
+    parameters: Record<string, any> = {},
+    context: Record<string, any> = {},
     sender = "Unknown",
     priority = "normal",
     correlationId = null,
@@ -53,4 +53,4 @@ class Message {
 
 }
 
-export { Message };
+export { Message, PayloadType };

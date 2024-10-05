@@ -35,4 +35,4 @@ interface AgentPromptTemplate {
     getMessageClassificationPrompt(message: string): string;
 }
 
-export { AgentPromptTemplate, LLMClassificationType, LLMClassification };
+export { AgentPromptTemplate, LLMClassificationType, LLMClassification, SimpleQuery, ComplexTask, ClarificationNeeded, Command };

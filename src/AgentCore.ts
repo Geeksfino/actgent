@@ -1,9 +1,7 @@
 import {
-  AgentConfig,
+  AgentCoreConfig,
   Tool,
   LLMConfig,
-  CommunicationConfig,
-  MemoryConfig,
   CapabilityDescription,
   Session,
 } from "./interfaces";
@@ -13,13 +11,14 @@ import { PriorityInbox } from "./PriorityInbox";
 import { Message } from "./Message";
 import crypto from "crypto";
 import { OpenAI } from "openai";
-import { DefaultPromptTemplate } from "./DefaultPromptTemplate";
-import { AgentPromptTemplate, LLMClassification, LLMClassificationType } from "./AgentPromptTemplate";
+import { IAgentPromptTemplate } from "./IAgentPromptTemplate";
 import { SessionContext } from "./SessionContext";
+import { GenericPromptTemplate } from "./GenericPromptTemplate";
 
 export class AgentCore {
   public id: string;
   public name: string;
+  public role: string;
   public goal: string;
   public capabilities: CapabilityDescription[];
   private memory: Memory;
@@ -28,30 +27,28 @@ export class AgentCore {
   private llmClient: OpenAI;
   private promptManager: PromptManager;
   private contextManager: { [sessionId: string]: SessionContext } = {};
-  private simpleQueryCallback?: (answer: string) => void;
-  private complexTaskCallback?: (actionPlan: { task: string; subtasks: string[] }) => void;
-  private clarificationNeededCallback?: (questions: string[]) => void;
-  private commandCallback?: (command: { action: string; parameters: Record<string, string>; expectedOutcome: string }) => void;
-
-  constructor(config: AgentConfig) {
+  private llmResponseHandler!: (response: any, message: Message) => void; 
+  
+  constructor(config: AgentCoreConfig, llmConfig: LLMConfig) {
     this.id = ""; // No id until registered
     this.name = config.name;
+    this.role = config.role;
     this.goal = config.goal || "";
     this.capabilities = config.capabilities;
     this.inbox = new PriorityInbox();
-    this.llmConfig = config.llmConfig || null;
+    this.llmConfig = llmConfig || null;
     this.memory = new DefaultAgentMemory();
-
-    if (config.llmConfig) {
+    
+    if (this.llmConfig) {
       this.llmClient = new OpenAI({
-        apiKey: config.llmConfig.apiKey,
-        baseURL: config.llmConfig.baseURL,
+        apiKey: this.llmConfig.apiKey,
+        baseURL: this.llmConfig.baseURL,
       });
     } else {
       throw new Error("No LLM client found");
     }
 
-    this.promptManager = new PromptManager(new DefaultPromptTemplate());
+    this.promptManager = new PromptManager(new GenericPromptTemplate(config.classificationTypeConfigs)); 
     this.promptManager.setGoal(this.goal);
   }
 
@@ -59,7 +56,7 @@ export class AgentCore {
     return this.capabilities;
   }
 
-  public async receiveMessage(message: Message): Promise<void> {
+  public async receive(message: Message): Promise<void> {
     this.inbox.enqueue(message);
   }
 
@@ -67,24 +64,8 @@ export class AgentCore {
     this.inbox.init(this.processMessage.bind(this));
   }
 
-  public setAgentPromptTemplate(promptTemplate: AgentPromptTemplate): void {
+  public setAgentPromptTemplate(promptTemplate: IAgentPromptTemplate): void {
     this.promptManager = new PromptManager(promptTemplate);
-  }
-
-  public setSimpleQueryCallback(callback: (answer: string) => void): void {
-    this.simpleQueryCallback = callback;
-  }
-
-  public setComplexTaskCallback(callback: (actionPlan: { task: string; subtasks: string[] }) => void): void {
-    this.complexTaskCallback = callback;
-  }
-
-  public setClarificationNeededCallback(callback: (questions: string[]) => void): void {
-    this.clarificationNeededCallback = callback;
-  }
-
-  public setCommandCallback(callback: (command: { action: string; parameters: Record<string, string>; expectedOutcome: string }) => void): void {
-    this.commandCallback = callback;
   }
 
   private cleanLLMResponse(response: string): string {
@@ -100,30 +81,20 @@ export class AgentCore {
     return response.replace(/`/g, '').trim();
   }
 
+  public addLLMResponseHandler(handler: (response: any, message: Message) => void) {
+    this.llmResponseHandler = handler;
+  }
+
   private async processMessage(message: Message): Promise<void> {
     console.log("Processing message:", message);
     const response = await this.promptLLM(message);
     
     // Handle the response based on message type
     const cleanedResponse = this.cleanLLMResponse(response);
-    const parsedResponse = JSON.parse(cleanedResponse) as LLMClassification;
-    switch (parsedResponse.messageType) {
-      case 'SIMPLE_QUERY':
-        this.simpleQueryCallback?.(parsedResponse.answer);
-        break;
-      case 'COMPLEX_TASK':
-        this.complexTaskCallback?.(parsedResponse.actionPlan);
-        break;
-      case 'CLARIFICATION_NEEDED':
-        this.clarificationNeededCallback?.(parsedResponse.questions);
-        break;
-      case 'COMMAND':
-        this.commandCallback?.(parsedResponse.command);
-        break;
-      default:
-        console.error("Unknown message type:", parsedResponse);
-    }
+
+    this.llmResponseHandler(cleanedResponse, message);
   }
+
 
   public async getOrCreateSessionContext(message: Message): Promise<Session> {
     if (!this.contextManager[message.sessionId]) {
@@ -133,11 +104,10 @@ export class AgentCore {
   }
 
   private async promptLLM(message: Message): Promise<string> {
-    console.log("System prompt===>", this.promptManager.getSystemPrompt());
-    const session = this.getOrCreateSessionContext(message);
+    //console.log("System prompt===>", this.promptManager.getSystemPrompt());
     const sessionContext = this.contextManager[message.sessionId];
     const prompt = this.promptManager.renderPrompt(sessionContext, this.promptManager.getMessageClassificationPrompt(message.payload.input), {});
-    console.log(`Interacting with LLM using prompt: ${prompt}`);
+    //console.log(`Interacting with LLM using prompt: ${prompt}`);
 
     try {
       const response = await this.llmClient.chat.completions.create({
@@ -195,11 +165,5 @@ export class AgentCore {
       goal: this.goal,
       capabilities: this.capabilities,
     });
-  }
-
-  public static fromJSON(json: string): AgentCore {
-    const data = JSON.parse(json);
-    const agent = new AgentCore(data);
-    return agent;
   }
 }
