@@ -4,6 +4,7 @@ export class GenericPromptTemplate<T extends ReadonlyArray<ClassificationTypeCon
   private classificationTypes: T;
 
   constructor(classificationTypes: T) {
+    console.log('GenericPromptTemplate constructor');
     this.classificationTypes = classificationTypes;
   }
 

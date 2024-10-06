@@ -3,12 +3,12 @@ import { ClassificationTypeConfig } from "./IAgentPromptTemplate";
 export interface AgentCoreConfig {
   name: string;                             // Agent name
   role: string;                             // Agent role
-  capabilities: CapabilityDescription[];  // Capabilities the agent has
+  capabilities: string;  // Capabilities the agent has
   tools?: { [key: string]: Tool };        // Custom tools the agent can use
   goal: string;                         // Long-term and short-term goals for the agent
   inboxConfig?: InboxConfig;              // Configuration for task inbox settings (priority, queue, etc.)
   memoryConfig?: MemoryConfig;            // Configuration for memory persistence (in-memory, DB, etc.)
-  classificationTypeConfigs: ClassificationTypeConfig[]; 
+  classificationTypeConfigs?: ClassificationTypeConfig[]; 
 }
 
 export interface AgentServiceConfig {
@@ -18,23 +18,10 @@ export interface AgentServiceConfig {
   proactiveInterval?: string;             // Interval for scheduling proactive actions
 }
 
-export interface CapabilityDescription {
-  name: string; 
-  description: string;
-}
-
 export interface LLMConfig {
   apiKey: string;
   model: string;
   baseURL?: string;
-}
-
-export interface Session {
-  owner: string;
-  sessionId: string;
-  description: string;
-  parentSessionId?: string;  // Optional reference to the parent session
-  subtasks?: Session[];  
 }
 
 export interface Tool {

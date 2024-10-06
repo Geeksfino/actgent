@@ -2,8 +2,6 @@ import {
   AgentCoreConfig,
   Tool,
   LLMConfig,
-  CapabilityDescription,
-  Session,
 } from "./interfaces";
 import { DefaultAgentMemory, Memory } from "./Memory";
 import { PromptManager } from "./PromptManager";
@@ -12,6 +10,7 @@ import { Message } from "./Message";
 import crypto from "crypto";
 import { OpenAI } from "openai";
 import { IAgentPromptTemplate } from "./IAgentPromptTemplate";
+import { Session } from "./Session";
 import { SessionContext } from "./SessionContext";
 import { GenericPromptTemplate } from "./GenericPromptTemplate";
 
@@ -20,16 +19,16 @@ export class AgentCore {
   public name: string;
   public role: string;
   public goal: string;
-  public capabilities: CapabilityDescription[];
+  public capabilities: string;
   private memory: Memory;
   private inbox: PriorityInbox;
   private llmConfig: LLMConfig | null;
   private llmClient: OpenAI;
   private promptManager: PromptManager;
   private contextManager: { [sessionId: string]: SessionContext } = {};
-  private llmResponseHandler!: (response: any, message: Message) => void; 
+  private llmResponseHandler!: (response: any, session: Session) => void; 
   
-  constructor(config: AgentCoreConfig, llmConfig: LLMConfig) {
+  constructor(config: AgentCoreConfig, llmConfig: LLMConfig, promptTemplate: IAgentPromptTemplate) { // Updated constructor
     this.id = ""; // No id until registered
     this.name = config.name;
     this.role = config.role;
@@ -39,6 +38,8 @@ export class AgentCore {
     this.llmConfig = llmConfig || null;
     this.memory = new DefaultAgentMemory();
     
+    //console.log("AgentCore LLM:" + JSON.stringify(this.llmConfig, null, 2));
+
     if (this.llmConfig) {
       this.llmClient = new OpenAI({
         apiKey: this.llmConfig.apiKey,
@@ -48,11 +49,13 @@ export class AgentCore {
       throw new Error("No LLM client found");
     }
 
-    this.promptManager = new PromptManager(new GenericPromptTemplate(config.classificationTypeConfigs)); 
+    this.promptManager = new PromptManager(promptTemplate); // Use the passed promptTemplate
     this.promptManager.setGoal(this.goal);
+    this.promptManager.setRole(this.role);
+    this.promptManager.setCapabilities(this.capabilities);
   }
 
-  public getCapabilities(): CapabilityDescription[] {
+  public getCapabilities(): string {
     return this.capabilities;
   }
 
@@ -81,7 +84,7 @@ export class AgentCore {
     return response.replace(/`/g, '').trim();
   }
 
-  public addLLMResponseHandler(handler: (response: any, message: Message) => void) {
+  public addLLMResponseHandler(handler: (response: any, session: Session) => void) {
     this.llmResponseHandler = handler;
   }
 
@@ -91,8 +94,9 @@ export class AgentCore {
     
     // Handle the response based on message type
     const cleanedResponse = this.cleanLLMResponse(response);
+    const session = this.contextManager[message.sessionId].getSession();
 
-    this.llmResponseHandler(cleanedResponse, message);
+    this.llmResponseHandler(cleanedResponse, session);
   }
 
 
@@ -104,7 +108,7 @@ export class AgentCore {
   }
 
   private async promptLLM(message: Message): Promise<string> {
-    //console.log("System prompt===>", this.promptManager.getSystemPrompt());
+    console.log("System prompt===>", this.promptManager.getSystemPrompt());
     const sessionContext = this.contextManager[message.sessionId];
     const prompt = this.promptManager.renderPrompt(sessionContext, this.promptManager.getMessageClassificationPrompt(message.payload.input), {});
     //console.log(`Interacting with LLM using prompt: ${prompt}`);
@@ -135,20 +139,15 @@ export class AgentCore {
     console.log("createSession called with description:", description);
 
     // Construct a Session object
-    const session: Session = {
-      owner: owner,
-      sessionId: "", // Placeholder for sessionId, will be set later
-      description: description,
-    };
-
+    const s: Session = new Session(this, owner, "", description, "");
     // Initialize session context and get the session ID
-    const sessionId = this.initSessionContext(session);
-    session.sessionId = sessionId; // Set the generated session ID to the Session object
+    const sessionId = this.initSessionContext(s);
+    s.sessionId = sessionId; // Set the generated session ID to the Session object
 
     // Create a Message object with session ID and description
-    const message = new Message(session.sessionId, session.description);
+    const message = new Message(s.sessionId, s.description);
     this.inbox.enqueue(message); // Enqueue the message
-    return session;
+    return s;
   }
 
   private initSessionContext(session: Session): string {

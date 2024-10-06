@@ -1,10 +1,12 @@
-import { AgentCoreConfig, Tool, LLMConfig, CommunicationConfig, MemoryConfig, CapabilityDescription, Session, AgentServiceConfig  } from './interfaces';
+import { AgentCoreConfig, Tool, LLMConfig, CommunicationConfig, AgentServiceConfig  } from './interfaces';
 import { Communication } from './Communication';
 import { AgentRegistry } from './AgentRegistry';
 import { AgentCore } from './AgentCore';
-import { ClassificationTypeConfig } from './IAgentPromptTemplate';
+import { ClassificationTypeConfig, IAgentPromptTemplate } from './IAgentPromptTemplate';
 import { Message } from './Message';
 import { InferClassificationUnion, InferClassificationType } from './TypeInference';  
+import { Session } from './Session';
+import { GenericPromptTemplate } from './GenericPromptTemplate';
 
 const defaultCommunicationConfig: CommunicationConfig = {};
 
@@ -53,36 +55,35 @@ const defaultTypes: ClassificationTypeConfig[] = [
 const coreConfig = {
   name: "BaseAgent",
   role: "Assistant",
-  goal: 'Creating functional specifications for developers to implement',
-  capabilities: [{ name: 'UX', description: 'Design user interaction for the product' },
-    { name: 'UI', description: 'Design the user interface for the product' },
-    { name: 'Planning', description: 'Create functional specifications for the product' },
-  ],
+  goal: 'testing',
+  capabilities: 'assist in testing',
   classificationTypeConfigs: defaultTypes,
 };
 
-const svcConfig = {
-  llmConfig: {
-    apiKey: "",
-    model: "qwen2",
-    baseUrl: "",
-  }
-}
-
 type BasicClassification = InferClassificationUnion<typeof defaultTypes>;
 
-export class BaseAgent  {
-  private core: AgentCore;
+export abstract class BaseAgent<T extends IAgentPromptTemplate>  {
+  private core!: AgentCore;
   
-  constructor(core_config: AgentCoreConfig, svc_config: AgentServiceConfig) {
-    // Ensure llmConfig is defined, or provide a default value
-    const llmConfig = svc_config.llmConfig;
-    this.core = new AgentCore(core_config, llmConfig!);
-    this.core.addLLMResponseHandler(this.handleLLMResponse.bind(this));
+  protected abstract usePromptTemplateClass(): new (...args: any[]) => T;
+
+  // A method to create an instance using the class type returned by "useClass"
+  public createPromptTemplate(...args: any[]): T {
+    const ClassToInstantiate = this.usePromptTemplateClass();
+    return new ClassToInstantiate(...args);
   }
 
-  public static getInstance(svc_config: AgentServiceConfig): BaseAgent {
-    return new BaseAgent(coreConfig, svc_config);
+  constructor(core_config: AgentCoreConfig, svc_config: AgentServiceConfig) {
+    console.log("BaseAgent constructor");
+    this.init(core_config, svc_config);
+  }
+
+  protected init(core_config: AgentCoreConfig, svc_config: AgentServiceConfig) {
+    const llmConfig = svc_config.llmConfig;
+    const promptTemplate = this.createPromptTemplate(defaultTypes);
+
+    this.core = new AgentCore(core_config, llmConfig!, promptTemplate);
+    this.core.addLLMResponseHandler(this.handleLLMResponse.bind(this));
   }
 
   public async run() {
@@ -93,20 +94,31 @@ export class BaseAgent  {
     return await this.core.createSession(owner, description);
   }
 
-  private handleLLMResponse(response: any, message: Message) {
+  protected getPromptTemplate(): IAgentPromptTemplate {
+    return new GenericPromptTemplate(coreConfig.classificationTypeConfigs);
+  }
+
+  protected handleLLMResponse(response: any, session: Session) {
     const result = JSON.parse(response) as BasicClassification;
     console.log("BaseAgent.handleLLMResponse:\n");
     switch (result.messageType) {
       case 'SIMPLE_QUERY':
-        console.log(result.answer);
+        //console.log(result.answer);
+        //session.onResponse(result.answer);
+        session.triggerHandleResult(result.answer);
         break;
       case 'COMPLEX_TASK':
         console.log("complex task:\n")
         console.log(result.actionPlan.task);
         console.log(result.actionPlan.subtasks);
+        result.actionPlan.subtasks.forEach(async (subtask: string) => {
+          const message = new Message(session.sessionId, subtask);
+          await this.core.receive(message);
+        });
         break;
       case 'CLARIFICATION_NEEDED':
         console.log(result.questions);
+        session.triggerClarificationNeeded(result.questions);
         break;
       case 'COMMAND':
         console.log(result.command.action);

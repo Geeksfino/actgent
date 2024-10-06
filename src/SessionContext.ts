@@ -1,4 +1,4 @@
-import { Session } from "./interfaces";
+import { Session } from "./Session";
 
 export class SessionContext {
     private session: Session;
