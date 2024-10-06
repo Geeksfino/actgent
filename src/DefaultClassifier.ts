@@ -64,18 +64,20 @@ export class DefaultClassifier extends AbstractClassifier<DefaultTypes> {
   public getClassificationTypeHandlers(): ClassifiedTypeHandlers<DefaultTypes> {
     const defaultTypes = this.getClassificationTypeDefinition();
     const callbacks: ClassifiedTypeHandlers<DefaultTypes> = { // Change here
-      SIMPLE_QUERY: (result) => {
+      SIMPLE_QUERY: (result, session) => {
         console.log(`Simple Query Answer: ${result.answer}`);
       },
-      COMPLEX_TASK: (result) => {
+      COMPLEX_TASK: (result, session) => {
         console.log(`Complex Task: ${result.actionPlan.task}`);
         console.log(`Subtasks: ${result.actionPlan.subtasks.join(", ")}`);
       },
-      CLARIFICATION_NEEDED: (result) => {
+      CLARIFICATION_NEEDED: (result, session) => {
         console.log(`Clarify: ${result.questions}`);
+        session.triggerClarificationNeeded(result);
       },
-      COMMAND: (result) => {
+      COMMAND: (result, session) => {
         console.log(`Command: ${result.command}`);
+        session.triggerHandleResult(result);
       },
     };
 

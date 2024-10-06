@@ -12,7 +12,7 @@ export type InferMessageType<T extends readonly ClassificationTypeConfig[], K ex
   Extract<InferClassificationUnion<T>, { messageType: K }>;
 
 export type ClassifiedTypeHandlers<T extends readonly ClassificationTypeConfig[]> = {
-    [K in T[number]['name']]: (result: InferMessageType<T, K>) => void;
+    [K in T[number]['name']]: (result: InferMessageType<T, K>, session: Session) => void;
 };
 
 export interface IClassifier<T extends readonly ClassificationTypeConfig[]> {

@@ -12,7 +12,7 @@ import { OpenAI } from "openai";
 import { IAgentPromptTemplate } from "./IAgentPromptTemplate";
 import { Session } from "./Session";
 import { SessionContext } from "./SessionContext";
-import { GenericPromptTemplate } from "./GenericPromptTemplate";
+
 
 export class AgentCore {
   public id: string;
@@ -94,6 +94,7 @@ export class AgentCore {
     
     // Handle the response based on message type
     const cleanedResponse = this.cleanLLMResponse(response);
+    //console.log("cleanedResponse===>", cleanedResponse);
     const session = this.contextManager[message.sessionId].getSession();
 
     this.llmResponseHandler(cleanedResponse, session);

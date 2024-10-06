@@ -1,6 +1,7 @@
 import { AgentCore } from "./AgentCore";
 import { ClassificationTypeConfig } from "./IClassifier";
-import { InferClassificationType, InferClassificationUnion } from "./TypeInference";
+import { Message } from "./Message";
+import { InferClassificationUnion } from "./TypeInference";
 
 export class Session {
     core: AgentCore;
@@ -21,6 +22,14 @@ export class Session {
         this.parentSessionId = parentSessionId
     }
 
+    public createMessage(message: string): Message {
+        return new Message(this.sessionId, message);
+    }
+
+    public async chat(message: string): Promise<void> {
+        this.core.receive(this.createMessage(message));
+    }
+
     public onClarificationNeeded<T extends readonly ClassificationTypeConfig[]>(handler: (obj: InferClassificationUnion<T>) => void): void {
         this.clarificationHandlers.push(handler);
     }
@@ -31,7 +40,7 @@ export class Session {
 
     // Method to trigger clarification needed handlers
     public triggerClarificationNeeded<T extends readonly ClassificationTypeConfig[]>(obj: InferClassificationUnion<T>): void {
-        console.log("trigger:" + JSON.stringify(obj));
+        //console.log("trigger:" + JSON.stringify(obj));
         this.clarificationHandlers.forEach(handler => {
             if (typeof handler === 'function') {  // Check if handler is a function
                 handler(obj);

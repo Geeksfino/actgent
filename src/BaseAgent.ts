@@ -5,7 +5,7 @@ import { AgentCore } from './AgentCore';
 import { IAgentPromptTemplate } from './IAgentPromptTemplate';
 import { ClassificationTypeConfig, IClassifier} from './IClassifier';
 import { Message } from './Message';
-import { InferClassificationUnion, InferClassificationType } from './TypeInference';  
+import { InferClassificationUnion } from './TypeInference';  
 import { Session } from './Session';
 
 const defaultCommunicationConfig: CommunicationConfig = {};
@@ -53,8 +53,28 @@ export abstract class BaseAgent<
     return await this.core.createSession(owner, description);
   }
 
-  protected handleLLMResponse(response: any, session: Session) {
-    this.classifier.handleLLMResponse(response, session);
+  protected handleLLMResponse(response: string | InferClassificationUnion<T>, session: Session) {
+    //console.log("BaseAgent handling LLM Response:");
+    
+    let parsedResponse: InferClassificationUnion<T>;
+    
+    if (typeof response === 'string') {
+      try {
+        parsedResponse = JSON.parse(response);
+      } catch (error) {
+        console.error("Failed to parse response string:", error);
+        return;
+      }
+    } else {
+      parsedResponse = response;
+    }
+
+    // console.log("Response type:", typeof parsedResponse);
+    // console.log("Response content:", JSON.stringify(parsedResponse, null, 2));
+    // console.log("Response keys:", Object.keys(parsedResponse));
+    // console.log("messageType:", parsedResponse.messageType);
+    
+    this.classifier.handleLLMResponse(parsedResponse, session);
   }
 
   private async findHelperAgent(subtask: string): Promise<AgentCore | null> {
