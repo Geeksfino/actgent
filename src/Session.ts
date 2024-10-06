@@ -1,5 +1,5 @@
 import { AgentCore } from "./AgentCore";
-import { ClassificationTypeConfig } from "./IAgentPromptTemplate";
+import { ClassificationTypeConfig } from "./IClassifier";
 import { InferClassificationType, InferClassificationUnion } from "./TypeInference";
 
 export class Session {

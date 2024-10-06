@@ -1,4 +1,4 @@
-import { ClassificationTypeConfig } from "./IAgentPromptTemplate";
+import { ClassificationTypeConfig } from "./IClassifier";
 
 export interface AgentCoreConfig {
   name: string;                             // Agent name

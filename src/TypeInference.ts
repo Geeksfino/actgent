@@ -1,4 +1,4 @@
-import { ClassificationTypeConfig } from './IAgentPromptTemplate';
+import { ClassificationTypeConfig } from './IClassifier';
 
 export type InferClassificationType<T extends ClassificationTypeConfig> =
   T extends { name: infer Name, structure: infer Structure }

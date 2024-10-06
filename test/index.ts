@@ -1,9 +1,6 @@
-import { AgentRegistry } from './AgentRegistry';
-import { BaseAgent } from './BaseAgent';
-import { AgentCoreConfig, AgentServiceConfig } from './interfaces';
-import { ClassificationTypeConfig, IAgentPromptTemplate } from './IAgentPromptTemplate';
-import { GenericPromptTemplate } from './GenericPromptTemplate';
-import { InferClassificationUnion } from './TypeInference';
+import { ClassificationTypeConfig } from '../src/IClassifier';
+import { InferClassificationUnion } from '../src/TypeInference';
+import { TestAgent } from './TestAgent';
 
 const grpcPort = parseInt(process.env.REGISTRY_GRPC_PORT || '1146');
 const httpPort = parseInt(process.env.REGISTRY_HTTP_PORT || '1147');
@@ -27,19 +24,8 @@ const svcConfig = {
   }
 };
 
-class TestAgent<T extends readonly ClassificationTypeConfig[]> extends BaseAgent<GenericPromptTemplate<T>> {
 
-  constructor(core_config: AgentCoreConfig, svc_config: AgentServiceConfig) {
-    super(core_config, svc_config);
-  }
-
-  protected usePromptTemplateClass(): new (classificationTypes: T) => GenericPromptTemplate<T> {
-    return GenericPromptTemplate;
-  }
-}
-
-console.log("svcconfig:" + JSON.stringify(svcConfig));
-const testAgent = new TestAgent<readonly ClassificationTypeConfig[]>(coreConfig, svcConfig);
+const testAgent = new TestAgent(coreConfig, svcConfig);
 testAgent.run();
 
 const session = await testAgent.createSession("owner", 'How to create web site?');
