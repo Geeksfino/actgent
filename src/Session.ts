@@ -23,11 +23,14 @@ export class Session {
     }
 
     public createMessage(message: string): Message {
-        return new Message(this.sessionId, message);
+        const msg = new Message(this.sessionId, message);
+        this.core.getSessionContext(this.sessionId).addMessage(msg);  // Add message to context
+        return msg;
     }
 
     public async chat(message: string): Promise<void> {
-        this.core.receive(this.createMessage(message));
+        const msg = this.createMessage(message);
+        this.core.receive(msg);
     }
 
     public onClarificationNeeded<T extends readonly ClassificationTypeConfig[]>(handler: (obj: InferClassificationUnion<T>) => void): void {

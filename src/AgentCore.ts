@@ -61,6 +61,7 @@ export class AgentCore {
 
   public async receive(message: Message): Promise<void> {
     this.inbox.enqueue(message);
+    this.contextManager[message.sessionId].addMessage(message);  // Add message to context
   }
 
   public async start(): Promise<void> {
@@ -103,7 +104,9 @@ export class AgentCore {
 
   public async getOrCreateSessionContext(message: Message): Promise<Session> {
     if (!this.contextManager[message.sessionId]) {
-      return this.createSession(message.metadata?.sender || "", message.payload.input);
+      const session = await this.createSession(message.metadata?.sender || "", message.payload.input);
+      this.contextManager[message.sessionId].addMessage(message);  // Add initial message
+      return session;
     }
     return this.contextManager[message.sessionId].getSession();
   }
@@ -125,8 +128,9 @@ export class AgentCore {
 
       const responseContent = response.choices[0].message.content || "{}";
       // Update the session context with the decomposition result
-      this.contextManager[message.sessionId].addToHistory(`User: ${message.payload.input}`);
-      this.contextManager[message.sessionId].addToHistory(`LLM: ${responseContent}`);
+      // this.contextManager[message.sessionId].addToHistory(`User: ${message.payload.input}`);
+      // this.contextManager[message.sessionId].addToHistory(`LLM: ${responseContent}`);
+      this.contextManager[message.sessionId].addMessage(message);
 
       console.log("LLM response===>", responseContent);
       return responseContent;
@@ -149,6 +153,10 @@ export class AgentCore {
     const message = new Message(s.sessionId, s.description);
     this.inbox.enqueue(message); // Enqueue the message
     return s;
+  }
+
+  public getSessionContext(sessionId: string): SessionContext {
+    return this.contextManager[sessionId];
   }
 
   private initSessionContext(session: Session): string {

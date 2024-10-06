@@ -1,11 +1,12 @@
 import { Session } from "./Session";
-
+import { Message } from "./Message";
 export class SessionContext {
     private session: Session;
     private conversationHistory: string[] = [];
     private state: { [key: string]: any } = {};
     private subtasks: SessionContext[] = [];
-  
+    private messages: Message[] = [];  // Store messages
+
     constructor(session: Session) {
       this.session = session;
       this.conversationHistory = [];
@@ -16,6 +17,14 @@ export class SessionContext {
       this.conversationHistory.push(response);
     }
   
+    public addMessage(message: Message): void {  // Add message to history
+      this.messages.push(message);
+    }
+
+    public getMessages(): Message[] {  // Retrieve all messages
+        return this.messages;
+    }
+
     public getSession(): Session {
       return this.session;
     }

@@ -1,4 +1,4 @@
-import { AgentPromptTemplate } from './AgentPromptTemplate';
+import { IAgentPromptTemplate } from './IAgentPromptTemplate';
 import { SessionContext } from './SessionContext'; 
 
 export class PromptManager {
@@ -6,7 +6,7 @@ export class PromptManager {
   private goal: string = "";
   private capabilities: string = "";
   
-  constructor(private promptTemplate: AgentPromptTemplate) {
+  constructor(private promptTemplate: IAgentPromptTemplate) {
     this.promptTemplate = promptTemplate;
   }
 
@@ -52,9 +52,10 @@ export class PromptManager {
     });
 
     if (sessionContext) {
-      const history = sessionContext.getHistory().join('\n');
+      //const history = sessionContext.getHistory().join('\n');
+      const messages = sessionContext.getMessages().map(msg => msg.payload.input).join('\n');
       //console.log("History===>", history);
-      prompt = history + prompt;
+      prompt = messages + prompt;
     } 
 
     return prompt || "";
