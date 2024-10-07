@@ -47,13 +47,9 @@ const defaultTypes: ClassificationTypeConfig[] = [
 
 export type SchemaTypes = Readonly<typeof defaultTypes>;
 
-export class DefaultClassifier extends AbstractClassifier<SchemaTypes> {
-  constructor() {
-    super();
-  }
-
-  public getClassificationTypeDefinition(): ReadonlyArray<ClassificationTypeConfig> {
-    return defaultTypes;
+export class DefaultClassifier<T extends readonly ClassificationTypeConfig[]> extends AbstractClassifier<T> {
+  constructor(schemaTypes: Readonly<T>) {
+    super(schemaTypes);
   }
 
   // public getClassificationTypeHandlers(): ClassifiedTypeHandlers<SchemaTypes> {

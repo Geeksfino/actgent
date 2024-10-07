@@ -33,9 +33,9 @@ testAgent.run();
 const session = await testAgent.createSession("owner", 'How to create web site?');
 
 // Handler function to print out data received
-const clarificationHandler = (data: InferClassificationUnion<readonly ClassificationTypeConfig[]>): void => {
-    console.log("Human Clarification needed:", data);
+const handler = (data: InferClassificationUnion<readonly ClassificationTypeConfig[]>): void => {
+    console.log("Received event from session:", data);
 };
 
 // Pass the handler to the session
-session.onEvent(clarificationHandler);
+session.onEvent(handler);

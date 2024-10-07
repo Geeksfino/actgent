@@ -18,11 +18,11 @@ export abstract class BaseAgent<
   private core!: AgentCore;
   private classifier!: K;
   
-  protected abstract useClassifierClass(): new () => K;
+  protected abstract useClassifierClass(schemaTypes: T): new () => K;
   protected abstract usePromptTemplateClass(): new (classificationTypes: T) => P;
 
-  protected createClassifier(): K {
-    const ClassToInstantiate = this.useClassifierClass();
+  protected createClassifier(schemaTypes: T): K {
+    const ClassToInstantiate = this.useClassifierClass(schemaTypes);
     return new ClassToInstantiate();
   }
 
@@ -31,15 +31,15 @@ export abstract class BaseAgent<
     return new ClassToInstantiate(classificationTypes);
   }
 
-  constructor(core_config: AgentCoreConfig, svc_config: AgentServiceConfig) {
-    this.init(core_config, svc_config);
+  constructor(core_config: AgentCoreConfig, svc_config: AgentServiceConfig, schemaTypes: T) {
+    this.init(core_config, svc_config, schemaTypes);
   }
 
-  protected init(core_config: AgentCoreConfig, svc_config: AgentServiceConfig) {
+  protected init(core_config: AgentCoreConfig, svc_config: AgentServiceConfig, schemaTypes: T) {
     const llmConfig = svc_config.llmConfig;
 
-    this.classifier = this.createClassifier();
-    const promptTemplate = this.createPromptTemplate(this.classifier.getClassificationTypeDefinition());
+    this.classifier = this.createClassifier(schemaTypes);
+    const promptTemplate = this.createPromptTemplate(schemaTypes);
 
     this.core = new AgentCore(core_config, llmConfig!, promptTemplate);
     this.core.addLLMResponseHandler(this.handleLLMResponse.bind(this));
