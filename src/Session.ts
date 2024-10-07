@@ -11,8 +11,7 @@ export class Session {
     parentSessionId?: string;  // Optional reference to the parent session
     subtasks?: Session[];  
 
-    private clarificationHandlers: Array<(obj: any) => void> = [];
-    private responseHandlers: Array<(obj: any) => void> = [];
+    private eventHandlers: Array<(obj: any) => void> = [];
 
     constructor(core: AgentCore, owner: string, sessionId: string, description: string, parentSessionId?: string) {
         this.core = core;
@@ -33,26 +32,17 @@ export class Session {
         this.core.receive(msg);
     }
 
-    public onClarificationNeeded<T extends readonly ClassificationTypeConfig[]>(handler: (obj: InferClassificationUnion<T>) => void): void {
-        this.clarificationHandlers.push(handler);
-    }
-
-    public onResult<T extends readonly ClassificationTypeConfig[]>(handler: (obj: InferClassificationUnion<T>) => void): void {
-        this.responseHandlers.push(handler);
+    public onEvent<T extends readonly ClassificationTypeConfig[]>(handler: (obj: InferClassificationUnion<T>) => void): void {
+        this.eventHandlers.push(handler);
     }
 
     // Method to trigger clarification needed handlers
-    public triggerClarificationNeeded<T extends readonly ClassificationTypeConfig[]>(obj: InferClassificationUnion<T>): void {
+    public triggerEventHandlers<T extends readonly ClassificationTypeConfig[]>(obj: InferClassificationUnion<T>): void {
         //console.log("trigger:" + JSON.stringify(obj));
-        this.clarificationHandlers.forEach(handler => {
+        this.eventHandlers.forEach(handler => {
             if (typeof handler === 'function') {  // Check if handler is a function
                 handler(obj);
             }
         });
-    }
-
-    // Method to trigger response handlers
-    public triggerHandleResult<T extends readonly ClassificationTypeConfig[]>(obj: InferClassificationUnion<T>): void {
-        this.responseHandlers.forEach(handler => handler(obj));
     }
 }

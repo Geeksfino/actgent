@@ -2,7 +2,7 @@ import { AgentCoreConfig, Tool, LLMConfig, CommunicationConfig, AgentServiceConf
 import { Communication } from './Communication';
 import { AgentRegistry } from './AgentRegistry';
 import { AgentCore } from './AgentCore';
-import { IAgentPromptTemplate } from './IAgentPromptTemplate';
+import { IAgentPromptTemplate } from './IPromptTemplate';
 import { ClassificationTypeConfig, IClassifier} from './IClassifier';
 import { Message } from './Message';
 import { InferClassificationUnion } from './TypeInference';  

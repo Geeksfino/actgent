@@ -4,8 +4,8 @@ import { InferClassificationUnion } from './TypeInference';
 
 export interface ClassificationTypeConfig {
     name: string;
-    description: string;
-    structure: Record<string, any>;
+    prompt: string;
+    schema: Record<string, any>;
 }
 
 export type InferMessageType<T extends readonly ClassificationTypeConfig[], K extends T[number]['name']> = 
@@ -17,7 +17,7 @@ export type ClassifiedTypeHandlers<T extends readonly ClassificationTypeConfig[]
 
 export interface IClassifier<T extends readonly ClassificationTypeConfig[]> {
     getClassificationTypeDefinition(): Readonly<T>;
-    getClassificationTypeHandlers(): ClassifiedTypeHandlers<Readonly<T>>;
+    //getClassificationTypeHandlers(): ClassifiedTypeHandlers<Readonly<T>>;
     handleLLMResponse(response: InferClassificationUnion<Readonly<T>>, session: Session): void;
 }
 

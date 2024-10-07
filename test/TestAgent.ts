@@ -1,19 +1,18 @@
 import { BaseAgent } from '../src/BaseAgent';
 import { AgentCoreConfig, AgentServiceConfig } from '../src/interfaces';
-import { GenericPromptTemplate } from '../src/GenericPromptTemplate';
-import { IClassifier } from '../src/IClassifier';
-import { DefaultClassifier, DefaultTypes } from '../src/DefaultClassifier';
+import GenericPromptTemplate from '../src/DefaultPromptTemplate';
+import { DefaultClassifier, SchemaTypes } from '../src/DefaultClassifier';
 
-export class TestAgent extends BaseAgent<DefaultTypes, DefaultClassifier, GenericPromptTemplate<DefaultTypes>> {
+export class TestAgent extends BaseAgent<SchemaTypes, DefaultClassifier, GenericPromptTemplate<SchemaTypes>> {
   constructor(core_config: AgentCoreConfig, svc_config: AgentServiceConfig) {
     super(core_config, svc_config);
   }
 
-  protected useClassifierClass(): new () => IClassifier<DefaultTypes> {
+  protected useClassifierClass(): new () => DefaultClassifier {
     return DefaultClassifier;
   }
 
-  protected usePromptTemplateClass(): new (classificationTypes: DefaultTypes) => GenericPromptTemplate<DefaultTypes> {
+  protected usePromptTemplateClass(): new (classificationTypes: SchemaTypes) => GenericPromptTemplate<SchemaTypes> {
     return GenericPromptTemplate;
   }
 }

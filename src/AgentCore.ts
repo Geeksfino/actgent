@@ -10,7 +10,7 @@ import { PriorityInbox } from "./PriorityInbox";
 import { Message } from "./Message";
 import crypto from "crypto";
 import { OpenAI } from "openai";
-import { IAgentPromptTemplate } from "./IAgentPromptTemplate";
+import { IAgentPromptTemplate } from "./IPromptTemplate";
 import { Session } from "./Session";
 import { SessionContext } from "./SessionContext";
 

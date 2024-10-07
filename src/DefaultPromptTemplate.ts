@@ -1,11 +1,11 @@
-import { IAgentPromptTemplate } from './IAgentPromptTemplate';
+import { IAgentPromptTemplate } from './IPromptTemplate';
 import { ClassificationTypeConfig } from './IClassifier';
 
-export class GenericPromptTemplate<T extends ReadonlyArray<ClassificationTypeConfig>> implements IAgentPromptTemplate {
+export default class DefaultPromptTemplate<T extends ReadonlyArray<ClassificationTypeConfig>> implements IAgentPromptTemplate {
   private classificationTypes: T;
 
   constructor(classificationTypes: T) {
-    console.log('GenericPromptTemplate constructor');
+    console.log('DefaultPromptTemplate constructor');
     this.classificationTypes = classificationTypes;
   }
 
@@ -24,11 +24,11 @@ export class GenericPromptTemplate<T extends ReadonlyArray<ClassificationTypeCon
 
   getMessageClassificationPrompt(message: string): string {
     const typesDescription = this.classificationTypes
-      .map(type => `- ${type.name}: ${type.description}`)
+      .map(type => `- ${type.name}: ${type.prompt}`)
       .join('\n');
 
     const jsonFormats = this.classificationTypes
-      .map(type => `${type.name}:\n\`\`\`json\n${JSON.stringify({ messageType: type.name, ...type.structure }, null, 2)}\n\`\`\``)
+      .map(type => `${type.name}:\n\`\`\`json\n${JSON.stringify({ messageType: type.name, ...type.schema }, null, 2)}\n\`\`\``)
       .join('\n\n');
 
     const prompt = `

@@ -38,6 +38,4 @@ const clarificationHandler = (data: InferClassificationUnion<readonly Classifica
 };
 
 // Pass the handler to the session
-session.onClarificationNeeded(clarificationHandler);
-
-session.onResult(obj => console.log(obj));
+session.onEvent(clarificationHandler);

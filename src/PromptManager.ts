@@ -1,4 +1,4 @@
-import { IAgentPromptTemplate } from './IAgentPromptTemplate';
+import { IAgentPromptTemplate } from './IPromptTemplate';
 import { SessionContext } from './SessionContext'; 
 
 export class PromptManager {
