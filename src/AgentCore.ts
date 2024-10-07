@@ -3,7 +3,8 @@ import {
   Tool,
   LLMConfig,
 } from "./interfaces";
-import { DefaultAgentMemory, Memory } from "./Memory";
+import { DefaultAgentMemory, Memory, MemoryStorage } from "./Memory";
+import { InMemoryStorage } from "./InMemoryStorage";
 import { PromptManager } from "./PromptManager";
 import { PriorityInbox } from "./PriorityInbox";
 import { Message } from "./Message";
@@ -13,6 +14,11 @@ import { IAgentPromptTemplate } from "./IAgentPromptTemplate";
 import { Session } from "./Session";
 import { SessionContext } from "./SessionContext";
 
+interface StorageConfig {
+  shortTerm?: MemoryStorage<any>;
+  longTerm?: MemoryStorage<any>;
+  working?: MemoryStorage<any>;
+}
 
 export class AgentCore {
   public id: string;
@@ -28,7 +34,12 @@ export class AgentCore {
   private contextManager: { [sessionId: string]: SessionContext } = {};
   private llmResponseHandler!: (response: any, session: Session) => void; 
   
-  constructor(config: AgentCoreConfig, llmConfig: LLMConfig, promptTemplate: IAgentPromptTemplate) { // Updated constructor
+  constructor(
+    config: AgentCoreConfig,
+    llmConfig: LLMConfig,
+    promptTemplate: IAgentPromptTemplate,
+    storageConfig?: StorageConfig
+  ) {
     this.id = ""; // No id until registered
     this.name = config.name;
     this.role = config.role;
@@ -36,7 +47,18 @@ export class AgentCore {
     this.capabilities = config.capabilities;
     this.inbox = new PriorityInbox();
     this.llmConfig = llmConfig || null;
-    this.memory = new DefaultAgentMemory();
+    
+    // Initialize memory with storage backends
+    const shortTermStorage = storageConfig?.shortTerm || new InMemoryStorage<any>();
+    const longTermStorage = storageConfig?.longTerm || new InMemoryStorage<any>();
+    const workingMemoryStorage = storageConfig?.working || new InMemoryStorage<any>();
+
+    this.memory = new DefaultAgentMemory(
+      1000000, // maxMemorySize (adjust as needed)
+      shortTermStorage,
+      longTermStorage,
+      workingMemoryStorage
+    );
     
     //console.log("AgentCore LLM:" + JSON.stringify(this.llmConfig, null, 2));
 
@@ -91,12 +113,17 @@ export class AgentCore {
 
   private async processMessage(message: Message): Promise<void> {
     console.log("Processing message:", message);
-    const response = await this.promptLLM(message);
+    const sessionContext = this.contextManager[message.sessionId];
+    
+    // Process message in memory
+    await this.memory.processMessage(message, sessionContext);
+
+    const context = await this.memory.generateContext(sessionContext);
+    const response = await this.promptLLM(message, context);
     
     // Handle the response based on message type
     const cleanedResponse = this.cleanLLMResponse(response);
-    //console.log("cleanedResponse===>", cleanedResponse);
-    const session = this.contextManager[message.sessionId].getSession();
+    const session = sessionContext.getSession();
 
     this.llmResponseHandler(cleanedResponse, session);
   }
@@ -111,10 +138,15 @@ export class AgentCore {
     return this.contextManager[message.sessionId].getSession();
   }
 
-  private async promptLLM(message: Message): Promise<string> {
+  private async promptLLM(message: Message, context: any): Promise<string> {
     console.log("System prompt===>", this.promptManager.getSystemPrompt());
     const sessionContext = this.contextManager[message.sessionId];
-    const prompt = this.promptManager.renderPrompt(sessionContext, this.promptManager.getMessageClassificationPrompt(message.payload.input), {});
+    // Use the generated context in your prompt
+    const prompt = this.promptManager.renderPrompt(
+      this.contextManager[message.sessionId],
+      this.promptManager.getMessageClassificationPrompt(message.payload.input),
+      context
+    );
     //console.log(`Interacting with LLM using prompt: ${prompt}`);
 
     try {
@@ -173,5 +205,23 @@ export class AgentCore {
       goal: this.goal,
       capabilities: this.capabilities,
     });
+  }
+
+  public async optimizeMemory(): Promise<void> {
+    await this.memory.optimizeMemory();
+  }
+
+  // Method to allow changing storage backends at runtime
+  public setStorageBackends(storageConfig: StorageConfig): void {
+    const shortTermStorage = storageConfig.shortTerm || new InMemoryStorage<any>();
+    const longTermStorage = storageConfig.longTerm || new InMemoryStorage<any>();
+    const workingMemoryStorage = storageConfig.working || new InMemoryStorage<any>();
+
+    this.memory = new DefaultAgentMemory(
+      1000000, // maxMemorySize (use the same value as in constructor)
+      shortTermStorage,
+      longTermStorage,
+      workingMemoryStorage
+    );
   }
 }
