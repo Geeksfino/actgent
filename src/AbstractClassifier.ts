@@ -10,9 +10,9 @@ import { InferClassificationUnion } from "./TypeInference";
 export abstract class AbstractClassifier<T extends readonly ClassificationTypeConfig[]>
   implements IClassifier<T>
 {  
-  protected schemaTypes: Readonly<T>;
+  protected schemaTypes: T;
 
-  constructor(schemaTypes: Readonly<T>) {
+  constructor(schemaTypes: T) {
     this.schemaTypes = schemaTypes;
   }
 

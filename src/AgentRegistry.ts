@@ -45,7 +45,7 @@ export class AgentRegistry {
 		// Regenerate the entire capabilities context
 		this.capabilitiesContext = Array.from(this.agents.values())
 			.map((agent: AgentCore) => {
-				const capabilities = agent.getCapabilities().map((cap: { name: string; description: string }) => `${cap.name}: ${cap.description}`).join('\n');
+				const capabilities = agent.getCapabilities();
 				return `Agent ${agent.id} has capabilities:\n${capabilities}`;
 			})
 			.join('\n\n');
@@ -167,7 +167,6 @@ export class AgentRegistry {
 		const data = JSON.parse(json);
 		const registry = AgentRegistry.getInstance();
 		registry.capabilitiesContext = data.capabilitiesContext;
-		registry.agents = new Map(data.agents.map(([id, agentData]: [string, any]) => [id, AgentCore.fromJSON(agentData)]));
 		return registry;
 	}
 }

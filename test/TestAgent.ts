@@ -4,7 +4,7 @@ import DefaultPromptTemplate from '../src/DefaultPromptTemplate';
 import { DefaultClassifier } from '../src/DefaultClassifier';
 import { ClassificationTypeConfig } from '../src/IClassifier';
 
-const defaultTypes: ClassificationTypeConfig[] = [
+const defaultTypes = [
   {
     name: "SIMPLE_QUERY",
     prompt: "A straightforward question that can be answered directly.",
@@ -46,7 +46,7 @@ const defaultTypes: ClassificationTypeConfig[] = [
   },
 ] as const; // 'as const' ensures immutability
 
-export type SchemaTypes = Readonly<typeof defaultTypes>;
+export type SchemaTypes = typeof defaultTypes;
 
 export class TestAgent extends BaseAgent<SchemaTypes, DefaultClassifier<SchemaTypes>, DefaultPromptTemplate<SchemaTypes>> {
   constructor(core_config: AgentCoreConfig, svc_config: AgentServiceConfig, schemaTypes: SchemaTypes = defaultTypes) {
