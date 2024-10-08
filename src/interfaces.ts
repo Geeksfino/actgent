@@ -22,6 +22,7 @@ export interface LLMConfig {
   apiKey: string;
   model: string;
   baseURL?: string;
+  streamMode?: boolean;
 }
 
 export interface Tool {

@@ -1,6 +1,6 @@
 import { ClassificationTypeConfig } from '../src/IClassifier';
 import { InferClassificationUnion } from '../src/TypeInference';
-import { TestAgent } from './TestAgent';
+import { SpecWriterAgent } from './SpecWriterAgent';
 
 const grpcPort = parseInt(process.env.REGISTRY_GRPC_PORT || '1146');
 const httpPort = parseInt(process.env.REGISTRY_HTTP_PORT || '1147');
@@ -11,12 +11,6 @@ const llmModel = process.env.LLM_MODEL || 'deepseek-chat';
 console.log("llm provider url: " + llmProviderUrl);
 console.log("llm model: " + llmModel);
 
-const coreConfig = {
-  name: "BaseAgent",
-  role: "Software Product Manager",
-  goal: 'Create software specification',
-  capabilities: 'assist in testing',
-};
 
 const svcConfig = {
   llmConfig: {
@@ -28,13 +22,13 @@ const svcConfig = {
 };
 
 
-const testAgent = new TestAgent(coreConfig, svcConfig);
-testAgent.registerStreamCallback((delta: string) => {
+const specWriterAgent = new SpecWriterAgent(svcConfig);
+specWriterAgent.registerStreamCallback((delta: string) => {
   console.log(delta);
 });
-testAgent.run();
+specWriterAgent.run();
 
-const session = await testAgent.createSession("owner", 'How to create web site?');
+const session = await specWriterAgent.createSession("owner", 'Create a stock chart mini-program');
 
 // Handler function to print out data received
 const handler = (data: InferClassificationUnion<readonly ClassificationTypeConfig[]>): void => {

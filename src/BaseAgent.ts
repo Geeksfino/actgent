@@ -15,7 +15,7 @@ export abstract class BaseAgent<
   K extends IClassifier<T>,
   P extends IAgentPromptTemplate
 >  {
-  private core!: AgentCore;
+  protected core!: AgentCore;
   private classifier!: K;
   
   protected abstract useClassifierClass(schemaTypes: T): new () => K;
@@ -54,8 +54,6 @@ export abstract class BaseAgent<
   }
 
   protected handleLLMResponse(response: string | InferClassificationUnion<T>, session: Session) {
-    //console.log("BaseAgent handling LLM Response:");
-    
     let parsedResponse: InferClassificationUnion<T>;
     
     if (typeof response === 'string') {
@@ -68,18 +66,24 @@ export abstract class BaseAgent<
     } else {
       parsedResponse = response;
     }
-
-    // console.log("Response type:", typeof parsedResponse);
-    // console.log("Response content:", JSON.stringify(parsedResponse, null, 2));
-    // console.log("Response keys:", Object.keys(parsedResponse));
-    // console.log("messageType:", parsedResponse.messageType);
     
     this.classifier.handleLLMResponse(parsedResponse, session);
   }
 
+  public registerStreamCallback(callback?: (delta: string) => void): void {
+    if (callback) {
+      this.core.registerStreamCallback(callback);
+    } else {
+      // Default line-by-line stream handler
+      this.core.registerStreamCallback((delta: string) => {
+        process.stdout.write(delta);
+      });
+    }
+  }
+
   private async findHelperAgent(subtask: string): Promise<AgentCore | null> {
     console.log('findHelperAgent called with subtask:', subtask);
-    const agent = await AgentRegistry.getInstance().findAgentByCapabilities(subtask); // Find agent using registry
+    const agent = await AgentRegistry.getInstance().findAgentByCapabilities(subtask);
     return agent;
   }
 }

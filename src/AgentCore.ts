@@ -32,8 +32,10 @@ export class AgentCore {
   private llmClient: OpenAI;
   private promptManager: PromptManager;
   private contextManager: { [sessionId: string]: SessionContext } = {};
-  private llmResponseHandler!: (response: any, session: Session) => void; 
-  
+  private llmResponseHandler!: (response: any, session: Session) => void;
+  private streamCallback?: (delta: string) => void;
+  private streamBuffer: string = '';
+
   constructor(
     config: AgentCoreConfig,
     llmConfig: LLMConfig,
@@ -111,6 +113,29 @@ export class AgentCore {
     this.llmResponseHandler = handler;
   }
 
+  public registerStreamCallback(callback: (delta: string) => void): void {
+    this.streamCallback = callback;
+  }
+
+  private processStreamBuffer(force: boolean = false) {
+    const lines = this.streamBuffer.split('\n');
+    const completeLines = lines.slice(0, -1);
+    this.streamBuffer = lines[lines.length - 1];
+
+    for (const line of completeLines) {
+      if (this.streamCallback) {
+        this.streamCallback(line + '\n');
+      }
+    }
+
+    if (force && this.streamBuffer) {
+      if (this.streamCallback) {
+        this.streamCallback(this.streamBuffer);
+      }
+      this.streamBuffer = '';
+    }
+  }
+
   private async processMessage(message: Message): Promise<void> {
     console.log("Processing message:", message);
     const sessionContext = this.contextManager[message.sessionId];
@@ -119,7 +144,13 @@ export class AgentCore {
     await this.memory.processMessage(message, sessionContext);
 
     const context = await this.memory.generateContext(sessionContext);
-    const response = await this.promptLLM(message, context);
+    const useStreamMode = false; // Set this to true if you want to use streaming mode
+    const streamCallback = useStreamMode ? (delta: string) => {
+      // Handle delta updates here, e.g., send to a websocket
+      console.log("Received delta:", delta);
+    } : undefined;
+
+    const response = await this.promptLLM(message, context, useStreamMode, streamCallback);
     
     // Handle the response based on message type
     const cleanedResponse = this.cleanLLMResponse(response);
@@ -127,7 +158,6 @@ export class AgentCore {
 
     this.llmResponseHandler(cleanedResponse, session);
   }
-
 
   public async getOrCreateSessionContext(message: Message): Promise<Session> {
     if (!this.contextManager[message.sessionId]) {
@@ -138,31 +168,53 @@ export class AgentCore {
     return this.contextManager[message.sessionId].getSession();
   }
 
-  private async promptLLM(message: Message, context: any): Promise<string> {
+  private async promptLLM(
+    message: Message,
+    context: any,
+    streamMode: boolean = false,
+    streamCallback?: (delta: string) => void
+  ): Promise<string> {
     console.log("System prompt===>", this.promptManager.getSystemPrompt());
     const sessionContext = this.contextManager[message.sessionId];
-    // Use the generated context in your prompt
     const prompt = this.promptManager.renderPrompt(
       this.contextManager[message.sessionId],
       this.promptManager.getMessageClassificationPrompt(message.payload.input),
       context
     );
-    //console.log(`Interacting with LLM using prompt: ${prompt}`);
 
     try {
-      const response = await this.llmClient.chat.completions.create({
-        model: this.llmConfig?.model || "gpt-4o",
-        messages: [
-          { role: "system", content: this.promptManager.getSystemPrompt() },
-          { role: "user", content: prompt },
-        ],
-      });
+      let responseContent = "";
 
-      const responseContent = response.choices[0].message.content || "{}";
-      // Update the session context with the decomposition result
-      // this.contextManager[message.sessionId].addToHistory(`User: ${message.payload.input}`);
-      // this.contextManager[message.sessionId].addToHistory(`LLM: ${responseContent}`);
-      this.contextManager[message.sessionId].addMessage(message);
+      if (this.llmConfig?.streamMode && this.streamCallback) {
+        const stream = await this.llmClient.chat.completions.create({
+          model: this.llmConfig?.model || "gpt-4",
+          messages: [
+            { role: "system", content: this.promptManager.getSystemPrompt() },
+            { role: "user", content: prompt },
+          ],
+          stream: true,
+        });
+
+        for await (const chunk of stream) {
+          const delta = chunk.choices[0]?.delta?.content || "";
+          responseContent += delta;
+          this.streamBuffer += delta;
+          this.processStreamBuffer();
+        }
+        // Process any remaining content in the buffer
+        this.processStreamBuffer(true);
+      } else {
+        const response = await this.llmClient.chat.completions.create({
+          model: this.llmConfig?.model || "gpt-4",
+          messages: [
+            { role: "system", content: this.promptManager.getSystemPrompt() },
+            { role: "user", content: prompt },
+          ],
+        });
+        responseContent = response.choices[0].message.content || "{}";
+      }
+
+      sessionContext.addMessage(message);
 
       console.log("LLM response===>", responseContent);
       return responseContent;
