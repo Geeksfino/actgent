@@ -1,7 +1,7 @@
 import { IAgentPromptTemplate } from './IPromptTemplate';
 import { ClassificationTypeConfig } from './IClassifier';
 
-export default class DefaultPromptTemplate<T extends ReadonlyArray<ClassificationTypeConfig>> implements IAgentPromptTemplate {
+export class DefaultPromptTemplate<T extends ReadonlyArray<ClassificationTypeConfig>> implements IAgentPromptTemplate {
   private classificationTypes: T;
 
   constructor(classificationTypes: T) {

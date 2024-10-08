@@ -1,10 +1,10 @@
 {
   "name": "@finogeeks/actgent",
   "version": "1.0.0",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc --build",
+    "build": "tsc",
     "watch": "tsc --watch"
   },
   "dependencies": {
@@ -18,7 +18,7 @@
     "uuidv4": "^6.2.13"
   },
   "devDependencies": {
-    "bun-types": "latest"
+    "bun-types": "^1.1.29"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
