@@ -1,32 +1,31 @@
-# Actgent: An Agent Development Framework
+# Actgent: An Actor-based Agent Development Framework
 
-Actgent is a powerful and flexible framework for developing AI agents. It provides a structured approach to creating, testing, and deploying intelligent agents for various applications.
+Actgent is a powerful and flexible message-driven framework for developing AI agents. It provides a structured approach to creating, testing, and deploying intelligent agents for various applications. Each agent employs an Actor-like mailbox to process incoming messages. 
 
 ## Architecture Overview
 
 Actgent follows a modular architecture designed to facilitate the development of scalable and maintainable agent systems:
 
-1. **Agent Core**: The central component that defines the agent's behavior, decision-making processes, and interaction capabilities.
+1. **Agent Core**: The central component that defines the agent's behavior, decision-making processes, and interaction capabilities. It assembles various components
+   of priority inbox, memory and prompt manager to support an agent's core capabilities
 
 2. **Service Layer**: Provides essential services and utilities that agents can leverage, such as communication protocols, data processing, and external integrations.
 
-3. **Testing Framework**: A robust suite of tools for unit testing, integration testing, and performance evaluation of agents.
-
-4. **Deployment Tools**: Utilities for packaging and deploying agents in various environments, including cloud platforms and edge devices.
+An agent can be instantiated and called in process, in a non-blocking fashion. So if you are building a desktop application or a service that aggregates a few agents, you can treat this framework as a library and make use of it, straight. Alternatively, if you want to build a networked "community" of agents, each of which running as independent service to be called upon remotely, you can enable the network mode of the agents to support various protocols.
 
 ## Key Concepts
 
 Actgent is built around several key concepts that work together to create powerful and flexible agents:
 
-1. **Message**: The basic unit of communication between agents and their environment.
-2. **Session**: Represents an ongoing interaction or conversation.
-3. **SessionContext**: Holds relevant information and state for a specific session.
-4. **Memory**: Allows agents to store and retrieve information across sessions.
-5. **Classifier**: Categorizes incoming messages to determine appropriate responses.
-6. **PromptTemplate**: Defines the structure of prompts sent to language models.
-7. **PromptManager**: Manages and organizes multiple prompt templates.
-8. **AgentCore**: The central logic and decision-making component of an agent.
-9. **Mailbox/PriorityInbox**: Manages incoming messages and prioritizes them for processing.
+1. **Message**: The basic unit of communication between agents and their environment. A message is a structure that contains not only content payload of text or multimedia, but also conversation session context as well as some meta data about the contents. Session and meta data info would be important for relating historical context to construct prompts. They are also important for agents' memory implementation.
+2. **Mailbox/PriorityInbox**: Manages incoming messages and prioritizes them for processing.
+3. **Session**: Represents an ongoing interaction or conversation. Messages with respect to the same topic between an original requester and an agent share the same session id. Sessions can be further related.
+4. **SessionContext**: Holds relevant information and state for a specific session.
+5. **Memory**: Allows agents to store and retrieve information across sessions.
+6. **Classifier**: Categorizes incoming messages to determine appropriate responses. This is a unique and important concept in this framework. Its main purpose is to classify an incoming message for the agent. When an agent receives a message, it is first enqueued to its priority inbox (a mailbox implementation inspired by the Actor model). An event loop monitors the queue and a handler dequeues the messages to process them one by one, each one classified into different types. This classification is done by a large language model, which comprehends a message and classify them based on the agent's criteria instruction. Upon classification, the LLM returns a message type as well as a structural answer (typically a JSON object). The agent is therefore able to receive natural language input, pass it to an LLM to get back a structural output of specific type and call upon the corresponding handler for that particular type to process the structural data. This is a "strong-typing" approach to make the agent powerful
+7. **PromptTemplate**: Defines the structure of prompts sent to language models.
+8. **PromptManager**: Manages and organizes multiple prompt templates.
+9. **AgentCore**: The central logic and decision-making component of an agent, putting all of the above together.
 10. **Agent**: The high-level abstraction that combines all these components into a functional entity.
 
 These components work together to create a flexible and powerful agent system. For example, an Agent uses its Classifier to categorize incoming Messages, then uses the appropriate PromptTemplate to generate a response, which is sent back through the Mailbox.
@@ -43,15 +42,16 @@ Let's walk through the process of creating a custom agent using the Actgent fram
 
 ### Steps to Create a Custom Agent
 
-1. **Extend the BaseAgent class**: Create a new class that extends BaseAgent, specifying the schema types, classifier, and prompt template.
+1. **Extend the BaseAgent class**: Create a new class that extends BaseAgent, specifying the schema types, classifier, and prompt template. In your class, you can choose different Classifier and PromptTemplate implementations but generally the default implementation will suffice
 
-2. **Define schema types**: Create an array of objects that define the different message classifications your agent will handle. Each object should include a name, prompt, and schema.
+2. **Define schema types**: Create an array of objects that define the different message classifications your agent will handle. Each object should include a name, prompt, and schema. Think about what your agent does, what it will ask a large language model to respond. Sort out the types of answers it expects the LLM to reply. This schema is basically the mapping of an instruction prompt and an expected response template in JSON format. The LLM will respond with data filled 
 
 3. **Implement the constructor**: Pass the necessary configurations to the superclass constructor.
 
 4. **Override classifier and prompt template methods**: Implement the useClassifierClass and usePromptTemplateClass methods to specify custom or default implementations.
 
-### Example: TestAgent
+
+#### Example: TestAgent
 
 Here's a simplified version of the TestAgent implementation:
 
@@ -93,7 +93,7 @@ export class TestAgent extends BaseAgent<SchemaTypes, DefaultClassifier<SchemaTy
 }
 ```
 
-### Example: SoftwareSpecWriterAgent
+#### Example: SoftwareSpecWriterAgent
 
 To further illustrate the flexibility of the Actgent framework, let's create a SoftwareSpecWriterAgent:
 
@@ -137,6 +137,43 @@ export class SoftwareSpecWriterAgent extends BaseAgent<SpecWriterSchemaTypes, De
 ```
 
 This SoftwareSpecWriterAgent example demonstrates how easy it is to create a specialized agent for a specific task, such as writing software specifications. By defining custom schema types and extending the BaseAgent class, you can quickly create agents tailored to your specific needs.
+
+### How to use an agent 
+
+```
+const llmApiKey = process.env.LLM_API_KEY || 'sk-<some key>';
+const llmProviderUrl = process.env.LLM_PROVIDER_URL || 'https://api.deepseek.com/v1';
+const llmModel = process.env.LLM_MODEL || 'deepseek-chat';
+
+console.log("llm provider url: " + llmProviderUrl);
+console.log("llm model: " + llmModel);
+
+const svcConfig = {
+  llmConfig: {
+    apiKey: llmApiKey,
+    model: llmModel,
+    baseURL: llmProviderUrl,
+    streamMode: true,
+  }
+};
+
+const specWriterAgent = new SpecWriterAgent(svcConfig);
+specWriterAgent.registerStreamCallback((delta: string) => {
+  console.log(delta);
+});
+specWriterAgent.run();
+
+const session = await specWriterAgent.createSession("owner", 'Create a stock chart mini-program');
+
+// Handler function to print out data received
+const handler = (data: InferClassificationUnion<readonly ClassificationTypeConfig[]>): void => {
+    console.log("Received event from session:", data);
+};
+
+// Pass the handler to the session
+session.onEvent(handler);
+
+```
 
 ## Installation and Running Tests
 
