@@ -45,6 +45,22 @@ export abstract class BaseAgent<
     this.core.addLLMResponseHandler(this.handleLLMResponse.bind(this));
   }
 
+  public getName(): string {
+    return this.core.name;
+  }
+
+  public getRole(): string {
+    return this.core.role;
+  }
+
+  public getGoal(): string {
+    return this.core.goal;
+  }
+
+  public getCapabilities(): string {
+    return this.core.capabilities;
+  } 
+
   public async run() {
     this.core.start();
   }

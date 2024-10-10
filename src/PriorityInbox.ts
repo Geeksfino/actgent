@@ -35,7 +35,7 @@ export class PriorityInbox {
       }
     
       private async checkPriorityInbox(): Promise<string> {
-        console.log('Checking priority inbox...');
+        //console.log('Checking priority inbox...');
         return new Promise((resolve) => {
           setTimeout(() => {
             resolve('Inbox checked');

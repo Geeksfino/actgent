@@ -1,0 +1,10 @@
+{
+  "apis": [
+    "API for fetching product categories and search functionality",
+    "API for retrieving product details, including ratings and reviews"
+  ],
+  "databases": [
+    "MongoDB"
+  ],
+  "codeSnippet": "const express = require('express');\nconst mongoose = require('mongoose');\nconst app = express();\n\n// MongoDB connection\nmongoose.connect('mongodb://localhost:27017/yourDatabaseName', { useNewUrlParser: true, useUnifiedTopology: true });\n\n// Sample API for fetching product categories\napp.get('/api/categories', async (req, res) => {\n  try {\n    const categories = await Category.find();\n    res.json(categories);\n  } catch (error) {\n    res.status(500).json({ message: error.message });\n  }\n});\n\n// Sample API for retrieving product details\napp.get('/api/products/:id', async (req, res) => {\n  try {\n    const product = await Product.findById(req.params.id).populate('ratings reviews');\n    res.json(product);\n  } catch (error) {\n    res.status(500).json({ message: error.message });\n  }\n});\n\napp.listen(3000, () => {\n  console.log('Server started on port 3000');\n});"
+}
