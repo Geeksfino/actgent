@@ -1,7 +1,7 @@
-import { ClassificationTypeConfig } from '../../src/IClassifier';
-import { InferClassificationUnion } from '../../src/TypeInference';
-import { AgentServiceConfigurator } from '../../src/AgentServiceConfigurator';
-import { AgentBuilder } from '../../src/AgentBuilder';
+import { ClassificationTypeConfig } from '@finogeeks/actgent';
+import { InferClassificationUnion } from '@finogeeks/actgent';
+import { AgentServiceConfigurator } from '@finogeeks/actgent';
+import { AgentBuilder } from '@finogeeks/actgent';
 
 const coreConfig = {
   name: "BaseAgent",

@@ -45,10 +45,10 @@ Let's walk through the process of creating a custom agent using the Actgent fram
 AgentBuilder is a utility class that help to make custom agent creation easy. Pass to its build method a target agent's class name and type schema definition, and a subclass of BaseAgent will be dynamically created, ready to be used.
 
 ```
-import { ClassificationTypeConfig } from '../../src/IClassifier';
-import { InferClassificationUnion } from '../../src/TypeInference';
-import { AgentServiceConfigurator } from '../../src/AgentServiceConfigurator';
-import { AgentBuilder } from '../../src/AgentBuilder';
+import { ClassificationTypeConfig } from '@finogeeks/actgent';
+import { InferClassificationUnion } from '@finogeeks/actgent';
+import { AgentServiceConfigurator } from '@finogeeks/actgent';
+import { AgentBuilder } from '@finogeeks/actgent';
 
 const coreConfig = {
   name: "BaseAgent",

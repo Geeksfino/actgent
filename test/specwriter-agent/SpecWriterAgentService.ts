@@ -1,7 +1,7 @@
-import { ClassificationTypeConfig } from '../../src/IClassifier';
-import { InferClassificationUnion } from '../../src/TypeInference';
+import { ClassificationTypeConfig } from '@finogeeks/actgent';
+import { InferClassificationUnion } from '@finogeeks/actgent';
 import { SpecWriterAgent } from './SpecWriterAgent';
-import { AgentServiceConfigurator } from '../../src/AgentServiceConfigurator';
+import { AgentServiceConfigurator } from '@finogeeks/actgent';
 
 // make sure to set the correct agent configuration in .agent.env file - rename .agent.env.example to .agent.env and edit as needed
 const svcConfig = AgentServiceConfigurator.getAgentConfiguration("test/specwriter-agent");

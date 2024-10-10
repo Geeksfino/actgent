@@ -2,7 +2,8 @@
 export { AgentCore } from './AgentCore';
 export { BaseAgent } from './BaseAgent';
 export { AgentRegistry } from './AgentRegistry';
-
+export { AgentBuilder } from './AgentBuilder';
+export { AgentServiceConfigurator } from './AgentServiceConfigurator';
 // Classifiers
 export { AbstractClassifier } from './AbstractClassifier';
 export { DefaultClassifier } from './DefaultClassifier';
