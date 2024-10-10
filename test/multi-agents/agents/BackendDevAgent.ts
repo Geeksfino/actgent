@@ -1,5 +1,4 @@
-import { ClassificationTypeConfig } from '@finogeeks/actgent';
-import { createAgent } from '../utils';
+import { ClassificationTypeConfig, AgentBuilder, AgentServiceConfigurator, AgentCoreConfig } from '@finogeeks/actgent';
 
 const backendDevTypes: ClassificationTypeConfig[] = [
     {
@@ -15,10 +14,13 @@ const backendDevTypes: ClassificationTypeConfig[] = [
     },
 ];
 
-export const { agent: backendDevAgent, name: backendDevName } = createAgent(
-    "BackendDevAgent",
-    "Backend Developer",
-    "Implement the backend",
-    "Backend development, API implementation",
-    backendDevTypes
-);
+const backendDevCoreConfig: AgentCoreConfig = {
+    name: "BackendDevAgent",
+    role: "Backend Developer",
+    goal: "Implement the backend",
+    capabilities: "Backend development, API implementation",
+};
+
+const svcConfig = AgentServiceConfigurator.getAgentConfiguration("test/multi-agents");
+const agentBuilder = new AgentBuilder(backendDevCoreConfig, svcConfig);
+export const backendDevAgent = agentBuilder.build("BackendDevAgent", backendDevTypes);

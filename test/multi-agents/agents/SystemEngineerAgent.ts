@@ -1,5 +1,4 @@
-import { ClassificationTypeConfig } from '@finogeeks/actgent';
-import { createAgent } from '../utils';
+import { ClassificationTypeConfig, AgentBuilder, AgentServiceConfigurator, AgentCoreConfig } from '@finogeeks/actgent';
 
 const systemEngineerTypes: ClassificationTypeConfig[] = [
     {
@@ -15,10 +14,13 @@ const systemEngineerTypes: ClassificationTypeConfig[] = [
     },
 ];
 
-export const { agent: systemEngineerAgent, name: systemEngineerName } = createAgent(
-    "SystemEngineerAgent",
-    "System Engineer",
-    "Plan and execute deployment",
-    "Deployment planning, system administration",
-    systemEngineerTypes
-);
+const systemEngineerCoreConfig: AgentCoreConfig = {
+    name: "SystemEngineerAgent",
+    role: "System Engineer",
+    goal: "Plan and execute deployment",
+    capabilities: "Deployment planning, system administration",
+};
+
+const svcConfig = AgentServiceConfigurator.getAgentConfiguration("test/multi-agents");
+const agentBuilder = new AgentBuilder(systemEngineerCoreConfig, svcConfig);
+export const systemEngineerAgent = agentBuilder.build("SystemEngineerAgent", systemEngineerTypes);

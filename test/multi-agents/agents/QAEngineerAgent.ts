@@ -1,5 +1,4 @@
-import { ClassificationTypeConfig } from '@finogeeks/actgent';
-import { createAgent } from '../utils';
+import { ClassificationTypeConfig, AgentBuilder, AgentServiceConfigurator, AgentCoreConfig } from '@finogeeks/actgent';
 
 const qaEngineerTypes: ClassificationTypeConfig[] = [
     {
@@ -15,10 +14,13 @@ const qaEngineerTypes: ClassificationTypeConfig[] = [
     },
 ];
 
-export const { agent: qaEngineerAgent, name: qaEngineerName } = createAgent(
-    "QAEngineerAgent",
-    "QA Engineer",
-    "Create and execute test plans",
-    "Quality assurance, test planning",
-    qaEngineerTypes
-);
+const qaEngineerCoreConfig: AgentCoreConfig = {
+    name: "QAEngineerAgent",
+    role: "QA Engineer",
+    goal: "Create and execute test plans",
+    capabilities: "Quality assurance, test planning",
+};
+
+const svcConfig = AgentServiceConfigurator.getAgentConfiguration("test/multi-agents");
+const agentBuilder = new AgentBuilder(qaEngineerCoreConfig, svcConfig);
+export const qaEngineerAgent = agentBuilder.build("QAEngineerAgent", qaEngineerTypes);

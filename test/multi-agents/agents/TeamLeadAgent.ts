@@ -1,5 +1,4 @@
-import { ClassificationTypeConfig } from '@finogeeks/actgent';
-import { createAgent } from '../utils';
+import { ClassificationTypeConfig, AgentBuilder, AgentServiceConfigurator, AgentCoreConfig } from '@finogeeks/actgent';
 
 const teamLeadTypes: ClassificationTypeConfig[] = [
     {
@@ -16,10 +15,13 @@ const teamLeadTypes: ClassificationTypeConfig[] = [
     },
 ];
 
-export const { agent: teamLeadAgent, name: teamLeadName } = createAgent(
-    "TeamLeadAgent",
-    "Team Lead",
-    "Coordinate the team and assign tasks",
-    "Task assignment, project coordination",
-    teamLeadTypes
-);
+const teamLeadCoreConfig: AgentCoreConfig = {
+    name: "TeamLeadAgent",
+    role: "Team Lead",
+    goal: "Coordinate the team and assign tasks",
+    capabilities: "Task assignment, project coordination",
+};
+
+const svcConfig = AgentServiceConfigurator.getAgentConfiguration("test/multi-agents");
+const agentBuilder = new AgentBuilder(teamLeadCoreConfig, svcConfig);
+export const teamLeadAgent = agentBuilder.build("TeamLeadAgent", teamLeadTypes);

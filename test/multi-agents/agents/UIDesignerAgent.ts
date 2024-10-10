@@ -1,5 +1,4 @@
-import { ClassificationTypeConfig } from '@finogeeks/actgent';
-import { createAgent } from '../utils';
+import { ClassificationTypeConfig, AgentBuilder, AgentServiceConfigurator, AgentCoreConfig } from '@finogeeks/actgent';
 
 const uiDesignerTypes: ClassificationTypeConfig[] = [
     {
@@ -15,10 +14,13 @@ const uiDesignerTypes: ClassificationTypeConfig[] = [
     },
 ];
 
-export const { agent: uiDesignerAgent, name: uiDesignerName } = createAgent(
-    "UIDesignerAgent",
-    "UI/UX Designer",
-    "Create UI/UX designs",
-    "UI/UX design, wireframing",
-    uiDesignerTypes
-);
+const uiDesignerCoreConfig: AgentCoreConfig = {
+    name: "UIDesignerAgent",
+    role: "UI/UX Designer",
+    goal: "Create UI/UX designs",
+    capabilities: "UI/UX design, wireframing",
+};
+
+const svcConfig = AgentServiceConfigurator.getAgentConfiguration("test/multi-agents");
+const agentBuilder = new AgentBuilder(uiDesignerCoreConfig, svcConfig);
+export const uiDesignerAgent = agentBuilder.build("UIDesignerAgent", uiDesignerTypes);

@@ -1,5 +1,4 @@
-import { ClassificationTypeConfig } from '@finogeeks/actgent';
-import { createAgent } from '../utils';
+import { ClassificationTypeConfig, AgentBuilder, AgentServiceConfigurator, AgentCoreConfig } from '@finogeeks/actgent';
 
 const architectTypes: ClassificationTypeConfig[] = [
     {
@@ -16,10 +15,13 @@ const architectTypes: ClassificationTypeConfig[] = [
     },
 ];
 
-export const { agent: architectAgent, name: architectName } = createAgent(
-    "ArchitectAgent",
-    "System Architect",
-    "Design the system architecture",
-    "System design, technology stack selection",
-    architectTypes
-);
+const architectCoreConfig: AgentCoreConfig = {
+    name: "ArchitectAgent",
+    role: "System Architect",
+    goal: "Design the system architecture",
+    capabilities: "System design, technology stack selection",
+};
+
+const svcConfig = AgentServiceConfigurator.getAgentConfiguration("test/multi-agents");
+const agentBuilder = new AgentBuilder(architectCoreConfig, svcConfig);
+export const architectAgent = agentBuilder.build("ArchitectAgent", architectTypes);

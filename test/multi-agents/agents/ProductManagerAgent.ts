@@ -1,5 +1,4 @@
-import { ClassificationTypeConfig } from '@finogeeks/actgent';
-import { createAgent } from '../utils';
+import { ClassificationTypeConfig, AgentBuilder, AgentServiceConfigurator, AgentCoreConfig } from '@finogeeks/actgent';
 
 const productManagerTypes: ClassificationTypeConfig[] = [
     {
@@ -17,10 +16,13 @@ const productManagerTypes: ClassificationTypeConfig[] = [
     },
 ];
 
-export const { agent: productManagerAgent, name: productManagerName } = createAgent(
-    "ProductManagerAgent",
-    "Product Manager",
-    "Analyze requirements and create user stories",
-    "Requirements analysis, user story creation",
-    productManagerTypes
-);
+const productManagerCoreConfig: AgentCoreConfig = {
+    name: "ProductManagerAgent",
+    role: "Product Manager",
+    goal: "Analyze requirements and create user stories",
+    capabilities: "Requirements analysis, user story creation",
+};
+
+const svcConfig = AgentServiceConfigurator.getAgentConfiguration("test/multi-agents");
+const agentBuilder = new AgentBuilder(productManagerCoreConfig, svcConfig);
+export const productManagerAgent = agentBuilder.build("ProductManagerAgent", productManagerTypes);
