@@ -40,7 +40,93 @@ This allows agent developers to define prompts and expect corresponding outputs 
 
 Let's walk through the process of creating a custom agent using the Actgent framework. We'll use the TestAgent as our guide and then create a new SoftwareSpecWriterAgent to illustrate the flexibility of the framework.
 
+### Dynamically create a custom agent using AgentBuilder
+
+AgentBuilder is a utility class that help to make custom agent creation easy. Pass to its build method a target agent's class name and type schema definition, and a subclass of BaseAgent will be dynamically created, ready to be used.
+
+```
+import { ClassificationTypeConfig } from '../../src/IClassifier';
+import { InferClassificationUnion } from '../../src/TypeInference';
+import { AgentServiceConfigurator } from '../../src/AgentServiceConfigurator';
+import { AgentBuilder } from '../../src/AgentBuilder';
+
+const coreConfig = {
+  name: "BaseAgent",
+  role: "Software Product Manager",
+  goal: 'Create software specification',
+  capabilities: 'assist in testing',
+};
+
+const svcConfig = AgentServiceConfigurator.getAgentConfiguration("test/test-agent");
+console.log("service config: " + JSON.stringify(svcConfig));
+
+// Define the schema types
+const schemaTypes = [
+  {
+    name: "SIMPLE_QUERY",
+    prompt: "A straightforward question that can be answered directly.",
+    schema: {
+      answer: "<DIRECT_ANSWER_TO_QUERY>",
+    },
+  },
+  {
+    name: "COMPLEX_TASK",
+    prompt: "A task that requires multiple steps or extended processing.",
+    schema: {
+      actionPlan: {
+        task: "<MAIN_OBJECTIVE>",
+        subtasks: ["<SUBTASK_1>", "<SUBTASK_2>", "..."],
+      },
+    },
+  },
+  {
+    name: "CLARIFICATION_NEEDED",
+    prompt: "The message needs clarification.",
+    schema: {
+      questions: ["<QUESTION_1>", "<QUESTION_2>", "..."],
+    },
+  },
+  {
+    name: "COMMAND",
+    prompt: "An instruction to perform a specific action.",
+    schema: {
+      command: {
+        action: "<SPECIFIC_ACTION>",
+        parameters: {
+          "<PARAM_1>": "<VALUE_1>",
+          "<PARAM_2>": "<VALUE_2>",
+          "...": "...",
+        },
+        expectedOutcome: "<DESCRIPTION_OF_EXPECTED_RESULT>",
+      },
+    },
+  },
+];
+
+// Use AgentBuilder to create the agent
+const agentBuilder = new AgentBuilder(coreConfig, svcConfig);
+const testAgent = agentBuilder.build("TestAgent", schemaTypes);
+
+testAgent.registerStreamCallback((delta: string) => {
+  console.log(delta);
+});
+testAgent.run();
+
+const session = await testAgent.createSession("owner", 'How to create web site?');
+
+// Handler function to print out data received
+const handler = (data: InferClassificationUnion<readonly ClassificationTypeConfig[]>): void => {
+  console.log("Received event from session:", data);
+};
+
+// Pass the handler to the session
+session.onEvent(handler);
+```
+
 ### Steps to Create a Custom Agent
+
+Use the AgentBuilder class for easy creation of agents. But in this section we "manually" construct agents without using the AgentBuilder, just to demonstrate
+the procedure of creating an agent anatomically. It is highly recommended to use the AgentBuilder instead, however.
 
 1. **Extend the BaseAgent class**: Create a new class that extends BaseAgent, specifying the schema types, classifier, and prompt template. In your class, you can choose different Classifier and PromptTemplate implementations but generally the default implementation will suffice
 
