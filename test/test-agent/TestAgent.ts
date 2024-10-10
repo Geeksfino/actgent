@@ -1,8 +1,8 @@
-import { BaseAgent } from '../src/BaseAgent';
-import { AgentCoreConfig, AgentServiceConfig } from '../src/interfaces';
-import { DefaultPromptTemplate } from '../src/DefaultPromptTemplate';
-import { DefaultClassifier } from '../src/DefaultClassifier';
-import { ClassificationTypeConfig } from '../src/IClassifier';
+import { BaseAgent } from "../../src/BaseAgent";
+import { AgentCoreConfig, AgentServiceConfig } from "../../src/interfaces";
+import { DefaultPromptTemplate } from "../../src/DefaultPromptTemplate";
+import { DefaultClassifier } from "../../src/DefaultClassifier";
+import { ClassificationTypeConfig } from "../../src/IClassifier";
 
 const defaultTypes = [
   {

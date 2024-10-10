@@ -175,4 +175,6 @@ dist
 .DS_Store
 bun.lockb
 agent.db
+.agent.env
+.env
 dist/
