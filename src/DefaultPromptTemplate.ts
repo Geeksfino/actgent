@@ -5,7 +5,7 @@ export class DefaultPromptTemplate<T extends ReadonlyArray<ClassificationTypeCon
   private classificationTypes: T;
 
   constructor(classificationTypes: T) {
-    console.log('DefaultPromptTemplate constructor');
+    //console.log('DefaultPromptTemplate constructor');
     this.classificationTypes = classificationTypes;
   }
 

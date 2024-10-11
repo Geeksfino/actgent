@@ -15,7 +15,8 @@ export interface AgentServiceConfig {
   llmConfig?: LLMConfig;                  // Configuration for large language model interaction
   communicationConfig?: CommunicationConfig; // Communication options (NATS, HTTP, gRPC)
   decisionInterval?: string;              // Interval for decision-making loop (used by Bree or other schedulers)
-  proactiveInterval?: string;             // Interval for scheduling proactive actions
+  proactiveInterval?: string;            // Interval for proactive loop (used by Bree or other schedulers)
+  loggingConfig?: LoggingConfig;          // Configuration for logging
 }
 
 export interface LLMConfig {
@@ -51,4 +52,8 @@ export interface InboxConfig {
 export interface PromptTemplate {
   id: string;
   template: string;
+}
+
+export interface LoggingConfig {
+  destination?: string;
 }

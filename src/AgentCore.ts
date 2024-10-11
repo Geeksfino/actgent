@@ -13,11 +13,17 @@ import { OpenAI } from "openai";
 import { IAgentPromptTemplate } from "./IPromptTemplate";
 import { Session } from "./Session";
 import { SessionContext } from "./SessionContext";
+import fs from 'fs';
+import path from 'path';
 
 interface StorageConfig {
   shortTerm?: MemoryStorage<any>;
   longTerm?: MemoryStorage<any>;
   working?: MemoryStorage<any>;
+}
+
+interface LoggingConfig {
+  destination?: string;
 }
 
 export class AgentCore {
@@ -35,12 +41,14 @@ export class AgentCore {
   private llmResponseHandler!: (response: any, session: Session) => void;
   private streamCallback?: (delta: string) => void;
   private streamBuffer: string = '';
+  private logger: (message: string) => void;
 
   constructor(
     config: AgentCoreConfig,
     llmConfig: LLMConfig,
     promptTemplate: IAgentPromptTemplate,
-    storageConfig?: StorageConfig
+    storageConfig?: StorageConfig,
+    loggingConfig?: LoggingConfig
   ) {
     this.id = ""; // No id until registered
     this.name = config.name;
@@ -77,6 +85,9 @@ export class AgentCore {
     this.promptManager.setGoal(this.goal);
     this.promptManager.setRole(this.role);
     this.promptManager.setCapabilities(this.capabilities);
+
+    // Initialize logger
+    this.logger = this.initLogger(loggingConfig);
   }
 
   public getCapabilities(): string {
@@ -137,7 +148,7 @@ export class AgentCore {
   }
 
   private async processMessage(message: Message): Promise<void> {
-    console.log("Processing message:", message);
+    this.log(`Processing message: ${JSON.stringify(message)}`);
     const sessionContext = this.contextManager[message.sessionId];
     
     // Process message in memory
@@ -174,7 +185,7 @@ export class AgentCore {
     streamMode: boolean = false,
     streamCallback?: (delta: string) => void
   ): Promise<string> {
-    console.log("System prompt===>", this.promptManager.getSystemPrompt());
+    this.log(`System prompt: ${this.promptManager.getSystemPrompt()}`);
     const sessionContext = this.contextManager[message.sessionId];
     const prompt = this.promptManager.renderPrompt(
       this.contextManager[message.sessionId],
@@ -219,7 +230,7 @@ export class AgentCore {
       console.log("LLM response===>", responseContent);
       return responseContent;
     } catch (error) {
-      console.error("Error interacting with LLM:", error);
+      this.log(`Error interacting with LLM: ${error}`);
       throw error;
     }
   }
@@ -275,5 +286,27 @@ export class AgentCore {
       longTermStorage,
       workingMemoryStorage
     );
+  }
+
+  private initLogger(loggingConfig?: LoggingConfig): (message: string) => void {
+    if (loggingConfig?.destination) {
+      const logDir = path.dirname(loggingConfig.destination);
+      if (!fs.existsSync(logDir)) {
+        fs.mkdirSync(logDir, { recursive: true });
+      }
+      return (message: string) => {
+        fs.appendFileSync(loggingConfig.destination!, `${new Date().toISOString()} - ${message}\n`);
+      };
+    } else {
+      return console.log;
+    }
+  }
+
+  public log(message: string): void {
+    this.logger(`[${this.name}] ${message}`);
+  }
+
+  public setLoggingConfig(loggingConfig: LoggingConfig): void {
+    this.logger = this.initLogger(loggingConfig);
   }
 }

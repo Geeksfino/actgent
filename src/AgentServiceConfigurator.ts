@@ -20,7 +20,7 @@ export class AgentServiceConfigurator {
 
   private constructor(basePath: string) {
     this.basePath = basePath;
-    console.log("base path: " + this.basePath);
+    //console.log("base path: " + this.basePath);
   } 
 
   public static getAgentConfiguration(basePath?: string, envFile: string = ".agent.env"): AgentServiceConfig {
@@ -38,7 +38,7 @@ export class AgentServiceConfigurator {
       : undefined;
     if (envPath && fs.existsSync(envPath)) {
       dotenv.config({ path: envPath });
-      console.log(`Agent service configuration loaded from ${envPath}`);
+      //console.log(`Agent service configuration loaded from ${envPath}`);
 
       configurator.agentServiceConf = {
         llmConfig: {

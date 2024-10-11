@@ -1,6 +1,8 @@
 import { InferClassificationUnion, ClassificationTypeConfig } from '@finogeeks/actgent';
 import fs from 'fs';
 import path from 'path';
+import readline from 'readline';
+import os from 'os';
 import { projectsDir } from './utils';
 
 // Import all agents
@@ -13,12 +15,32 @@ import { backendDevAgent } from './agents/BackendDevAgent';
 import { qaEngineerAgent } from './agents/QAEngineerAgent';
 import { systemEngineerAgent } from './agents/SystemEngineerAgent';
 
+// Add this import
+import { LoggingConfig } from '../../src/interfaces';
+
+// Function to expand tilde in path
+function expandTilde(filePath: string): string {
+    if (filePath[0] === '~') {
+        return path.join(os.homedir(), filePath.slice(1));
+    }
+    return filePath;
+}
+
 // Main program
 async function main() {
-    const userInput = process.argv[2];
-    if (!userInput) {
-        console.error("Please provide a user requirement as a command-line argument.");
+    if (process.argv.length < 3) {
+        console.error("Usage: bun run test/multi-agents/team.js <workarea_directory>");
+        console.error("Example: bun run test/multi-agents/team.js ~/workarea");
         process.exit(1);
+    }
+
+    const baseDir = process.cwd();
+    const workareaDir = expandTilde(process.argv[2]);
+
+    // Ensure workarea directory exists
+    if (!fs.existsSync(workareaDir)) {
+        console.log(`Creating workarea directory: ${workareaDir}`);
+        fs.mkdirSync(workareaDir, { recursive: true });
     }
 
     console.log("Starting the software development process...");
@@ -36,20 +58,62 @@ async function main() {
     ];
 
     for (const agent of agents) {
+        const logFile = path.join(workareaDir, `${agent.getName()}.log`);
+        
+        // Create a loggingConfig for each agent
+        const loggingConfig: LoggingConfig = {
+            destination: logFile
+        };
+
+        // Pass the loggingConfig to the agent's run method
+        await agent.run(loggingConfig);
+
         agent.registerStreamCallback((delta: string) => {
+            fs.appendFileSync(logFile, `${delta}\n`);
             console.log(`${agent.getName()} output:`, delta);
         });
-        await agent.run();
     }
 
-    // Team Lead initiates the process
-    const teamLeadSession = await teamLeadAgent.createSession("user", userInput);
-    teamLeadSession.onEvent((data: InferClassificationUnion<readonly ClassificationTypeConfig[]>) => {
-        if (data.messageType === "TASK_ASSIGNMENT") {
-            console.log("Team Lead has assigned tasks:", data.assignments);
-            handleProductManagerTask(data.assignments.find(a => a.role === "Product Manager")?.task || "");
-        }
+    // Create readline interface for user input
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
     });
+
+    // Function to get user input
+    function getUserInput(prompt: string): Promise<string> {
+        return new Promise((resolve) => {
+            rl.question(prompt, (answer) => {
+                resolve(answer);
+            });
+        });
+    }
+
+    // Main chat loop
+    async function chatLoop() {
+        while (true) {
+            const userInput = await getUserInput("\nEnter your requirement (or '/exit' to quit): ");
+            if (userInput.toLowerCase() === '/exit') {
+                break;
+            }
+            await processUserInput(userInput);
+        }
+        rl.close();
+    }
+
+    // Process user input
+    async function processUserInput(userInput: string) {
+        console.log("Processing your input...");
+
+        // Team Lead initiates the process
+        const teamLeadSession = await teamLeadAgent.createSession("user", userInput);
+        teamLeadSession.onEvent((data: InferClassificationUnion<readonly ClassificationTypeConfig[]>) => {
+            if (data.messageType === "TASK_ASSIGNMENT") {
+                console.log("Team Lead has assigned tasks:", data.assignments);
+                handleProductManagerTask(data.assignments.find(a => a.role === "Product Manager")?.task || "");
+            }
+        });
+    }
 
     // Product Manager analyzes requirements
     async function handleProductManagerTask(task: string) {
@@ -137,20 +201,23 @@ async function main() {
 
     // Helper functions to save artifacts
     function saveFrontendCode(implementation: any) {
-        fs.writeFileSync(path.join(projectsDir, 'frontend_code.json'), JSON.stringify(implementation, null, 2));
+        fs.writeFileSync(path.join(workareaDir, 'frontend_code.json'), JSON.stringify(implementation, null, 2));
     }
 
     function saveBackendCode(implementation: any) {
-        fs.writeFileSync(path.join(projectsDir, 'backend_code.json'), JSON.stringify(implementation, null, 2));
+        fs.writeFileSync(path.join(workareaDir, 'backend_code.json'), JSON.stringify(implementation, null, 2));
     }
 
     function saveTestPlan(testPlan: any) {
-        fs.writeFileSync(path.join(projectsDir, 'test_plan.json'), JSON.stringify(testPlan, null, 2));
+        fs.writeFileSync(path.join(workareaDir, 'test_plan.json'), JSON.stringify(testPlan, null, 2));
     }
 
     function saveDeploymentPlan(deploymentPlan: any) {
-        fs.writeFileSync(path.join(projectsDir, 'deployment_plan.json'), JSON.stringify(deploymentPlan, null, 2));
+        fs.writeFileSync(path.join(workareaDir, 'deployment_plan.json'), JSON.stringify(deploymentPlan, null, 2));
     }
+
+    // Start the chat loop
+    await chatLoop();
 }
 
 // Run the main program

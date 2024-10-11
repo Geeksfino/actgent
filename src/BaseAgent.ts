@@ -7,6 +7,7 @@ import { ClassificationTypeConfig, IClassifier} from './IClassifier';
 import { Message } from './Message';
 import { InferClassificationUnion } from './TypeInference';  
 import { Session } from './Session';
+import { LoggingConfig } from './interfaces';
 
 const defaultCommunicationConfig: CommunicationConfig = {};
 
@@ -31,17 +32,27 @@ export abstract class BaseAgent<
     return new ClassToInstantiate(classificationTypes);
   }
 
-  constructor(core_config: AgentCoreConfig, svc_config: AgentServiceConfig, schemaTypes: T) {
-    this.init(core_config, svc_config, schemaTypes);
+  constructor(
+    core_config: AgentCoreConfig,
+    svc_config: AgentServiceConfig,
+    schemaTypes: T,
+    loggingConfig?: LoggingConfig
+  ) {
+    this.init(core_config, svc_config, schemaTypes, loggingConfig);
   }
 
-  protected init(core_config: AgentCoreConfig, svc_config: AgentServiceConfig, schemaTypes: T) {
+  protected init(
+    core_config: AgentCoreConfig,
+    svc_config: AgentServiceConfig,
+    schemaTypes: T,
+    loggingConfig?: LoggingConfig
+  ) {
     const llmConfig = svc_config.llmConfig;
 
     this.classifier = this.createClassifier(schemaTypes);
     const promptTemplate = this.createPromptTemplate(schemaTypes);
 
-    this.core = new AgentCore(core_config, llmConfig!, promptTemplate);
+    this.core = new AgentCore(core_config, llmConfig!, promptTemplate, undefined, loggingConfig);
     this.core.addLLMResponseHandler(this.handleLLMResponse.bind(this));
   }
 
@@ -61,7 +72,14 @@ export abstract class BaseAgent<
     return this.core.capabilities;
   } 
 
-  public async run() {
+  public log(message: string): void {
+    this.core.log(message);
+  }
+
+  public async run(loggingConfig?: LoggingConfig) {
+    if (loggingConfig) {
+        this.core.setLoggingConfig(loggingConfig);
+    }
     this.core.start();
   }
 
@@ -76,7 +94,7 @@ export abstract class BaseAgent<
       try {
         parsedResponse = JSON.parse(response);
       } catch (error) {
-        console.error("Failed to parse response string:", error);
+        this.core.log(`Failed to parse response string: ${error}`);
         return;
       }
     } else {

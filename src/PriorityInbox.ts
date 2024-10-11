@@ -21,7 +21,7 @@ export class PriorityInbox {
     }
 
     public init(processMessage: (message: Message) => Promise<void>): void {
-        console.log('initializing priority inbox');
+        //console.log('initializing priority inbox');
         this.processMessage = processMessage;
 
         // Set up RxJS interval to check the inbox
