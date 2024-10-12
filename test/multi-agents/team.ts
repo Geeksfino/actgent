@@ -10,7 +10,7 @@ import os from "os";
 import { deserializeMiniProgram } from "./utils";
 // Import all agents
 // import { projectManagerAgent } from './agents/ProjectManagerAgent';
-// import { productManagerAgent } from './agents/ProductManagerAgent';
+import { productManagerAgent } from './agents/ProductManagerAgent';
 import { specWriterAgent } from "./agents/SpecWriterAgent";
 // import { architectAgent } from './agents/ArchitectAgent';
 // import { uiDesignerAgent } from './agents/UIDesignerAgent';
@@ -64,8 +64,20 @@ async function orchestrateWorkflow(desc: string, projectDir: string) {
   console.log("Starting the software development process...");
 
   // Step 1: Product Manager creates functional specification
-  const swSession = await specWriterAgent.createSession("Orchestrator", desc);
+  const pmSession = await productManagerAgent.createSession("Orchestrator", desc);
+  const productPlan = await new Promise<any>((resolve) => {
+    pmSession.onEvent((data) => {
+      if (data.messageType === "PRODUCT_PLAN") {
+        resolve(data.plan);
+      } else if (data.messageType === "CLARIFICATION_NEEDED") {
+        //console.log("Clarification needed:", data.questions);
+        promptForClarification(data.questions, pmSession).then(resolve);
+      }
+    });
+  });
+  console.log("Product plan created:", JSON.stringify(productPlan, null, 2));
 
+  const swSession = await specWriterAgent.createSession("Orchestrator", JSON.stringify(productPlan));
   const functionalSpec = await new Promise<any>((resolve) => {
     swSession.onEvent((data) => {
       //console.log("Received event:", data);
@@ -117,6 +129,9 @@ async function orchestrateWorkflow(desc: string, projectDir: string) {
       frontendSession.onEvent((data) => {
           if (data.messageType === "MINIPROGRAM_CODE_GENERATION") {
             resolve(data.generatedCode);
+          } else if (data.messageType === "CLARIFICATION_NEEDED") {
+            //console.log("Clarification needed:", data.questions);
+            promptForClarification(data.questions, frontendSession).then(resolve);
           }
       });
     });
@@ -228,7 +243,7 @@ async function main() {
   const agents = [
     specWriterAgent,
     // projectManagerAgent,
-    // productManagerAgent,
+    productManagerAgent,
     // architectAgent,
     // uiDesignerAgent,
     frontendDevAgent,

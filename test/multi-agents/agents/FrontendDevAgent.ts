@@ -3,7 +3,7 @@ import { ClassificationTypeConfig, AgentBuilder, AgentServiceConfigurator, Agent
 const frontendDevTypes: ClassificationTypeConfig[] = [
     {
         name: "MINIPROGRAM_CODE_GENERATION",
-        description: "Implementation of a WeChat mini-program based on the given specification.",
+        description: "A fully completed implementation of a WeChat mini-program based on the given specification.",
         schema: {
             generatedCode: {
                 name: "<MINIPROGRAM_NAME>",
@@ -75,7 +75,7 @@ const frontendDevTypes: ClassificationTypeConfig[] = [
     },
     {
         name: "CLARIFICATION_NEEDED",
-        description: "The message needs further clarification from the user.",
+        description: "The questions that need further clarification from request initiator in order to complete the implementation of the WeChat mini-program.",
         schema: {
           questions: ["<QUESTION_1>", "<QUESTION_2>", "..."],
         },
@@ -118,6 +118,7 @@ frontendDevAgent.addInstruction("Code Generation Guidelines", `
 
 2. Pages section:
    - Use only alphanumeric characters, underscores (_) for page names.
+   - If the folder and name of a page is "Home", make sure its page path is "pages/Home/Home". Do not make their first letter lowercase. Cases are important.
    - Navigation between pages:
      a. Always use 'switchTab' if the target page is a tab page listed in the tabBar.
      b. Use 'navigateTo' if the target page is not listed in the tabBar.

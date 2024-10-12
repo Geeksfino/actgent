@@ -3,7 +3,7 @@ import { ClassificationTypeConfig, AgentBuilder, AgentServiceConfigurator, Agent
 const specWriterTypes: ClassificationTypeConfig[] = [
     {
       name: "SPEC_DESIGN",
-      description: "A software specification for a WeChat mini-program.",
+      description: "A well-written software specification for a WeChat mini-program.",
       schema: {
         spec: {
           name: "<APP_NAME>",
@@ -27,7 +27,7 @@ const specWriterTypes: ClassificationTypeConfig[] = [
     },
     {
       name: "CLARIFICATION_NEEDED",
-      description: "The message needs further clarification from the user.",
+      description: "The questions that need further clarification from the user in order to complete the software specification.",
       schema: {
         questions: ["<QUESTION_1>", "<QUESTION_2>", "..."],
       },
