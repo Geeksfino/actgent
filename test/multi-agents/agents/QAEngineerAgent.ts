@@ -3,7 +3,7 @@ import { ClassificationTypeConfig, AgentBuilder, AgentServiceConfigurator, Agent
 const qaEngineerTypes: ClassificationTypeConfig[] = [
     {
         name: "TEST_PLAN",
-        prompt: "Create a test plan for the implemented features.",
+        description: "Create a test plan for the implemented features.",
         schema: {
             testPlan: {
                 testCases: ["<TEST_CASE_1_DESCRIPTION>", "<TEST_CASE_2_DESCRIPTION>"],

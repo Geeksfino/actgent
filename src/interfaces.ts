@@ -4,6 +4,7 @@ export interface AgentCoreConfig {
   name: string;                             // Agent name
   role: string;                             // Agent role
   capabilities: string;  // Capabilities the agent has
+  instructions?: Map<string, string>;
   tools?: { [key: string]: Tool };        // Custom tools the agent can use
   goal: string;                         // Long-term and short-term goals for the agent
   inboxConfig?: InboxConfig;              // Configuration for task inbox settings (priority, queue, etc.)

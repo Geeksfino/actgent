@@ -18,14 +18,14 @@ console.log("service config: " + JSON.stringify(svcConfig));
 const schemaTypes = [
   {
     name: "SIMPLE_QUERY",
-    prompt: "A straightforward question that can be answered directly.",
+    description: "A straightforward question that can be answered directly.",
     schema: {
       answer: "<DIRECT_ANSWER_TO_QUERY>",
     },
   },
   {
     name: "COMPLEX_TASK",
-    prompt: "A task that requires multiple steps or extended processing.",
+    description: "A task that requires multiple steps or extended processing.",
     schema: {
       actionPlan: {
         task: "<MAIN_OBJECTIVE>",
@@ -35,14 +35,14 @@ const schemaTypes = [
   },
   {
     name: "CLARIFICATION_NEEDED",
-    prompt: "The message needs clarification.",
+    description: "The message needs clarification.",
     schema: {
       questions: ["<QUESTION_1>", "<QUESTION_2>", "..."],
     },
   },
   {
     name: "COMMAND",
-    prompt: "An instruction to perform a specific action.",
+    description: "An instruction to perform a specific action.",
     schema: {
       command: {
         action: "<SPECIFIC_ACTION>",

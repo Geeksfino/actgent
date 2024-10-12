@@ -3,7 +3,7 @@ import { ClassificationTypeConfig, AgentBuilder, AgentServiceConfigurator, Agent
 const backendDevTypes: ClassificationTypeConfig[] = [
     {
         name: "BACKEND_IMPLEMENTATION",
-        prompt: "Implement the backend based on the system architecture.",
+        description: "Implement the backend based on the system architecture.",
         schema: {
             implementation: {
                 apis: ["<API_1_NAME>", "<API_2_NAME>"],

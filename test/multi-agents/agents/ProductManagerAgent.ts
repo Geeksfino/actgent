@@ -2,25 +2,33 @@ import { ClassificationTypeConfig, AgentBuilder, AgentServiceConfigurator, Agent
 
 const productManagerTypes: ClassificationTypeConfig[] = [
     {
-        name: "REQUIREMENTS_ANALYSIS",
-        prompt: "Analyze user requirements and create user stories.",
+        name: "FUNCTIONAL_SPECIFICATION",
+        description: "As the Product Manager, analyze the project requirements and create a comprehensive functional specification. Include detailed feature descriptions, user stories, and acceptance criteria.",
         schema: {
-            userStories: [
-                {
-                    id: "<STORY_ID>",
-                    description: "<USER_STORY_DESCRIPTION>",
-                    acceptanceCriteria: ["<CRITERION_1>", "<CRITERION_2>"],
-                }
-            ],
+            specification: {
+                projectOverview: "<PROJECT_OVERVIEW>",
+                targetAudience: "<TARGET_AUDIENCE_DESCRIPTION>",
+                features: [
+                    {
+                        name: "<FEATURE_NAME>",
+                        description: "<FEATURE_DESCRIPTION>",
+                        userStories: ["<USER_STORY_1>", "<USER_STORY_2>"],
+                        acceptanceCriteria: ["<CRITERION_1>", "<CRITERION_2>"]
+                    }
+                ],
+                nonFunctionalRequirements: ["<REQUIREMENT_1>", "<REQUIREMENT_2>"],
+                constraints: ["<CONSTRAINT_1>", "<CONSTRAINT_2>"]
+            }
         },
     },
+    // ... (keep other types like FEATURE_REFINEMENT if needed)
 ];
 
 const productManagerCoreConfig: AgentCoreConfig = {
     name: "ProductManagerAgent",
     role: "Product Manager",
-    goal: "Analyze requirements and create user stories",
-    capabilities: "Requirements analysis, user story creation",
+    goal: "Define product features and create comprehensive functional specifications",
+    capabilities: "Requirements analysis, feature definition, user story creation, market analysis, stakeholder communication",
 };
 
 const svcConfig = AgentServiceConfigurator.getAgentConfiguration("test/multi-agents");

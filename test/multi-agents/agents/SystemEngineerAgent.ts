@@ -3,13 +3,25 @@ import { ClassificationTypeConfig, AgentBuilder, AgentServiceConfigurator, Agent
 const systemEngineerTypes: ClassificationTypeConfig[] = [
     {
         name: "DEPLOYMENT_PLAN",
-        prompt: "Create a deployment plan for the application.",
+        description: "Create a deployment plan for the application.",
         schema: {
             deploymentPlan: {
                 environment: "<DEPLOYMENT_ENVIRONMENT>",
                 steps: ["<STEP_1>", "<STEP_2>"],
                 monitoringSetup: "<MONITORING_DESCRIPTION>",
             },
+        },
+    },
+    {
+        name: "CLARIFICATION_NEEDED",
+        description: "Request clarification on a specific topic related to system deployment or administration.",
+        schema: {
+            type: "object",
+            properties: {
+                question: { type: "string" },
+                context: { type: "string" },
+            },
+            required: ["question"],
         },
     },
 ];

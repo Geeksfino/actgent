@@ -23,7 +23,7 @@ export class Session {
 
     public createMessage(message: string): Message {
         const msg = new Message(this.sessionId, message);
-        this.core.getSessionContext(this.sessionId).addMessage(msg);  // Add message to context
+        //this.core.getSessionContext(this.sessionId).addMessage(msg);  
         return msg;
     }
 

@@ -72,8 +72,16 @@ export abstract class BaseAgent<
     return this.core.capabilities;
   } 
 
-  public log(message: string): void {
-    this.core.log(message);
+  public getInstructions(): Map<string, string> | undefined {
+    return this.core.getInstructions();
+  }
+
+  public addInstruction(name: string, instruction: string): void {
+    this.core.addInstruction(name, instruction);
+  }
+
+  public log(sessionId: string, message: string): void {
+    this.core.log(sessionId, message);
   }
 
   public async run(loggingConfig?: LoggingConfig) {
@@ -94,7 +102,7 @@ export abstract class BaseAgent<
       try {
         parsedResponse = JSON.parse(response);
       } catch (error) {
-        this.core.log(`Failed to parse response string: ${error}`);
+        this.core.log(session.sessionId, `Failed to parse response string: ${error}`);
         return;
       }
     } else {

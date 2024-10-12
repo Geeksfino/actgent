@@ -5,6 +5,7 @@ export class PromptManager {
   private role: string = "";
   private goal: string = "";
   private capabilities: string = "";
+  private instructions: Map<string, string> | undefined;
   
   constructor(private promptTemplate: IAgentPromptTemplate) {
     this.promptTemplate = promptTemplate;
@@ -22,8 +23,13 @@ export class PromptManager {
     this.capabilities = capabilities;
   }
 
+  public setInstructions(instructions: Map<string, string>): void {
+    this.instructions = instructions;
+  }
+
   public getSystemPrompt(): string {
-    return this.renderPrompt(null, this.promptTemplate.getSystemPrompt(), { goal: this.goal, capabilities: this.capabilities, role: this.role });
+    const instructions = this.instructions ? Array.from(this.instructions.values()).join('\n') : '';
+    return this.renderPrompt(null, this.promptTemplate.getSystemPrompt(), { goal: this.goal, capabilities: this.capabilities, role: this.role, instructions: instructions });
   }
 
   public getAssistantPrompt(): string {
@@ -52,9 +58,8 @@ export class PromptManager {
     });
 
     if (sessionContext) {
-      //const history = sessionContext.getHistory().join('\n');
       const messages = sessionContext.getMessages().map(msg => msg.payload.input).join('\n');
-      //console.log("History===>", history);
+      console.log(`PromptManager Messages===> [ ${messages} ]`);
       prompt = messages + prompt;
     } 
 

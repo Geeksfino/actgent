@@ -3,7 +3,7 @@ import { ClassificationTypeConfig, AgentBuilder, AgentServiceConfigurator, Agent
 const uiDesignerTypes: ClassificationTypeConfig[] = [
     {
         name: "UI_DESIGN",
-        prompt: "Create a UI/UX design based on the user stories and system architecture.",
+        description: "Create a UI/UX design based on the user stories and system architecture.",
         schema: {
             design: {
                 wireframes: ["<WIREFRAME_1_DESCRIPTION>", "<WIREFRAME_2_DESCRIPTION>"],

@@ -32,6 +32,7 @@ export class AgentCore {
   public role: string;
   public goal: string;
   public capabilities: string;
+  public instructions: Map<string, string> | undefined;
   private memory: Memory;
   private inbox: PriorityInbox;
   private llmConfig: LLMConfig | null;
@@ -41,7 +42,7 @@ export class AgentCore {
   private llmResponseHandler!: (response: any, session: Session) => void;
   private streamCallback?: (delta: string) => void;
   private streamBuffer: string = '';
-  private logger: (message: string) => void;
+  private logger: (sessionId: string, message: string) => void;
 
   constructor(
     config: AgentCoreConfig,
@@ -55,6 +56,7 @@ export class AgentCore {
     this.role = config.role;
     this.goal = config.goal || "";
     this.capabilities = config.capabilities;
+    this.instructions = config.instructions || undefined;
     this.inbox = new PriorityInbox();
     this.llmConfig = llmConfig || null;
     
@@ -85,6 +87,9 @@ export class AgentCore {
     this.promptManager.setGoal(this.goal);
     this.promptManager.setRole(this.role);
     this.promptManager.setCapabilities(this.capabilities);
+    if (this.instructions) {
+      this.promptManager.setInstructions(this.instructions);
+    }
 
     // Initialize logger
     this.logger = this.initLogger(loggingConfig);
@@ -94,9 +99,20 @@ export class AgentCore {
     return this.capabilities;
   }
 
+  public addInstruction(name: string, instruction: string): void {
+    if (!this.instructions) {
+      this.instructions = new Map<string, string>();
+    }
+    this.instructions.set(name, instruction);
+  } 
+
+  public getInstructions(): Map<string, string> | undefined {
+    return this.instructions;
+  }
+
   public async receive(message: Message): Promise<void> {
     this.inbox.enqueue(message);
-    this.contextManager[message.sessionId].addMessage(message);  // Add message to context
+    //this.contextManager[message.sessionId].addMessage(message);  // Add message to context
   }
 
   public async start(): Promise<void> {
@@ -148,8 +164,12 @@ export class AgentCore {
   }
 
   private async processMessage(message: Message): Promise<void> {
-    this.log(`Processing message: ${JSON.stringify(message)}`);
     const sessionContext = this.contextManager[message.sessionId];
+    
+    // Log the input message
+    this.logger(message.sessionId, `Input: ${message.payload.input}`);
+
+    sessionContext.addMessage(message);
     
     // Process message in memory
     await this.memory.processMessage(message, sessionContext);
@@ -157,7 +177,6 @@ export class AgentCore {
     const context = await this.memory.generateContext(sessionContext);
     const useStreamMode = false; // Set this to true if you want to use streaming mode
     const streamCallback = useStreamMode ? (delta: string) => {
-      // Handle delta updates here, e.g., send to a websocket
       console.log("Received delta:", delta);
     } : undefined;
 
@@ -166,14 +185,18 @@ export class AgentCore {
     // Handle the response based on message type
     const cleanedResponse = this.cleanLLMResponse(response);
     const session = sessionContext.getSession();
+    const responseMessage = session.createMessage(cleanedResponse);
+    sessionContext.addMessage(responseMessage);
 
+    // Log the output message
+    this.logger(message.sessionId, `Output: ${cleanedResponse}`);
     this.llmResponseHandler(cleanedResponse, session);
   }
 
   public async getOrCreateSessionContext(message: Message): Promise<Session> {
     if (!this.contextManager[message.sessionId]) {
       const session = await this.createSession(message.metadata?.sender || "", message.payload.input);
-      this.contextManager[message.sessionId].addMessage(message);  // Add initial message
+      //this.contextManager[message.sessionId].addMessage(message);  // Add initial message
       return session;
     }
     return this.contextManager[message.sessionId].getSession();
@@ -185,7 +208,7 @@ export class AgentCore {
     streamMode: boolean = false,
     streamCallback?: (delta: string) => void
   ): Promise<string> {
-    this.log(`System prompt: ${this.promptManager.getSystemPrompt()}`);
+    //this.log(`System prompt: ${this.promptManager.getSystemPrompt()}`);
     const sessionContext = this.contextManager[message.sessionId];
     const prompt = this.promptManager.renderPrompt(
       this.contextManager[message.sessionId],
@@ -225,12 +248,12 @@ export class AgentCore {
         responseContent = response.choices[0].message.content || "{}";
       }
 
-      sessionContext.addMessage(message);
+      //sessionContext.addMessage(message);
 
-      console.log("LLM response===>", responseContent);
+      //console.log("LLM response===>", responseContent);
       return responseContent;
     } catch (error) {
-      this.log(`Error interacting with LLM: ${error}`);
+      this.log(message.sessionId, `Error interacting with LLM: ${error}`);
       throw error;
     }
   }
@@ -288,22 +311,25 @@ export class AgentCore {
     );
   }
 
-  private initLogger(loggingConfig?: LoggingConfig): (message: string) => void {
+  private initLogger(loggingConfig?: LoggingConfig): (sessionId: string, message: string) => void {
     if (loggingConfig?.destination) {
       const logDir = path.dirname(loggingConfig.destination);
       if (!fs.existsSync(logDir)) {
         fs.mkdirSync(logDir, { recursive: true });
       }
-      return (message: string) => {
-        fs.appendFileSync(loggingConfig.destination!, `${new Date().toISOString()} - ${message}\n`);
+      return (sessionId: string, message: string) => {
+        const logMessage = `${new Date().toISOString()} - [Session: ${sessionId}] ${message}\n`;
+        fs.appendFileSync(loggingConfig.destination!, logMessage);
       };
     } else {
-      return console.log;
+      return (sessionId: string, message: string) => {
+        console.log(`[Session: ${sessionId}] ${message}`);
+      };
     }
   }
 
-  public log(message: string): void {
-    this.logger(`[${this.name}] ${message}`);
+  public log(sessionId: string, message: string): void {
+    this.logger(sessionId, `[${this.name}] ${message}`);
   }
 
   public setLoggingConfig(loggingConfig: LoggingConfig): void {

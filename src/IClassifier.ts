@@ -4,7 +4,7 @@ import { InferClassificationUnion } from './TypeInference';
 
 export interface ClassificationTypeConfig {
     name: string;
-    prompt: string;
+    description: string;
     schema: Record<string, any>;
 }
 

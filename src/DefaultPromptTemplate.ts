@@ -15,6 +15,9 @@ export class DefaultPromptTemplate<T extends ReadonlyArray<ClassificationTypeCon
       Your capabilities are: {capabilities}.
       Your objective is to align every action with this overarching mission while processing specific tasks efficiently and effectively.
       Keep this goal in mind for every task you undertake. Decline any task that is not aligned with your goal or capabilities. 
+
+      Specific Instructions:
+      {instructions}
     `;
   }
 
@@ -24,7 +27,7 @@ export class DefaultPromptTemplate<T extends ReadonlyArray<ClassificationTypeCon
 
   getMessageClassificationPrompt(message: string): string {
     const typesDescription = this.classificationTypes
-      .map(type => `- ${type.name}: ${type.prompt}`)
+      .map(type => `- ${type.name}: ${type.description}`)
       .join('\n');
 
     const jsonFormats = this.classificationTypes
