@@ -7,7 +7,7 @@ import fs from "fs";
 import path from "path";
 import readline from "readline";
 import os from "os";
-
+import { deserializeMiniProgram } from "./utils";
 // Import all agents
 // import { projectManagerAgent } from './agents/ProjectManagerAgent';
 // import { productManagerAgent } from './agents/ProductManagerAgent';
@@ -60,7 +60,7 @@ function expandTilde(filePath: string): string {
   return filePath;
 }
 
-async function orchestrateWorkflow(desc: string) {
+async function orchestrateWorkflow(desc: string, projectDir: string) {
   console.log("Starting the software development process...");
 
   // Step 1: Product Manager creates functional specification
@@ -121,6 +121,7 @@ async function orchestrateWorkflow(desc: string) {
       });
     });
     console.log("Mini-program project generated:", miniProgramProject);
+    deserializeMiniProgram(JSON.stringify(miniProgramProject), projectDir);
 
   //     new Promise<any>((resolve) => {
   //       backendSession.onEvent((data) => {
@@ -238,7 +239,7 @@ async function main() {
   ];
 
   for (const agent of agents) {
-    const logFile = path.join(projectDir, `${agent.getName()}.log`);
+    const logFile = path.join(workareaDir, `${agent.getName()}.log`);
 
     // Create a loggingConfig for each agent
     const loggingConfig: LoggingConfig = {
@@ -256,7 +257,7 @@ async function main() {
 
   try {
     const desc = await getUserInput("Please enter the project description: ");
-    const result = await orchestrateWorkflow(desc);
+    const result = await orchestrateWorkflow(desc, projectDir);
     console.log("Project completed successfully:", result);
   } catch (error) {
     console.error("An error occurred during the development process:", error);

@@ -1,6 +1,7 @@
 import { AgentBuilder, AgentServiceConfigurator, ClassificationTypeConfig } from '@finogeeks/actgent';
 import path from 'path';
 import fs from 'fs';
+import { generateMiniProgram } from './code_parser'; 
 
 // Ensure the projects directory exists
 export const projectsDir = path.join(__dirname, 'projects');
@@ -14,4 +15,15 @@ export function createAgent(name: string, role: string, goal: string, capabiliti
     const svcConfig = AgentServiceConfigurator.getAgentConfiguration("test/multi-agents");
     const agentBuilder = new AgentBuilder(coreConfig, svcConfig);
     return { agent: agentBuilder.build(name, schemaTypes), name };
+}
+
+export function deserializeMiniProgram(inputJson: string, outputDir: string) {
+
+    // Clean up any previous test output
+    if (fs.existsSync(outputDir)) {
+        fs.rmdirSync(outputDir, { recursive: true });
+    }
+
+    // Call the function to generate the mini-program
+    generateMiniProgram(inputJson, outputDir);
 }
