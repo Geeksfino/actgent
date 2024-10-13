@@ -1,8 +1,4 @@
-import {
-  AgentCoreConfig,
-  Tool,
-  LLMConfig,
-} from "./interfaces";
+import { AgentCoreConfig, Tool, LLMConfig } from "./interfaces";
 import { DefaultAgentMemory, Memory, MemoryStorage } from "./Memory";
 import { InMemoryStorage } from "./InMemoryStorage";
 import { PromptManager } from "./PromptManager";
@@ -13,8 +9,8 @@ import { OpenAI } from "openai";
 import { IAgentPromptTemplate } from "./IPromptTemplate";
 import { Session } from "./Session";
 import { SessionContext } from "./SessionContext";
-import fs from 'fs';
-import path from 'path';
+import fs from "fs";
+import path from "path";
 
 interface StorageConfig {
   shortTerm?: MemoryStorage<any>;
@@ -41,7 +37,7 @@ export class AgentCore {
   private contextManager: { [sessionId: string]: SessionContext } = {};
   private llmResponseHandler!: (response: any, session: Session) => void;
   private streamCallback?: (delta: string) => void;
-  private streamBuffer: string = '';
+  private streamBuffer: string = "";
   private logger: (sessionId: string, message: string) => void;
 
   constructor(
@@ -59,11 +55,14 @@ export class AgentCore {
     this.instructions = config.instructions || undefined;
     this.inbox = new PriorityInbox();
     this.llmConfig = llmConfig || null;
-    
+
     // Initialize memory with storage backends
-    const shortTermStorage = storageConfig?.shortTerm || new InMemoryStorage<any>();
-    const longTermStorage = storageConfig?.longTerm || new InMemoryStorage<any>();
-    const workingMemoryStorage = storageConfig?.working || new InMemoryStorage<any>();
+    const shortTermStorage =
+      storageConfig?.shortTerm || new InMemoryStorage<any>();
+    const longTermStorage =
+      storageConfig?.longTerm || new InMemoryStorage<any>();
+    const workingMemoryStorage =
+      storageConfig?.working || new InMemoryStorage<any>();
 
     this.memory = new DefaultAgentMemory(
       1000000, // maxMemorySize (adjust as needed)
@@ -71,7 +70,7 @@ export class AgentCore {
       longTermStorage,
       workingMemoryStorage
     );
-    
+
     //console.log("AgentCore LLM:" + JSON.stringify(this.llmConfig, null, 2));
 
     if (this.llmConfig) {
@@ -104,7 +103,7 @@ export class AgentCore {
       this.instructions = new Map<string, string>();
     }
     this.instructions.set(name, instruction);
-  } 
+  }
 
   public getInstructions(): Map<string, string> | undefined {
     return this.instructions;
@@ -123,20 +122,30 @@ export class AgentCore {
     this.promptManager = new PromptManager(promptTemplate);
   }
 
+  public resolvePrompt(
+    sessionContext: SessionContext | null,
+    message: string,
+    context: any
+  ): Object {
+    return this.promptManager.resolvePrompt(sessionContext, message, context);
+  }
+
   private cleanLLMResponse(response: string): string {
     // Remove markdown code block delimiters and any surrounding whitespace
     const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
     const match = response.match(jsonRegex);
-    
+
     if (match && match[1]) {
       return match[1].trim();
     }
-    
+
     // If no JSON block is found, return the original response stripped of backticks
-    return response.replace(/`/g, '').trim();
+    return response.replace(/`/g, "").trim();
   }
 
-  public addLLMResponseHandler(handler: (response: any, session: Session) => void) {
+  public addLLMResponseHandler(
+    handler: (response: any, session: Session) => void
+  ) {
     this.llmResponseHandler = handler;
   }
 
@@ -145,13 +154,13 @@ export class AgentCore {
   }
 
   private processStreamBuffer(force: boolean = false) {
-    const lines = this.streamBuffer.split('\n');
+    const lines = this.streamBuffer.split("\n");
     const completeLines = lines.slice(0, -1);
     this.streamBuffer = lines[lines.length - 1];
 
     for (const line of completeLines) {
       if (this.streamCallback) {
-        this.streamCallback(line + '\n');
+        this.streamCallback(line + "\n");
       }
     }
 
@@ -159,29 +168,36 @@ export class AgentCore {
       if (this.streamCallback) {
         this.streamCallback(this.streamBuffer);
       }
-      this.streamBuffer = '';
+      this.streamBuffer = "";
     }
   }
 
   private async processMessage(message: Message): Promise<void> {
     const sessionContext = this.contextManager[message.sessionId];
-    
+
     // Log the input message
     this.logger(message.sessionId, `Input: ${message.payload.input}`);
 
     sessionContext.addMessage(message);
-    
+
     // Process message in memory
     await this.memory.processMessage(message, sessionContext);
 
     const context = await this.memory.generateContext(sessionContext);
     const useStreamMode = false; // Set this to true if you want to use streaming mode
-    const streamCallback = useStreamMode ? (delta: string) => {
-      console.log("Received delta:", delta);
-    } : undefined;
+    const streamCallback = useStreamMode
+      ? (delta: string) => {
+          console.log("Received delta:", delta);
+        }
+      : undefined;
 
-    const response = await this.promptLLM(message, context, useStreamMode, streamCallback);
-    
+    const response = await this.promptLLM(
+      message,
+      context,
+      useStreamMode,
+      streamCallback
+    );
+
     // Handle the response based on message type
     const cleanedResponse = this.cleanLLMResponse(response);
     const session = sessionContext.getSession();
@@ -195,7 +211,10 @@ export class AgentCore {
 
   public async getOrCreateSessionContext(message: Message): Promise<Session> {
     if (!this.contextManager[message.sessionId]) {
-      const session = await this.createSession(message.metadata?.sender || "", message.payload.input);
+      const session = await this.createSession(
+        message.metadata?.sender || "",
+        message.payload.input
+      );
       //this.contextManager[message.sessionId].addMessage(message);  // Add initial message
       return session;
     }
@@ -210,11 +229,22 @@ export class AgentCore {
   ): Promise<string> {
     //this.log(`System prompt: ${this.promptManager.getSystemPrompt()}`);
     const sessionContext = this.contextManager[message.sessionId];
-    const prompt = this.promptManager.renderPrompt(
-      this.contextManager[message.sessionId],
-      this.promptManager.getMessageClassificationPrompt(message.payload.input),
-      context
-    );
+
+    // console.log("<========= Resolved prompt =========>");
+    // console.log(
+    //   AgentCore.formatMulltiLine(
+    //     JSON.stringify(
+    //       this.promptManager.resolvePrompt(
+    //         sessionContext,
+    //       message.payload.input,
+    //       context
+    //     ),
+    //     null,
+    //       2
+    //     )
+    //   )
+    // );
+    // console.log("<======================================>");
 
     try {
       let responseContent = "";
@@ -224,7 +254,18 @@ export class AgentCore {
           model: this.llmConfig?.model || "gpt-4",
           messages: [
             { role: "system", content: this.promptManager.getSystemPrompt() },
-            { role: "user", content: prompt },
+            {
+              role: "assistant",
+              content: this.promptManager.getAssistantPrompt(),
+            },
+            {
+              role: "user",
+              content: this.promptManager.getUserPrompt(
+                sessionContext,
+                message.payload.input,
+                context
+              ),
+            },
           ],
           stream: true,
         });
@@ -242,7 +283,18 @@ export class AgentCore {
           model: this.llmConfig?.model || "gpt-4",
           messages: [
             { role: "system", content: this.promptManager.getSystemPrompt() },
-            { role: "user", content: prompt },
+            {
+              role: "assistant",
+              content: this.promptManager.getAssistantPrompt(),
+            },
+            {
+              role: "user",
+              content: this.promptManager.getUserPrompt(
+                sessionContext,
+                message.payload.input,
+                context
+              ),
+            },
           ],
         });
         responseContent = response.choices[0].message.content || "{}";
@@ -258,7 +310,10 @@ export class AgentCore {
     }
   }
 
-  public async createSession(owner: string, description: string): Promise<Session> {
+  public async createSession(
+    owner: string,
+    description: string
+  ): Promise<Session> {
     console.log("createSession called with description:", description);
 
     // Construct a Session object
@@ -290,6 +345,7 @@ export class AgentCore {
       name: this.name,
       goal: this.goal,
       capabilities: this.capabilities,
+      instructions: this.instructions,
     });
   }
 
@@ -299,9 +355,12 @@ export class AgentCore {
 
   // Method to allow changing storage backends at runtime
   public setStorageBackends(storageConfig: StorageConfig): void {
-    const shortTermStorage = storageConfig.shortTerm || new InMemoryStorage<any>();
-    const longTermStorage = storageConfig.longTerm || new InMemoryStorage<any>();
-    const workingMemoryStorage = storageConfig.working || new InMemoryStorage<any>();
+    const shortTermStorage =
+      storageConfig.shortTerm || new InMemoryStorage<any>();
+    const longTermStorage =
+      storageConfig.longTerm || new InMemoryStorage<any>();
+    const workingMemoryStorage =
+      storageConfig.working || new InMemoryStorage<any>();
 
     this.memory = new DefaultAgentMemory(
       1000000, // maxMemorySize (use the same value as in constructor)
@@ -311,7 +370,9 @@ export class AgentCore {
     );
   }
 
-  private initLogger(loggingConfig?: LoggingConfig): (sessionId: string, message: string) => void {
+  private initLogger(
+    loggingConfig?: LoggingConfig
+  ): (sessionId: string, message: string) => void {
     if (loggingConfig?.destination) {
       const logDir = path.dirname(loggingConfig.destination);
       if (!fs.existsSync(logDir)) {
@@ -335,4 +396,12 @@ export class AgentCore {
   public setLoggingConfig(loggingConfig: LoggingConfig): void {
     this.logger = this.initLogger(loggingConfig);
   }
+
+  private static formatMulltiLine(multiline: string): string {
+    // Replace \n with actual newlines and print the formatted content
+    let formattedContent = multiline.replace(/\\n/g, "\n");
+    formattedContent = formattedContent.replace(/\\"/g, '"');
+    return formattedContent;
+  }
+
 }

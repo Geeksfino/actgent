@@ -34,7 +34,8 @@ const productManagerTypes: ClassificationTypeConfig[] = [
 const productManagerCoreConfig: AgentCoreConfig = {
     name: "ProductManagerAgent",
     role: "Product Manager",
-    goal: "As the Product Manager, analyze the project requirements and create a comprehensive functional specification. Include detailed feature descriptions, user stories, and acceptance criteria.",
+    goal: `As the Product Manager, analyze the project requirements and create a comprehensive functional specification that 
+           can be used to develop a WeChat mini-program. Include detailed feature descriptions, user stories, and acceptance criteria.`,
     capabilities: "Requirements analysis, feature definition, user story creation, market analysis, stakeholder communication",
 };
 

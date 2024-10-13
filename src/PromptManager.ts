@@ -36,6 +36,10 @@ export class PromptManager {
     return this.renderPrompt(null, this.promptTemplate.getAssistantPrompt(), {});
   }
 
+  public getUserPrompt(sessionContext: SessionContext | null, message: string, variables: { [key: string]: string }): string {
+    return this.renderPrompt(sessionContext, message, variables);
+  }
+
   public getMessageClassificationPrompt(message: string): string {
     //console.log("Message classification prompt===>", this.promptTemplate.getMessageClassificationPrompt(message));
     return this.renderPrompt(null, this.promptTemplate.getMessageClassificationPrompt(message), {});
@@ -66,4 +70,17 @@ export class PromptManager {
     return prompt || "";
   }
 
+  public resolvePrompt(sessionContext: SessionContext | null, message: string, variables: { [key: string]: string }): Object {
+    const systemPrompt = this.getSystemPrompt();
+    const assistantPrompt = this.getAssistantPrompt();
+
+    let resolvedPrompt = {
+      "system": systemPrompt,
+      "assistant": assistantPrompt,
+      "user": this.getUserPrompt(sessionContext, message, variables)
+    }
+    
+
+    return resolvedPrompt;
+  }
 }
