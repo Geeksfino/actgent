@@ -123,6 +123,10 @@ export abstract class BaseAgent<
     }
   }
 
+  public resolvePrompt(sessionContext: any, input: string, context: any): Object {
+    return this.core.resolvePrompt(sessionContext, input, context);
+  }
+
   private async findHelperAgent(subtask: string): Promise<AgentCore | null> {
     console.log('findHelperAgent called with subtask:', subtask);
     const agent = await AgentRegistry.getInstance().findAgentByCapabilities(subtask);

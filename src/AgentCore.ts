@@ -103,6 +103,7 @@ export class AgentCore {
       this.instructions = new Map<string, string>();
     }
     this.instructions.set(name, instruction);
+    this.promptManager.setInstructions(this.instructions);
   }
 
   public getInstructions(): Map<string, string> | undefined {
