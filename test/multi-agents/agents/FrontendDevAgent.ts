@@ -1,86 +1,81 @@
-import { ClassificationTypeConfig, AgentBuilder, AgentServiceConfigurator, AgentCoreConfig } from '@finogeeks/actgent';
+import { AgentBuilder, AgentServiceConfigurator, AgentCoreConfig } from '@finogeeks/actgent';
+import { DefaultSchemaBuilder } from '@finogeeks/actgent';
 
-const frontendDevTypes: ClassificationTypeConfig[] = [
-    {
-        name: "MINIPROGRAM_CODE_GENERATION",
-        description: "A fully completed implementation of a WeChat mini-program based on the given specification.",
-        schema: {
-            generatedCode: {
-                name: "<MINIPROGRAM_NAME>",
-                description: "<MINIPROGRAM_DESCRIPTION>",
-                category: "<MINIPROGRAM_CATEGORY>",
-                appJs: "<GLOBAL_INITIALIZATION_CODE>",
-                appWxss: "<GLOBAL_STYLE_SHEET>",
-                appJson: {
-                    pages: ["<LIST_OF_PAGE_PATHS>"],
-                    window: {
-                        backgroundTextStyle: "light",
-                        navigationBarBackgroundColor: "<HEX_COLOR>",
-                        navigationBarTitleText: "<TITLE>",
-                        navigationBarTextStyle: "<BLACK_OR_WHITE>"
-                    },
-                    tabBar: {
-                        color: "<HEX_COLOR>",
-                        selectedColor: "<HEX_COLOR>",
-                        backgroundColor: "<HEX_COLOR>",
-                        borderStyle: "<BLACK_OR_WHITE>",
-                        list: [
-                            {
-                                pagePath: "<PATH_TO_PAGE>",
-                                text: "<TAB_TEXT>"
-                            }
-                        ]
-                    }
-                },
-                projectJson: {
-                    description: "<PROJECT_DESCRIPTION>",
-                    "packOptions": {
-                        "ignore": []
-                      },
-                      "setting": {
-                        "es6": true,
-                        "useOldBuilder": false
-                      },
-                      "compileType": "miniprogram",
-                      "appid": "",
-                      "projectname": "<project-name>",
-                      "isGameTourist": false,
-                      "projectType": 0,
-                      "buildOption": {
-                        "compilerSource": "wx"
-                      }
-                },
-                sitemapJson: {
-                    rules: []
-                },
-                pages: [
-                    {
-                        name: "<PAGE_NAME>",
-                        wxml: "<WXML_CODE>",
-                        wxss: "<WXSS_CODE>",
-                        js: "<JAVASCRIPT_CODE>",
-                        json: {
-                            navigationBarTitleText: "<PAGE_TITLE>"
-                        }
-                    }
-                ],
-                images: [
-                    {
-                        path: "<IMAGE_URL>",
-                        content: "<BASE64_OR_FILE_DATA>"
-                    }
-                ]
-            },
+const schemaBuilder = new DefaultSchemaBuilder();
+
+const frontendDevTemplate = {
+    generatedCode: {
+      name: "<MINIPROGRAM_NAME>",
+      description: "<MINIPROGRAM_DESCRIPTION>",
+      category: "<MINIPROGRAM_CATEGORY>",
+      appJs: "<GLOBAL_INITIALIZATION_CODE>",
+      appWxss: "<GLOBAL_STYLE_SHEET>",
+      appJson: {
+        pages: ["<LIST_OF_PAGE_PATHS>"],
+        window: {
+          backgroundTextStyle: "light",
+          navigationBarBackgroundColor: "<HEX_COLOR>",
+          navigationBarTitleText: "<TITLE>",
+          navigationBarTextStyle: "<BLACK_OR_WHITE>"
         },
-    },
-    {
-        name: "CLARIFICATION_NEEDED",
-        description: "The questions that need further clarification from request initiator in order to complete the implementation of the WeChat mini-program.",
-        schema: {
-          questions: ["<QUESTION_1>", "<QUESTION_2>", "..."],
+        tabBar: {
+          color: "<HEX_COLOR>",
+          selectedColor: "<HEX_COLOR>",
+          backgroundColor: "<HEX_COLOR>",
+          borderStyle: "<BLACK_OR_WHITE>",
+          list: [
+            {
+              pagePath: "<PATH_TO_PAGE>",
+              text: "<TAB_TEXT>"
+            }
+          ]
+        }
+      },
+      projectJson: {
+        description: "<PROJECT_DESCRIPTION>",
+        "packOptions": {
+          "ignore": []
         },
+        "setting": {
+          "es6": true,
+          "useOldBuilder": false
+        },
+        "compileType": "miniprogram",
+        "appid": "",
+        "projectname": "<project-name>",
+        "isGameTourist": false,
+        "projectType": 0,
+        "buildOption": {
+          "compilerSource": "wx"
+        }
+      },
+      sitemapJson: {
+        rules: []
+      },
+      pages: [
+        {
+          name: "<PAGE_NAME>",
+          wxml: "<WXML_CODE>",
+          wxss: "<WXSS_CODE>",
+          js: "<JAVASCRIPT_CODE>",
+          json: {
+            navigationBarTitleText: "<PAGE_TITLE>"
+          }
+        }
+      ],
+      images: [
+        {
+          path: "<IMAGE_URL>",
+          content: "<BASE64_OR_FILE_DATA>"
+        }
+      ]
     },
-];
+  summary: "<BRIEF_SUMMARY_OF_RESULT>"
+};
+
+schemaBuilder.setFormattedOutputForCompletedTask(`
+  ${JSON.stringify(frontendDevTemplate)}
+`);
 
 const frontendDevCoreConfig: AgentCoreConfig = {
     name: "FrontendDevAgent",
@@ -91,7 +86,7 @@ const frontendDevCoreConfig: AgentCoreConfig = {
 
 const svcConfig = AgentServiceConfigurator.getAgentConfiguration("test/multi-agents");
 const agentBuilder = new AgentBuilder(frontendDevCoreConfig, svcConfig);
-export const frontendDevAgent = agentBuilder.build("FrontendDevAgent", frontendDevTypes);
+export const frontendDevAgent = agentBuilder.build("FrontendDevAgent", schemaBuilder.getClassificationTypes());
 
 // Add custom instructions for the agent
 frontendDevAgent.addInstruction("Code Generation Guidelines", `

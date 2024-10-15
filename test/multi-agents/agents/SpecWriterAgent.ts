@@ -1,38 +1,30 @@
-import { ClassificationTypeConfig, AgentBuilder, AgentServiceConfigurator, AgentCoreConfig } from '@finogeeks/actgent';
+import { AgentBuilder, AgentServiceConfigurator, AgentCoreConfig } from '@finogeeks/actgent';
+import { DefaultSchemaBuilder } from '@finogeeks/actgent';
 
-const specWriterTypes: ClassificationTypeConfig[] = [
-    {
-      name: "SPEC_DESIGN",
-      description: "A well-written software specification for a WeChat mini-program.",
-      schema: {
-        spec: {
-          name: "<APP_NAME>",
-          description: "<APP_DESCRIPTION>",
-          category: "<APP_CATEGORY>",
-          pages: [
-            {
-              name: "<PAGE_NAME>",
-              description: "<PAGE_DESCRIPTION>",
-              uiComponents: ["<COMPONENT_1_DESCRIPTION>", "<COMPONENT_2_DESCRIPTION>"],
-              layout: "<LAYOUT_DESCRIPTION>"
-            }
-          ],
-          homePage: "<HOMEPAGE_NAME>",
-          userEngagement: "<ENGAGEMENT_FEATURES_DESCRIPTION>",
-          innovativeInteractions: "<INTERACTION_DETAILS>",
-          scalability: "<SCALABILITY_FEATURES>",
-          internationalization: "<LANGUAGE_SUPPORT>"
-        }
-      },
-    },
-    {
-      name: "CLARIFICATION_NEEDED",
-      description: "The questions that need further clarification from the user in order to complete the software specification.",
-      schema: {
-        questions: ["<QUESTION_1>", "<QUESTION_2>", "..."],
-      },
-    },
-  ] 
+const schemaBuilder = new DefaultSchemaBuilder();
+
+const specTemplate = {
+    name: "<APP_NAME>",
+    description: "<APP_DESCRIPTION>",
+    category: "<APP_CATEGORY>",
+    pages: [
+      {
+        name: "<PAGE_NAME>",
+        description: "<PAGE_DESCRIPTION>",
+        uiComponents: ["<COMPONENT_1_DESCRIPTION>", "<COMPONENT_2_DESCRIPTION>"],
+        layout: "<LAYOUT_DESCRIPTION>"
+      }
+    ],
+    homePage: "<HOMEPAGE_NAME>",
+    userEngagement: "<ENGAGEMENT_FEATURES_DESCRIPTION>",
+    innovativeInteractions: "<INTERACTION_DETAILS>",
+    scalability: "<SCALABILITY_FEATURES>",
+    internationalization: "<LANGUAGE_SUPPORT>"
+}
+
+schemaBuilder.setFormattedOutputForCompletedTask(`
+  ${JSON.stringify(specTemplate)}
+`);
 
 const specWriterCoreConfig: AgentCoreConfig = {
     name: "SpecWriterAgent",
@@ -89,8 +81,8 @@ const specWriterCoreConfig: AgentCoreConfig = {
         <PAGE_NAME> must be always in English regardless of the language of the input description.
       `,
     capabilities: 'Design detailed and innovative software specifications',
-  };
+}
 
 const svcConfig = AgentServiceConfigurator.getAgentConfiguration("test/multi-agents");
 const agentBuilder = new AgentBuilder(specWriterCoreConfig, svcConfig);
-export const specWriterAgent = agentBuilder.build("SpecWriterAgent", specWriterTypes);
+export const specWriterAgent = agentBuilder.build("SpecWriterAgent", schemaBuilder.getClassificationTypes());

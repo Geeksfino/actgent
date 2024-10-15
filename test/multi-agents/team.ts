@@ -2,6 +2,7 @@ import {
   InferClassificationUnion,
   ClassificationTypeConfig,
   Session,
+  DefaultSchemaBuilder,
 } from "@finogeeks/actgent";
 import fs from "fs";
 import path from "path";
@@ -67,11 +68,14 @@ async function orchestrateWorkflow(desc: string, projectDir: string) {
   const pmSession = await productManagerAgent.createSession("Orchestrator", desc);
   const productPlan = await new Promise<any>((resolve) => {
     pmSession.onEvent((data) => {
-      if (data.messageType === "PRODUCT_PLAN") {
-        resolve(data.plan);
-      } else if (data.messageType === "CLARIFICATION_NEEDED") {
+      if (data.messageType === DefaultSchemaBuilder.TASK_COMPLETE) {
+        resolve(data.result);
+      } else if (data.messageType === DefaultSchemaBuilder.CLARIFICATION_NEEDED) {
         //console.log("Clarification needed:", data.questions);
         promptForClarification(data.questions, pmSession).then(resolve);
+      } else {
+        console.log("Received event:", data);
+        resolve(data);
       }
     });
   });
@@ -81,11 +85,14 @@ async function orchestrateWorkflow(desc: string, projectDir: string) {
   const functionalSpec = await new Promise<any>((resolve) => {
     swSession.onEvent((data) => {
       //console.log("Received event:", data);
-      if (data.messageType === "SPEC_DESIGN") {
-        resolve(data.spec);
-      } else if (data.messageType === "CLARIFICATION_NEEDED") {
+      if (data.messageType === DefaultSchemaBuilder.TASK_COMPLETE) {
+        resolve(data.result);
+      } else if (data.messageType === DefaultSchemaBuilder.CLARIFICATION_NEEDED) {
         //console.log("Clarification needed:", data.questions);
         promptForClarification(data.questions, swSession).then(resolve);
+      } else {
+        console.log("Received event:", data);
+        resolve(data);
       }
     });
   });
@@ -127,9 +134,9 @@ async function orchestrateWorkflow(desc: string, projectDir: string) {
 
     const miniProgramProject = await new Promise<any>((resolve) => {
       frontendSession.onEvent((data) => {
-          if (data.messageType === "MINIPROGRAM_CODE_GENERATION") {
-            resolve(data.generatedCode);
-          } else if (data.messageType === "CLARIFICATION_NEEDED") {
+          if (data.messageType === DefaultSchemaBuilder.TASK_COMPLETE) {
+            resolve(data.result);
+          } else if (data.messageType === DefaultSchemaBuilder.CLARIFICATION_NEEDED) {
             //console.log("Clarification needed:", data.questions);
             promptForClarification(data.questions, frontendSession).then(resolve);
           }
@@ -205,9 +212,9 @@ async function promptForClarification(
   await session.chat(answer);
   return new Promise<any>((resolve) => {
     session.onEvent((data) => {
-      if (data.messageType === "SPEC_DESIGN") {
+      if (data.messageType === DefaultSchemaBuilder.TASK_COMPLETE) {
         resolve(data.spec);
-      } else if (data.messageType === "CLARIFICATION_NEEDED") {
+      } else if (data.messageType === DefaultSchemaBuilder.CLARIFICATION_NEEDED) {
         console.log("Additional clarification needed:", data.questions);
         promptForClarification(data.questions, session).then(resolve);
       }

@@ -1,45 +1,41 @@
-import { ClassificationTypeConfig, AgentBuilder, AgentServiceConfigurator, AgentCoreConfig } from '@finogeeks/actgent';
+import {
+  AgentBuilder,
+  AgentServiceConfigurator,
+  AgentCoreConfig,
+} from "@finogeeks/actgent";
+import { DefaultSchemaBuilder } from "@finogeeks/actgent";
 
-const orchestratorTypes: ClassificationTypeConfig[] = [
-    {
-        name: "TASK_CLASSIFICATION",
-        description: "Classification of the user message to determine the nature of the task caused by this message. This will be used to determine which agent should handle the task.",
-        schema: {
-            classification: {
-                taskType: "<TASK_TYPE>",
-                confidence: "<CONFIDENCE_SCORE>",
-                reason: "<REASON_FOR_CLASSIFICATION>"
-            }
-        },
-    },
-    {
-        name: "USER_RESPONSE",
-        description: "A response to be sent back to the user.",
-        schema: {
-            message: "<MESSAGE_TO_USER>"
-        },
-    },
-    {
-        name: "CLARIFICATION_NEEDED",
-        description: "The questions that need further clarification from the user.",
-        schema: {
-            questions: ["<QUESTION_1>", "<QUESTION_2>", "..."],
-        },
-    },
-];
+const schemaBuilder = new DefaultSchemaBuilder();
 
-const orchestratorCoreConfig: AgentCoreConfig = {
-    name: "OrchestratorAgent",
-    role: "Project Coordinator",
-    goal: "Coordinate the software development process by managing communication between the user and specialized agents, classifying user messages, and directing them to the appropriate agent.",
-    capabilities: "Task classification, task delegation, communication management, project coordination",
+const orchestratorTemplate = {
+  taskType: "<TASK_TYPE>",
+  confidence: "<CONFIDENCE_SCORE>",
+  reason: "<REASON_FOR_CLASSIFICATION>",
 };
 
-const svcConfig = AgentServiceConfigurator.getAgentConfiguration("test/multi-agents");
-const agentBuilder = new AgentBuilder(orchestratorCoreConfig, svcConfig);
-const orchestratorAgent = agentBuilder.build("OrchestratorAgent", orchestratorTypes);
+schemaBuilder.setFormattedOutputForCompletedTask(`
+  ${JSON.stringify(orchestratorTemplate)}
+`);
 
-orchestratorAgent.addInstruction("Task Classification Guidelines", `
+const orchestratorCoreConfig: AgentCoreConfig = {
+  name: "OrchestratorAgent",
+  role: "Project Coordinator",
+  goal: "Coordinate the software development process by managing communication between the user and specialized agents, classifying user messages, and directing them to the appropriate agent.",
+  capabilities:
+    "Task classification, task delegation, communication management, project coordination",
+};
+
+const svcConfig =
+  AgentServiceConfigurator.getAgentConfiguration("test/multi-agents");
+const agentBuilder = new AgentBuilder(orchestratorCoreConfig, svcConfig);
+const orchestratorAgent = agentBuilder.build(
+  "OrchestratorAgent",
+  schemaBuilder.getClassificationTypes()
+);
+
+orchestratorAgent.addInstruction(
+  "Task Classification Guidelines",
+  `
 As the Orchestrator, your primary task is to analyze user messages and determine which specialized agent should handle them as tasks. Follow these guidelines:
 
 1. Carefully read and understand the user's message.
@@ -57,25 +53,13 @@ As the Orchestrator, your primary task is to analyze user messages and determine
 
 3. Provide a confidence score (0-100) for your classification.
 4. Explain the reason for your classification.
-5. If the message is unclear or requires more information, generate clarification questions.
+5. If the message is unclear or requires more information, use the CLARIFICATION_NEEDED output.
 
-Your output should be in the following format, note that the taskType should only be one of the task types listed above and anything else is an error:
-{
-    "classification": {
-        "taskType": "<TASK_TYPE>",
-        "confidence": <CONFIDENCE_SCORE>,
-        "reason": "<REASON_FOR_CLASSIFICATION>"
-    }
-}
+When a task is classified, use the TASK_COMPLETE output with the following structure:
 
-Or, if clarification is needed:
-{
-    "questions": [
-        "<QUESTION_1>",
-        "<QUESTION_2>",
-        "..."
-    ]
-}
-`);
+${JSON.stringify(schemaBuilder.getSchema(DefaultSchemaBuilder.TASK_COMPLETE))}
+
+`
+);
 
 export { orchestratorAgent };

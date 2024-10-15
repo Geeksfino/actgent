@@ -8,6 +8,7 @@ export { AgentServiceConfigurator } from './AgentServiceConfigurator';
 export { AbstractClassifier } from './AbstractClassifier';
 export { DefaultClassifier } from './DefaultClassifier';
 export { IClassifier, ClassificationTypeConfig, ClassifiedTypeHandlers } from './IClassifier';
+export { DefaultSchemaBuilder } from './DefaultSchemaBuilder';
 
 // Communication
 export { Communication } from './Communication';

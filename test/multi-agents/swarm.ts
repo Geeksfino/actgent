@@ -1,6 +1,7 @@
 import {
   Session,
   LoggingConfig,
+  DefaultSchemaBuilder,
 } from "@finogeeks/actgent";
 import fs from "fs";
 import path from "path";
@@ -62,31 +63,58 @@ async function orchestrateWorkflow(desc: string, projectDir: string): Promise<vo
 
   const sessions: { [key: string]: Session } = {};
   let currentInput = desc;
-  let orchestratorSession = await orchestratorAgent.createSession("User", currentInput);
+  let orchestratorSession;
 
   while (true) {
     console.log("Current input:", currentInput);
-    const result = await new Promise<any>((resolve) => {
+    if (!orchestratorSession) {
+      orchestratorSession = await orchestratorAgent.createSession("User", currentInput);
+    } else {
+      orchestratorSession.chat(currentInput);
+    }
+    const res = await new Promise<any>((resolve) => {
       orchestratorSession.onEvent((data) => {
-        if (data.messageType === "TASK_CLASSIFICATION") {
-          resolve(data.classification);
-        } else if (data.messageType === "CLARIFICATION_NEEDED") {
-          resolve({ questions: data.questions });
-        }
+        resolve(JSON.stringify(data));
       });
-      //orchestratorSession.chat(currentInput);
     });
-    console.log("orchestration:", JSON.stringify(result, null, 2));
+    const response = JSON.parse(res);
+    console.log("orchestration:", response);
+    const content = response.content;
+    console.log("content:", content);
 
-    if (result.questions) {
+    if (response.messageType === DefaultSchemaBuilder.CLARIFICATION_NEEDED) {
       const clarification = await getUserInput(
-        "Clarification needed:\n" + result.questions.join("\n") + "\n\nYour response: "
+        "Clarification needed:\n" + content.questions.join("\n") + "\n\nYour response: "
       );
       currentInput = clarification;
       continue;
     }
 
-    const { taskType, confidence, reason } = result;
+    if (response.messageType === DefaultSchemaBuilder.CONFIRMATION_NEEDED) {
+      const confirmation = await getUserInput(
+        "Confirmation needed:\n" + content.prompt + "\nOptions:\n" + content.options.join("\n") + "\n\nYour response: "
+      );
+      currentInput = confirmation;
+      continue;
+    }
+
+    if (response.messageType === DefaultSchemaBuilder.ERROR_OR_UNABLE) {
+      currentInput = await getUserInput(
+        "Error or unable to process your request: " + content.reason + "\n" + content.suggestedAction +  "\n\nPlease rephrase your request: "
+      );
+      continue;
+    }
+
+    if (response.messageType === DefaultSchemaBuilder.COMMAND) {
+      console.log("command:", content.command);
+      continue;
+    }
+
+    const task = JSON.parse(content.result);
+    console.log("taskType:", task.taskType);
+    console.log("confidence:", task.confidence);
+    console.log("reason:", task.reason);
+    const { taskType, confidence, reason } = task;
     console.log(`Classified as ${taskType} (Confidence: ${confidence}%)`);
     console.log(`Reason: ${reason}`);
 
@@ -112,62 +140,39 @@ async function orchestrateWorkflow(desc: string, projectDir: string): Promise<vo
     }
 
     const agentSession = sessions[taskType];
+    agentSession.chat(currentInput);
     const agentResult = await new Promise<any>((resolve) => {
       agentSession.onEvent((data) => {
-        if (data.messageType === "CLARIFICATION_NEEDED") {
-          promptForClarification(data.questions, agentSession, orchestratorSession).then(resolve);
-        } else {
-          resolve(data);
-        }
+        resolve(JSON.stringify(data));
       });
     });
 
-    console.log(`${taskType} result:`, JSON.stringify(agentResult, null, 2));
-
-    if (taskType === "FRONTEND_DEVELOPMENT") {
-      deserializeMiniProgram(JSON.stringify(agentResult.generatedCode), projectDir);
+    const r = JSON.parse(agentResult);
+    console.log(`=====${taskType} result======`, r);
+    console.log(`=====${taskType} result======`, r.messageType);
+    if (taskType === "FRONTEND_DEVELOPMENT" && r.messageType === DefaultSchemaBuilder.TASK_COMPLETE) {
+        const val = JSON.parse(r.content.result);
+        const generatedCode = val.generatedCode;
+        console.log("generatedCode:", generatedCode);
+        deserializeMiniProgram(JSON.stringify(generatedCode), projectDir);
       break;
     }
 
-    orchestratorSession.chat(`Task completed by ${taskType}. Result: ${JSON.stringify(agentResult)}. What is the next step?`); 
-  }
-}
+    if (r.messageType === DefaultSchemaBuilder.CLARIFICATION_NEEDED ||
+        r.messageType === DefaultSchemaBuilder.CONFIRMATION_NEEDED ||
+        r.messageType === DefaultSchemaBuilder.ERROR_OR_UNABLE) {
+      // Relay the agent's request back to the orchestrator
+      currentInput = `Agent ${taskType} needs assistance: ${r}`;
+      orchestratorSession.chat(currentInput);
+      continue;
+    }
 
-async function promptForClarification(
-  questions: string[],
-  agentSession: Session,
-  orchestratorSession: Session
-): Promise<any> {
-  const orchestratorResponse = await new Promise<any>((resolve) => {
-    orchestratorSession.onEvent((data) => {
-      if (data.messageType === "TASK_CLASSIFICATION") {
-        resolve(data.classification);
-      } else if (data.messageType === "CLARIFICATION_NEEDED") {
-        resolve({ questions: data.questions });
-      }
-    });
-    orchestratorSession.chat(`Agent needs clarification: ${JSON.stringify(questions)}`);
-  });
+    currentInput = `Task completed by ${taskType}. Result: ${r}. What is the next step?`;
 
-  if (orchestratorResponse.taskType === "USER") {
-    const answer = await getUserInput(
-      "Please provide clarification for the following questions:\n" +
-      questions.join("\n") +
-      "\n\n>"
-    );
-    return new Promise<any>((resolve) => {
-      agentSession.onEvent((data) => {
-        if (data.messageType === "PRODUCT_MANAGEMENT" || data.messageType === "SPEC_WRITING" || data.messageType === "FRONTEND_DEVELOPMENT") {
-          resolve(data);
-        } else if (data.messageType === "CLARIFICATION_NEEDED") {
-          promptForClarification(data.questions, agentSession, orchestratorSession).then(resolve);
-        }
-      });
-      agentSession.chat(answer);
-    });
-  } else {
-    // Let the orchestrator handle the clarification with another agent
-    return orchestratorResponse;
+    // At the end of the loop, we need to send the next message
+    if (currentInput !== desc) {  // Skip for the first iteration
+      orchestratorSession.chat(currentInput);
+    }
   }
 }
 
