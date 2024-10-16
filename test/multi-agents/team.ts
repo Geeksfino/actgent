@@ -69,10 +69,10 @@ async function orchestrateWorkflow(desc: string, projectDir: string) {
   const productPlan = await new Promise<any>((resolve) => {
     pmSession.onEvent((data) => {
       if (data.messageType === DefaultSchemaBuilder.TASK_COMPLETE) {
-        resolve(data.result);
+        resolve(data.content.result);
       } else if (data.messageType === DefaultSchemaBuilder.CLARIFICATION_NEEDED) {
         //console.log("Clarification needed:", data.questions);
-        promptForClarification(data.questions, pmSession).then(resolve);
+        promptForClarification(data.content.questions, pmSession).then(resolve);
       } else {
         console.log("Received event:", data);
         resolve(data);
@@ -86,10 +86,10 @@ async function orchestrateWorkflow(desc: string, projectDir: string) {
     swSession.onEvent((data) => {
       //console.log("Received event:", data);
       if (data.messageType === DefaultSchemaBuilder.TASK_COMPLETE) {
-        resolve(data.result);
+        resolve(data.content.result);
       } else if (data.messageType === DefaultSchemaBuilder.CLARIFICATION_NEEDED) {
         //console.log("Clarification needed:", data.questions);
-        promptForClarification(data.questions, swSession).then(resolve);
+        promptForClarification(data.content.questions, swSession).then(resolve);
       } else {
         console.log("Received event:", data);
         resolve(data);
@@ -135,15 +135,19 @@ async function orchestrateWorkflow(desc: string, projectDir: string) {
     const miniProgramProject = await new Promise<any>((resolve) => {
       frontendSession.onEvent((data) => {
           if (data.messageType === DefaultSchemaBuilder.TASK_COMPLETE) {
-            resolve(data.result);
+            resolve(data);
           } else if (data.messageType === DefaultSchemaBuilder.CLARIFICATION_NEEDED) {
             //console.log("Clarification needed:", data.questions);
-            promptForClarification(data.questions, frontendSession).then(resolve);
+            promptForClarification(data.content.questions, frontendSession).then(resolve);
           }
       });
     });
-    console.log("Mini-program project generated:", miniProgramProject);
-    deserializeMiniProgram(JSON.stringify(miniProgramProject), projectDir);
+    const r = JSON.parse(miniProgramProject);
+    const val = JSON.parse(r.content.result);
+    const generatedCode = val.generatedCode;
+    console.log("generatedCode:", generatedCode);
+    console.log("Mini-program project generated:", generatedCode);
+    deserializeMiniProgram(JSON.stringify(generatedCode), projectDir);
 
   //     new Promise<any>((resolve) => {
   //       backendSession.onEvent((data) => {
@@ -215,8 +219,8 @@ async function promptForClarification(
       if (data.messageType === DefaultSchemaBuilder.TASK_COMPLETE) {
         resolve(data.spec);
       } else if (data.messageType === DefaultSchemaBuilder.CLARIFICATION_NEEDED) {
-        console.log("Additional clarification needed:", data.questions);
-        promptForClarification(data.questions, session).then(resolve);
+        console.log("Additional clarification needed:", data.content.questions);
+        promptForClarification(data.content.questions, session).then(resolve);
       }
     });
   });

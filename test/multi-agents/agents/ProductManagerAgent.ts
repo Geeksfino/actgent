@@ -9,6 +9,9 @@ import { DefaultSchemaBuilder } from "@finogeeks/actgent";
 const schemaBuilder = new DefaultSchemaBuilder();
 
 const productManagerTemplate = {
+  productName: "<PRODUCT_NAME>",
+  productDescription: "<PRODUCT_DESCRIPTION>",
+  productCategory: "<PRODUCT_CATEGORY>",
   productOverview: "<PRODUCT_OVERVIEW>",
   targetAudience: "<TARGET_AUDIENCE_DESCRIPTION>",
   features: [

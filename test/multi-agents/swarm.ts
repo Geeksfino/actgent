@@ -8,16 +8,16 @@ import path from "path";
 import readline from "readline";
 import os from "os";
 import { deserializeMiniProgram } from "./utils";
-import { orchestratorAgent } from './agents/OrchestratorAgent';
-import { productManagerAgent } from './agents/ProductManagerAgent';
+import { orchestratorAgent } from "./agents/OrchestratorAgent";
+import { productManagerAgent } from "./agents/ProductManagerAgent";
 import { specWriterAgent } from "./agents/SpecWriterAgent";
-import { frontendDevAgent } from './agents/FrontendDevAgent';
+import { frontendDevAgent } from "./agents/FrontendDevAgent";
 
 const agents = {
-    REQUIREMENTS: orchestratorAgent,
-    PRODUCT_MANAGEMENT: productManagerAgent,
-    SPEC_WRITING: specWriterAgent,
-    FRONTEND_DEVELOPMENT: frontendDevAgent,
+  REQUIREMENTS: orchestratorAgent,
+  PRODUCT_MANAGEMENT: productManagerAgent,
+  SPEC_WRITING: specWriterAgent,
+  FRONTEND_DEVELOPMENT: frontendDevAgent,
   // Add other agents as needed
 };
 
@@ -36,7 +36,7 @@ async function getUserInput(prompt: string): Promise<string> {
       });
     });
 
-    if (answer === '/exit') {
+    if (answer === "/exit") {
       console.log("Exiting the program.");
       process.exit(0);
     }
@@ -58,121 +58,345 @@ function expandTilde(filePath: string): string {
   return filePath;
 }
 
-async function orchestrateWorkflow(desc: string, projectDir: string): Promise<void> {
+// Define the message types
+type ClarificationNeededMessage = {
+  messageType: typeof DefaultSchemaBuilder.CLARIFICATION_NEEDED;
+  content: {
+    questions: string[];
+  };
+};
+
+type ConfirmationNeededMessage = {
+  messageType: typeof DefaultSchemaBuilder.CONFIRMATION_NEEDED;
+  content: {
+    prompt: string;
+    options: string[];
+  };
+};
+
+type TaskCompleteMessage = {
+  messageType: typeof DefaultSchemaBuilder.TASK_COMPLETE;
+  content: {
+    result: string;
+  };
+};
+
+type ErrorOrUnableMessage = {
+  messageType: typeof DefaultSchemaBuilder.ERROR_OR_UNABLE;
+  content: {
+    reason: string;
+    suggestedAction: string;
+  };
+};
+
+type CommandMessage = {
+  messageType: typeof DefaultSchemaBuilder.COMMAND;
+  content: {
+    action: string;
+    parameters: Record<string, string>;
+  };
+};
+
+type UserInputMessage = {
+  messageType: "USER_INPUT";
+  content: string;
+};
+
+type AgentMessage =
+  | ClarificationNeededMessage
+  | ConfirmationNeededMessage
+  | TaskCompleteMessage
+  | ErrorOrUnableMessage
+  | CommandMessage
+  | UserInputMessage;
+
+interface MessageContext {
+  originator: string;
+  recipient: string;
+  content: AgentMessage;
+}
+
+// Add this function to get the agent name
+function getAgentName(taskType: string): string {
+  if (taskType === "ORCHESTRATOR" || taskType === "USER") {
+    return taskType;
+  }
+  const agent = agents[taskType];
+  return agent ? agent.getName() : taskType;
+}
+
+function extractMessageContent(message: AgentMessage): string {
+  switch (message.messageType) {
+    case DefaultSchemaBuilder.CLARIFICATION_NEEDED:
+      return message.content.questions.join("\n");
+    case DefaultSchemaBuilder.CONFIRMATION_NEEDED:
+      return `${message.content.prompt}\nOptions:\n${message.content.options.join("\n")}`;
+    case DefaultSchemaBuilder.TASK_COMPLETE:
+      return message.content.result;
+    case DefaultSchemaBuilder.ERROR_OR_UNABLE:
+      return `${message.content.reason}\n${message.content.suggestedAction}`;
+    case DefaultSchemaBuilder.COMMAND:
+      return `Action: ${message.content.action}\nParameters: ${JSON.stringify(message.content.parameters)}`;
+    case "USER_INPUT":
+      return message.content;
+    default:
+      return JSON.stringify(message);
+  }
+}
+
+async function orchestrateWorkflow(
+  desc: string,
+  projectDir: string
+): Promise<void> {
   console.log("Starting the software development process...");
 
   const sessions: { [key: string]: Session } = {};
-  let currentInput = desc;
-  let orchestratorSession;
+  let orchestratorSession: Session;
+  let messageQueue: MessageContext[] = [];
 
-  while (true) {
-    console.log("Current input:", currentInput);
-    if (!orchestratorSession) {
-      orchestratorSession = await orchestratorAgent.createSession("User", currentInput);
-    } else {
-      orchestratorSession.chat(currentInput);
-    }
-    const res = await new Promise<any>((resolve) => {
-      orchestratorSession.onEvent((data) => {
-        resolve(JSON.stringify(data));
+  function enqueueMessage(
+    originator: string,
+    recipient: string,
+    content: AgentMessage
+  ) {
+    messageQueue.push({ originator, recipient, content });
+  }
+
+  async function processMessage(context: MessageContext): Promise<void> {
+    const { originator, recipient, content } = context;
+    const originatorName = getAgentName(originator);
+    const recipientName = getAgentName(recipient);
+    console.log(
+      `Processing message from ${originatorName} to ${recipientName}: ${extractMessageContent(content)}`
+    );
+
+    if (recipient === "ORCHESTRATOR") {
+      const messageContent = extractMessageContent(content);
+      console.log("messageContent:", messageContent);
+      if (!orchestratorSession) {
+        orchestratorSession = await orchestratorAgent.createSession(
+          "User",
+          messageContent
+        );
+      } else {
+        orchestratorSession.chat(messageContent);
+      }
+
+      const response = await new Promise<AgentMessage>((resolve) => {
+        orchestratorSession.onEvent((data) => {
+          resolve(data as AgentMessage);
+        });
       });
-    });
-    const response = JSON.parse(res);
-    console.log("orchestration:", response);
-    const content = response.content;
-    console.log("content:", content);
 
-    if (response.messageType === DefaultSchemaBuilder.CLARIFICATION_NEEDED) {
-      const clarification = await getUserInput(
-        "Clarification needed:\n" + content.questions.join("\n") + "\n\nYour response: "
+      if (
+        response.messageType === DefaultSchemaBuilder.CLARIFICATION_NEEDED ||
+        response.messageType === DefaultSchemaBuilder.CONFIRMATION_NEEDED ||
+        response.messageType === DefaultSchemaBuilder.ERROR_OR_UNABLE
+      ) {
+        let prompt: string;
+
+        if (
+          response.messageType === DefaultSchemaBuilder.CLARIFICATION_NEEDED
+        ) {
+          prompt = response.content.questions.join("\n");
+        } else if (
+          response.messageType === DefaultSchemaBuilder.CONFIRMATION_NEEDED
+        ) {
+          prompt = `${response.content.prompt}\nOptions:\n${response.content.options.join("\n")}`;
+        } else {
+          prompt = `${response.content.reason}\n${response.content.suggestedAction}`;
+        }
+
+        if (originator === "USER") {
+          const userInput = await getUserInput(prompt + "\n\nYour response: ");
+          enqueueMessage("USER", "ORCHESTRATOR", {
+            messageType: "USER_INPUT",
+            content: userInput,
+          });
+        } else {
+          const userInput = await getUserInput(prompt + "\n\nYour response: ");
+          enqueueMessage("ORCHESTRATOR", originator, {
+            messageType: "USER_INPUT",
+            content: userInput,
+          });
+        }
+        return;
+      }
+
+      if (response.messageType === DefaultSchemaBuilder.COMMAND) {
+        console.log("command===>:", response.content);
+        return;
+      }
+
+      // The orchestrator agent has classified the task and the confidence level
+      const task = JSON.parse(extractMessageContent(response));
+      const { taskType, confidence } = task;
+
+      if (confidence < 70 && originator === "USER") {
+        const confirmation = await getUserInput(
+          `Low confidence classification. Proceed with ${taskType}? (yes/no): `
+        );
+        if (confirmation.toLowerCase() !== "yes") {
+          const newInput = await getUserInput("Please rephrase your request: ");
+          enqueueMessage("USER", "ORCHESTRATOR", {
+            messageType: "USER_INPUT",
+            content: newInput,
+          });
+          return;
+        }
+      }
+
+      if (taskType == "DECISION_MAKING") {
+        const decisionMakingMessage: ConfirmationNeededMessage = {
+          messageType: DefaultSchemaBuilder.CONFIRMATION_NEEDED,
+          content: {
+            prompt: task.result.prompt  ,
+            options: task.result.options,
+          },
+        };
+        enqueueMessage("ORCHESTRATOR", "USER", decisionMakingMessage);
+        return;
+      }
+
+      if (taskType == "OTHER") {
+        const otherMessage: ErrorOrUnableMessage = {
+          messageType: DefaultSchemaBuilder.ERROR_OR_UNABLE,
+          content: {
+            reason: "The topic is not clear. Please rephrase your request.",
+            suggestedAction: "Please provide a clear and concise request.",
+          },
+        };
+        enqueueMessage("ORCHESTRATOR", "USER", otherMessage);
+        return;
+      }
+
+      // The task is classified and can be handled by the target agent and the confidence level is high enough to proceed
+      const targetAgent = agents[taskType];
+      if (!targetAgent) {
+        console.log(`No agent available for ${taskType}. Skipping.`);
+        if (originator === "USER") {
+          const newInput = await getUserInput(
+            "Please provide the next instruction: "
+          );
+          enqueueMessage("USER", "ORCHESTRATOR", {
+            messageType: "USER_INPUT",
+            content: newInput,
+          });
+        }
+        return;
+      }
+
+      console.log(
+        `Enqueueing message from ORCHESTRATOR to ${getAgentName(taskType)}`
       );
-      currentInput = clarification;
-      continue;
-    }
+      enqueueMessage("ORCHESTRATOR", taskType, content);
 
-    if (response.messageType === DefaultSchemaBuilder.CONFIRMATION_NEEDED) {
-      const confirmation = await getUserInput(
-        "Confirmation needed:\n" + content.prompt + "\nOptions:\n" + content.options.join("\n") + "\n\nYour response: "
-      );
-      currentInput = confirmation;
-      continue;
-    }
+    } else if (recipient === "USER") {
+      let userInput: string;
+      if (content.messageType === DefaultSchemaBuilder.CLARIFICATION_NEEDED) {
+        userInput = await getUserInput(
+          `Clarification needed:\n${content.content.questions.join("\n")}\n\nYour response: `
+        );
+      } else if (
+        content.messageType === DefaultSchemaBuilder.CONFIRMATION_NEEDED
+      ) {
+        userInput = await getUserInput(
+          `Confirmation needed:\n${content.content.prompt}\nOptions:\n${content.content.options.join("\n")}\n\nYour response: `
+        );
+      } else if (content.messageType === DefaultSchemaBuilder.ERROR_OR_UNABLE) {
+        userInput = await getUserInput(
+          `Error: ${content.content.reason}\n${content.content.suggestedAction}\n\nPlease provide new instructions: `
+        );
+      } else {
+        userInput = await getUserInput(
+          `Message from ${originator}: ${JSON.stringify(content)}\n\nYour response: `
+        );
+      }
+      enqueueMessage("USER", "ORCHESTRATOR", {
+        messageType: "USER_INPUT",
+        content: userInput,
+      });
+    } else {
+      // Message is for a specific agent
+      const messageContent = extractMessageContent(content);
 
-    if (response.messageType === DefaultSchemaBuilder.ERROR_OR_UNABLE) {
-      currentInput = await getUserInput(
-        "Error or unable to process your request: " + content.reason + "\n" + content.suggestedAction +  "\n\nPlease rephrase your request: "
-      );
-      continue;
-    }
+      if (!sessions[recipient]) {
+        sessions[recipient] = await agents[recipient].createSession(
+          "Orchestrator",
+          messageContent
+        );
+      } else {
+        sessions[recipient].chat(messageContent);
+      }
 
-    if (response.messageType === DefaultSchemaBuilder.COMMAND) {
-      console.log("command:", content.command);
-      continue;
-    }
+      const agentResponse = await new Promise<AgentMessage>((resolve) => {
+        sessions[recipient].onEvent((data) => {
+          resolve(data as AgentMessage);
+        });
+      });
 
-    const task = JSON.parse(content.result);
-    console.log("taskType:", task.taskType);
-    console.log("confidence:", task.confidence);
-    console.log("reason:", task.reason);
-    const { taskType, confidence, reason } = task;
-    console.log(`Classified as ${taskType} (Confidence: ${confidence}%)`);
-    console.log(`Reason: ${reason}`);
+      if (agentResponse.messageType === DefaultSchemaBuilder.TASK_COMPLETE) {
 
-    if (confidence < 70) {
-      const confirmation = await getUserInput(
-        `Low confidence classification. Proceed with ${taskType}? (yes/no): `
-      );
-      if (confirmation.toLowerCase() !== 'yes') {
-        currentInput = await getUserInput("Please rephrase your request: ");
-        continue;
+        if (recipient === "FRONTEND_DEVELOPMENT") {  
+          console.log("agentResponse:", agentResponse.content.result);
+          const val = JSON.parse(agentResponse.content.result);
+          const generatedCode = val.generatedCode;
+          console.log("generatedCode:", generatedCode);
+          deserializeMiniProgram(JSON.stringify(generatedCode), projectDir);
+          console.log("Project completed successfully!");
+          return;
+        }
+
+        const agentName = getAgentName(recipient);
+        const originatorName = getAgentName(originator);
+        console.log(`Enqueueing message from agent ${agentName} to ${originatorName}`);
+
+        const taskCompleteMessage: TaskCompleteMessage = {
+          messageType: DefaultSchemaBuilder.TASK_COMPLETE,
+          content: {
+            result: JSON.stringify(agentResponse.content.result),
+          },
+        };
+        enqueueMessage(recipient, originator, taskCompleteMessage);
+      } else if (agentResponse.messageType === DefaultSchemaBuilder.ERROR_OR_UNABLE) {
+        const errorOrUnableMessage: ErrorOrUnableMessage = {
+          messageType: DefaultSchemaBuilder.ERROR_OR_UNABLE,
+          content: {
+            reason: agentResponse.content.reason,
+            suggestedAction: agentResponse.content.suggestedAction,
+          },
+        };
+        enqueueMessage(recipient, originator, errorOrUnableMessage);
+      } else if (agentResponse.messageType === DefaultSchemaBuilder.CLARIFICATION_NEEDED) {
+        const clarificationNeededMessage: ClarificationNeededMessage = {    
+          messageType: DefaultSchemaBuilder.CLARIFICATION_NEEDED,
+          content: {
+            questions: agentResponse.content.questions,
+          },
+        };
+        enqueueMessage(recipient, originator, clarificationNeededMessage);
+      } else if (agentResponse.messageType === DefaultSchemaBuilder.CONFIRMATION_NEEDED) {
+        const confirmationNeededMessage: ConfirmationNeededMessage = {
+          messageType: DefaultSchemaBuilder.CONFIRMATION_NEEDED,
+          content: {
+            prompt: agentResponse.content.prompt,
+            options: agentResponse.content.options,
+          },
+        };
+        enqueueMessage(recipient, originator, confirmationNeededMessage);
       }
     }
+  }
 
-    const targetAgent = agents[taskType];
-    if (!targetAgent) {
-      console.log(`No agent available for ${taskType}. Skipping.`);
-      currentInput = await getUserInput("Please provide the next instruction: ");
-      continue;
-    }
+  // Initial message
+  enqueueMessage("USER", "ORCHESTRATOR", {
+    messageType: "USER_INPUT",
+    content: desc,
+  });
 
-    if (!sessions[taskType]) {
-      sessions[taskType] = await targetAgent.createSession("Orchestrator", currentInput);
-    }
-
-    const agentSession = sessions[taskType];
-    agentSession.chat(currentInput);
-    const agentResult = await new Promise<any>((resolve) => {
-      agentSession.onEvent((data) => {
-        resolve(JSON.stringify(data));
-      });
-    });
-
-    const r = JSON.parse(agentResult);
-    console.log(`=====${taskType} result======`, r);
-    console.log(`=====${taskType} result======`, r.messageType);
-    if (taskType === "FRONTEND_DEVELOPMENT" && r.messageType === DefaultSchemaBuilder.TASK_COMPLETE) {
-        const val = JSON.parse(r.content.result);
-        const generatedCode = val.generatedCode;
-        console.log("generatedCode:", generatedCode);
-        deserializeMiniProgram(JSON.stringify(generatedCode), projectDir);
-      break;
-    }
-
-    if (r.messageType === DefaultSchemaBuilder.CLARIFICATION_NEEDED ||
-        r.messageType === DefaultSchemaBuilder.CONFIRMATION_NEEDED ||
-        r.messageType === DefaultSchemaBuilder.ERROR_OR_UNABLE) {
-      // Relay the agent's request back to the orchestrator
-      currentInput = `Agent ${taskType} needs assistance: ${r}`;
-      orchestratorSession.chat(currentInput);
-      continue;
-    }
-
-    currentInput = `Task completed by ${taskType}. Result: ${r}. What is the next step?`;
-
-    // At the end of the loop, we need to send the next message
-    if (currentInput !== desc) {  // Skip for the first iteration
-      orchestratorSession.chat(currentInput);
-    }
+  while (messageQueue.length > 0) {
+    const message = messageQueue.shift()!;
+    await processMessage(message);
   }
 }
 
@@ -220,7 +444,7 @@ async function main() {
     await agent.run(loggingConfig);
 
     agent.registerStreamCallback((delta: string) => {
-      console.log(`${agent.getName()} output:`, delta);
+      console.log(`${agent.getName()}:`, delta);
     });
   }
 

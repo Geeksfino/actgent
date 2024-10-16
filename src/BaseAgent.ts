@@ -97,7 +97,6 @@ export abstract class BaseAgent<
 
   protected handleLLMResponse(response: string | InferClassificationUnion<T>, session: Session) {
     let parsedResponse: InferClassificationUnion<T>;
-    
     if (typeof response === 'string') {
       try {
         parsedResponse = JSON.parse(response);
@@ -108,7 +107,6 @@ export abstract class BaseAgent<
     } else {
       parsedResponse = response;
     }
-    
     this.classifier.handleLLMResponse(parsedResponse, session);
   }
 

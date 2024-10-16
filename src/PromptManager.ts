@@ -63,7 +63,7 @@ export class PromptManager {
 
     if (sessionContext) {
       const messages = sessionContext.getMessages().map(msg => msg.payload.input).join('\n');
-      console.log(`PromptManager Messages===> [ ${messages} ]`);
+      //console.log(`PromptManager Messages===> [ ${messages} ]`);
       prompt = messages + prompt;
     } 
 

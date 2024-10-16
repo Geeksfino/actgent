@@ -231,8 +231,9 @@ export class AgentCore {
     //this.log(`System prompt: ${this.promptManager.getSystemPrompt()}`);
     const sessionContext = this.contextManager[message.sessionId];
 
-    // console.log("<========= Resolved prompt =========>");
-    // console.log(
+    // this.log(message.sessionId, "<------ Resolved prompt ------->");
+    // this.log(
+    //   message.sessionId,
     //   AgentCore.formatMulltiLine(
     //     JSON.stringify(
     //       this.promptManager.resolvePrompt(
@@ -245,7 +246,7 @@ export class AgentCore {
     //     )
     //   )
     // );
-    // console.log("<======================================>");
+    // this.log(message.sessionId, "<------ Resolved prompt ------->");
 
     try {
       let responseContent = "";
@@ -315,7 +316,6 @@ export class AgentCore {
     owner: string,
     description: string
   ): Promise<Session> {
-    console.log("createSession called with description:", description);
 
     // Construct a Session object
     const s: Session = new Session(this, owner, "", description, "");
@@ -326,6 +326,9 @@ export class AgentCore {
     // Create a Message object with session ID and description
     const message = new Message(s.sessionId, s.description);
     this.inbox.enqueue(message); // Enqueue the message
+    this.log(message.sessionId, "createSession called with description:");
+    this.log(message.sessionId, description);
+
     return s;
   }
 

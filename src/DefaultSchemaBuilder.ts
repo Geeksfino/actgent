@@ -2,6 +2,7 @@ import { ClassificationTypeConfig } from './IClassifier';
 
 export class DefaultSchemaBuilder {
     private classificationTypes: ClassificationTypeConfig[];
+    private isJson: boolean = true;
 
     // Constants for classification type names
     static readonly CLARIFICATION_NEEDED = "CLARIFICATION_NEEDED";
@@ -36,25 +37,24 @@ export class DefaultSchemaBuilder {
                 description: "When a final result or answer has been generated and no further action is required, use this output structure.",
                 schema: {
                     content: {
-                        result: "<FINAL_RESULT_OR_ANSWER>",
-                        summary: "<BRIEF_SUMMARY_OF_RESULT>",
+                        result: "<FINAL_RESULT_OR_ANSWER>"
                     }
                 }
             },
-            {
-                name: DefaultSchemaBuilder.COMMAND,
-                description: "When a specific action needs to be performed or a tool needs to be used before proceeding, respond with this output structure.",
-                schema: {
-                    content: {
-                        action: "<ACTION_NAME>",
-                        parameters: {
-                            "<PARAM_1_NAME>": "<PARAM_1_VALUE>",
-                            "<PARAM_2_NAME>": "<PARAM_2_VALUE>",
-                            "...": "..."
-                        }
-                    }
-                }
-            },
+            // {
+            //     name: DefaultSchemaBuilder.COMMAND,
+            //     description: "When a pre-registered tool needs to be used before proceeding, respond with this output structure.",
+            //     schema: {
+            //         content: {
+            //             action: "<TOOL_NAME>",
+            //             parameters: {
+            //                 "<PARAM_1_NAME>": "<PARAM_1_VALUE>",
+            //                 "<PARAM_2_NAME>": "<PARAM_2_VALUE>",
+            //                 "...": "..."
+            //             }
+            //         }
+            //     }
+            // },
             {
                 name: DefaultSchemaBuilder.ERROR_OR_UNABLE,
                 description: "When the task cannot be completed due to errors, insufficient information, or other constraints, use this output structure.",
@@ -108,7 +108,13 @@ export class DefaultSchemaBuilder {
         }
     }
 
-    public setFormattedOutputForCompletedTask(formattedOutput: string): void {
+    public setFormattedOutputForCompletedTask(formattedOutput: string, isJson: boolean = true): void {
+        if (isJson) {
+            this.isJson = true;
+        } else {
+            this.isJson = false;
+        }
+
         const taskCompleteType = this.classificationTypes.find(t => t.name === DefaultSchemaBuilder.TASK_COMPLETE);
         if (taskCompleteType) {
             taskCompleteType.schema.content.result = formattedOutput;

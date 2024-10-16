@@ -1,95 +1,93 @@
-import { AgentBuilder, AgentServiceConfigurator, AgentCoreConfig } from '@finogeeks/actgent';
-import { DefaultSchemaBuilder } from '@finogeeks/actgent';
+import {
+  AgentBuilder,
+  AgentServiceConfigurator,
+  AgentCoreConfig,
+} from "@finogeeks/actgent";
+import { DefaultSchemaBuilder } from "@finogeeks/actgent";
 
 const schemaBuilder = new DefaultSchemaBuilder();
 
 const frontendDevTemplate = {
-    generatedCode: {
-      name: "<MINIPROGRAM_NAME>",
-      description: "<MINIPROGRAM_DESCRIPTION>",
-      category: "<MINIPROGRAM_CATEGORY>",
-      appJs: "<GLOBAL_INITIALIZATION_CODE>",
-      appWxss: "<GLOBAL_STYLE_SHEET>",
-      appJson: {
-        pages: ["<LIST_OF_PAGE_PATHS>"],
-        window: {
-          backgroundTextStyle: "light",
-          navigationBarBackgroundColor: "<HEX_COLOR>",
-          navigationBarTitleText: "<TITLE>",
-          navigationBarTextStyle: "<BLACK_OR_WHITE>"
-        },
-        tabBar: {
-          color: "<HEX_COLOR>",
-          selectedColor: "<HEX_COLOR>",
-          backgroundColor: "<HEX_COLOR>",
-          borderStyle: "<BLACK_OR_WHITE>",
-          list: [
-            {
-              pagePath: "<PATH_TO_PAGE>",
-              text: "<TAB_TEXT>"
-            }
-          ]
-        }
+  generatedCode: {
+    name: "<MINIPROGRAM_NAME>",
+    description: "<MINIPROGRAM_DESCRIPTION>",
+    category: "<MINIPROGRAM_CATEGORY>",
+    appJs: "<GLOBAL_INITIALIZATION_CODE>",
+    appWxss: "<GLOBAL_STYLE_SHEET>",
+    appJson: {
+      pages: ["<LIST_OF_PAGE_PATHS>"],
+      window: {
+        backgroundTextStyle: "light",
+        navigationBarBackgroundColor: "<HEX_COLOR>",
+        navigationBarTitleText: "<TITLE>",
+        navigationBarTextStyle: "<BLACK_OR_WHITE>",
       },
-      projectJson: {
-        description: "<PROJECT_DESCRIPTION>",
-        "packOptions": {
-          "ignore": []
-        },
-        "setting": {
-          "es6": true,
-          "useOldBuilder": false
-        },
-        "compileType": "miniprogram",
-        "appid": "",
-        "projectname": "<project-name>",
-        "isGameTourist": false,
-        "projectType": 0,
-        "buildOption": {
-          "compilerSource": "wx"
-        }
-      },
-      sitemapJson: {
-        rules: []
-      },
-      pages: [
-        {
-          name: "<PAGE_NAME>",
-          wxml: "<WXML_CODE>",
-          wxss: "<WXSS_CODE>",
-          js: "<JAVASCRIPT_CODE>",
-          json: {
-            navigationBarTitleText: "<PAGE_TITLE>"
-          }
-        }
-      ],
-      images: [
-        {
-          path: "<IMAGE_URL>",
-          content: "<BASE64_OR_FILE_DATA>"
-        }
-      ]
+      // "<OPTIONAL_TABBAR_CONFIG_HERE>"
     },
-  summary: "<BRIEF_SUMMARY_OF_RESULT>"
+    projectJson: {
+      description: "<PROJECT_DESCRIPTION>",
+      packOptions: {
+        ignore: [],
+      },
+      setting: {
+        es6: true,
+        useOldBuilder: false,
+      },
+      compileType: "miniprogram",
+      appid: "",
+      projectname: "<project-name>",
+      isGameTourist: false,
+      projectType: 0,
+      buildOption: {
+        compilerSource: "wx",
+      },
+    },
+    sitemapJson: {
+      rules: [],
+    },
+    pages: [
+      {
+        name: "<PAGE_NAME>",
+        wxml: "<WXML_CODE>",
+        wxss: "<WXSS_CODE>",
+        js: "<JAVASCRIPT_CODE>",
+        json: {
+          navigationBarTitleText: "<PAGE_TITLE>",
+        },
+      },
+    ],
+    images: [
+      {
+        path: "<IMAGE_URL>",
+        content: "<BASE64_OR_FILE_DATA>",
+      },
+    ],
+  }
 };
-
 schemaBuilder.setFormattedOutputForCompletedTask(`
   ${JSON.stringify(frontendDevTemplate)}
 `);
 
 const frontendDevCoreConfig: AgentCoreConfig = {
-    name: "FrontendDevAgent",
-    role: "WeChat Mini-Program Developer",
-    goal: " As a WeChat mini-program developer, your task is to generate the code for a mini-program based on the given specification. Provide the necessary code files, including app.js, app.wxss, app.json, fide.project.config.json, and sitemap.json. Generate the wxml, wxss, js, and json files for each page",
-    capabilities: "WeChat mini-program development, world-class skills with UI implementation using JavaScript, CSS, XML, HTML5, WXML, WXSS",
+  name: "FrontendDevAgent",
+  role: "WeChat Mini-Program Developer",
+  goal: " As a WeChat mini-program developer, your task is to generate the code for a mini-program based on the given specification. Provide the necessary code files, including app.js, app.wxss, app.json, fide.project.config.json, and sitemap.json. Generate the wxml, wxss, js, and json files for each page",
+  capabilities:
+    "WeChat mini-program development, world-class skills with UI implementation using JavaScript, CSS, XML, HTML5, WXML, WXSS",
 };
 
-const svcConfig = AgentServiceConfigurator.getAgentConfiguration("test/multi-agents");
+const svcConfig =
+  AgentServiceConfigurator.getAgentConfiguration("test/multi-agents");
 const agentBuilder = new AgentBuilder(frontendDevCoreConfig, svcConfig);
-export const frontendDevAgent = agentBuilder.build("FrontendDevAgent", schemaBuilder.getClassificationTypes());
+export const frontendDevAgent = agentBuilder.build(
+  "FrontendDevAgent",
+  schemaBuilder.getClassificationTypes()
+);
 
 // Add custom instructions for the agent
-frontendDevAgent.addInstruction("Code Generation Guidelines", `
+frontendDevAgent.addInstruction(
+  "Code Generation Guidelines",
+  `
       ## General Requirements
 
         1. Output must be a single, well-formed JSON document that can be parsed using JSON.parse().
@@ -103,9 +101,24 @@ frontendDevAgent.addInstruction("Code Generation Guidelines", `
 ## Specific Instructions
 
 1. AppJson section:
-   - The "tabBar" sub-section is optional. Omit it if there's only one page or if a tabBar is not required.
+   - By default, there shall be no tabBar. You need to explicitly add it to the appJson only if there are more than 1 page and if a tabBar is required.
+   - When you do add a tabBar, add it to the appJson section of the output template under the <OPTIONAL_TABBAR_CONFIG_HERE> tag. It should look like this:
+     ---- content block ----
+      tabBar: {
+        color: "<HEX_COLOR>",
+        selectedColor: "<HEX_COLOR>",
+        backgroundColor: "<HEX_COLOR>",
+        borderStyle: "<BLACK_OR_WHITE>",
+        list: [
+          {
+            pagePath: "<PATH_TO_PAGE>",
+            text: "<TAB_TEXT>",
+          },
+        ],
+      },
+     ---- end of content block ----
    - If the 'tabBar' section is present, please make sure you do NOT generate iconPath and selectedIconPath at this point.
-   - TabBar can contain 2 to 5 tabs only.
+   - List section of TabBar must contain 2 to 5 tabs only. If there are fewer than 2 elements, there shall be no tabBar in the appJson.
    - Do not include file extensions when referencing pages in the pages array.
    - Page paths must be relative to the pages directory, e.g., "pages/index/index".
    - Page names must be unique within the mini-program and they are case-insensitive. Make sure to preserve the case of the page names in the page paths.
@@ -262,4 +275,5 @@ Generate only the JSON output based on the given specification. Ensure that all 
 real image URLs as described in the Data and Image Resources section. The mini-program should be fully functional with this sample data 
 upon generation. Do not include any explanations or additional text outside the JSON structure.
 
-`);
+`
+);
