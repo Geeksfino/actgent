@@ -5,50 +5,33 @@ import {
 } from "@finogeeks/actgent";
 import fs from "fs";
 import path from "path";
-import readline from "readline";
 import os from "os";
-import { deserializeMiniProgram } from "./utils";
 import { orchestratorAgent } from "./agents/OrchestratorAgent";
 import { productManagerAgent } from "./agents/ProductManagerAgent";
 import { specWriterAgent } from "./agents/SpecWriterAgent";
 import { frontendDevAgent } from "./agents/FrontendDevAgent";
+import {
+  AgentMessage,
+  MessageContext,
+  getUserInput,
+  logMessage,
+  extractMessageContent,
+  isInteractionNeeded,
+  getPromptFromResponse,
+  handleLowConfidence,
+  handleDecisionMaking,
+  handleOtherTask,
+  handleFrontendDevelopmentComplete,
+  createUserInputMessage,
+  createTaskCompleteMessage,
+} from "./swarm_helper";
 
 const agents = {
   REQUIREMENTS: orchestratorAgent,
   PRODUCT_MANAGEMENT: productManagerAgent,
   SPEC_WRITING: specWriterAgent,
   FRONTEND_DEVELOPMENT: frontendDevAgent,
-  // Add other agents as needed
 };
-
-// Create readline interface for user input
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-});
-
-// Function to get user input
-async function getUserInput(prompt: string): Promise<string> {
-  while (true) {
-    const answer = await new Promise<string>((resolve) => {
-      rl.question(prompt, (answer) => {
-        resolve(answer.trim());
-      });
-    });
-
-    if (answer === "/exit") {
-      console.log("Exiting the program.");
-      process.exit(0);
-    }
-
-    if (answer !== "") {
-      return answer;
-    }
-
-    // If the answer is empty, just print the prompt again
-    process.stdout.write(">");
-  }
-}
 
 // Function to expand tilde in path
 function expandTilde(filePath: string): string {
@@ -58,90 +41,114 @@ function expandTilde(filePath: string): string {
   return filePath;
 }
 
-// Define the message types
-type ClarificationNeededMessage = {
-  messageType: typeof DefaultSchemaBuilder.CLARIFICATION_NEEDED;
-  content: {
-    questions: string[];
-  };
+type WorkflowContext = {
+  sessions: { [key: string]: Session };
+  orchestratorSession: Session | null;
+  messageQueue: MessageContext[];
+  projectDir: string;
+  enqueueMessage: (originator: string, recipient: string, content: AgentMessage) => void;
 };
 
-type ConfirmationNeededMessage = {
-  messageType: typeof DefaultSchemaBuilder.CONFIRMATION_NEEDED;
-  content: {
-    prompt: string;
-    options: string[];
-  };
-};
+async function processOrchestratorMessage(context: WorkflowContext, messageContext: MessageContext): Promise<void> {
+  const { originator, content } = messageContext;
+  const messageContent = extractMessageContent(content);
 
-type TaskCompleteMessage = {
-  messageType: typeof DefaultSchemaBuilder.TASK_COMPLETE;
-  content: {
-    result: string;
-  };
-};
+  if (!context.orchestratorSession) {
+    context.orchestratorSession = await orchestratorAgent.createSession("User", messageContent);
+  } else {
+    context.orchestratorSession.chat(messageContent);
+  }
 
-type ErrorOrUnableMessage = {
-  messageType: typeof DefaultSchemaBuilder.ERROR_OR_UNABLE;
-  content: {
-    reason: string;
-    suggestedAction: string;
-  };
-};
+  const response = await new Promise<AgentMessage>((resolve) => {
+    context.orchestratorSession!.onEvent((data) => resolve(data as AgentMessage));
+  });
 
-type CommandMessage = {
-  messageType: typeof DefaultSchemaBuilder.COMMAND;
-  content: {
-    action: string;
-    parameters: Record<string, string>;
-  };
-};
-
-type UserInputMessage = {
-  messageType: "USER_INPUT";
-  content: string;
-};
-
-type AgentMessage =
-  | ClarificationNeededMessage
-  | ConfirmationNeededMessage
-  | TaskCompleteMessage
-  | ErrorOrUnableMessage
-  | CommandMessage
-  | UserInputMessage;
-
-interface MessageContext {
-  originator: string;
-  recipient: string;
-  content: AgentMessage;
+  await handleOrchestratorResponse(context, response, originator);
 }
 
-// Add this function to get the agent name
-function getAgentName(taskType: string): string {
-  if (taskType === "ORCHESTRATOR" || taskType === "USER") {
-    return taskType;
+async function handleOrchestratorResponse(context: WorkflowContext, response: AgentMessage, originator: string): Promise<void> {
+  if (isInteractionNeeded(response)) {
+    await handleUserInteraction(context, response, originator);
+  } else if (response.messageType === DefaultSchemaBuilder.COMMAND) {
+    console.log("Command received:", response.content);
+  } else {
+    await handleTaskClassification(context, response, originator);
   }
-  const agent = agents[taskType];
-  return agent ? agent.getName() : taskType;
 }
 
-function extractMessageContent(message: AgentMessage): string {
-  switch (message.messageType) {
-    case DefaultSchemaBuilder.CLARIFICATION_NEEDED:
-      return message.content.questions.join("\n");
-    case DefaultSchemaBuilder.CONFIRMATION_NEEDED:
-      return `${message.content.prompt}\nOptions:\n${message.content.options.join("\n")}`;
-    case DefaultSchemaBuilder.TASK_COMPLETE:
-      return message.content.result;
-    case DefaultSchemaBuilder.ERROR_OR_UNABLE:
-      return `${message.content.reason}\n${message.content.suggestedAction}`;
-    case DefaultSchemaBuilder.COMMAND:
-      return `Action: ${message.content.action}\nParameters: ${JSON.stringify(message.content.parameters)}`;
-    case "USER_INPUT":
-      return message.content;
-    default:
-      return JSON.stringify(message);
+async function handleUserInteraction(context: WorkflowContext, response: AgentMessage, originator: string): Promise<void> {
+  const prompt = getPromptFromResponse(response);
+  const userInput = await getUserInput(prompt + "\n\nYour response: ");
+  context.enqueueMessage(originator === "USER" ? "USER" : "ORCHESTRATOR", "ORCHESTRATOR", createUserInputMessage(userInput));
+}
+
+async function handleTaskClassification(context: WorkflowContext, response: AgentMessage, originator: string): Promise<void> {
+  const task = JSON.parse(extractMessageContent(response));
+  const { taskType, confidence } = task;
+
+  if (confidence < 70 && originator === "USER") {
+    const result = await handleLowConfidence(taskType);
+    if (typeof result === "string" && result !== taskType) {
+      context.enqueueMessage("USER", "ORCHESTRATOR", createUserInputMessage(result));
+      return;
+    }
   }
+
+  // if the incoming message is from an agent and orchestrator determines that it needs to make a decision from user,
+  // then orchestrator will send it to USER with decision or confirmation. Note this is not covered in DefaultSchemaBuilder.
+  // So it needs to be handled here.
+  if (taskType === "DECISION_MAKING") {
+    context.enqueueMessage("ORCHESTRATOR", "USER", handleDecisionMaking(task));
+  } else if (taskType === "OTHER") {
+    context.enqueueMessage("ORCHESTRATOR", "USER", handleOtherTask());
+  } else {
+    const targetAgent = agents[taskType];
+    if (targetAgent) {
+      context.enqueueMessage("ORCHESTRATOR", taskType, response);
+    } else {
+      const newInput = await getUserInput("No agent available for this task type. Please provide the next instruction: ");
+      context.enqueueMessage("USER", "ORCHESTRATOR", createUserInputMessage(newInput));
+    }
+  }
+}
+
+async function processAgentMessage(context: WorkflowContext, messageContext: MessageContext): Promise<void> {
+  const { originator, recipient, content } = messageContext;
+  const messageContent = extractMessageContent(content);
+
+  if (!context.sessions[recipient]) {
+    context.sessions[recipient] = await agents[recipient].createSession("Orchestrator", messageContent);
+  } else {
+    context.sessions[recipient].chat(messageContent);
+  }
+
+  const agentResponse = await new Promise<AgentMessage>((resolve) => {
+    context.sessions[recipient].onEvent((data) => resolve(data as AgentMessage));
+  });
+
+  await handleAgentResponse(context, agentResponse, recipient, originator);
+}
+
+async function handleAgentResponse(context: WorkflowContext, response: AgentMessage, recipient: string, originator: string): Promise<void> {
+  if (response.messageType === DefaultSchemaBuilder.TASK_COMPLETE) {
+    if (recipient === "FRONTEND_DEVELOPMENT") {
+      await handleFrontendDevelopmentComplete(response, context.projectDir);
+    } else {
+      context.enqueueMessage(recipient, originator, createTaskCompleteMessage(response));
+    }
+  } else {
+    context.enqueueMessage(recipient, originator, response);
+  }
+}
+
+function createErrorMessage(error: Error): AgentMessage {
+  return {
+    messageType: DefaultSchemaBuilder.ERROR_OR_UNABLE,
+    content: {
+      reason: error.message,
+      suggestedAction: "Please try again or provide a different instruction.",
+    },
+  };
 }
 
 async function orchestrateWorkflow(
@@ -150,254 +157,39 @@ async function orchestrateWorkflow(
 ): Promise<void> {
   console.log("Starting the software development process...");
 
-  const sessions: { [key: string]: Session } = {};
-  let orchestratorSession: Session;
-  let messageQueue: MessageContext[] = [];
+  const context: WorkflowContext = {
+    sessions: {},
+    orchestratorSession: null,
+    messageQueue: [],
+    projectDir,
+    enqueueMessage: (originator, recipient, content) => {
+      context.messageQueue.push({ originator, recipient, content });
+    },
+  };
 
-  function enqueueMessage(
-    originator: string,
-    recipient: string,
-    content: AgentMessage
-  ) {
-    messageQueue.push({ originator, recipient, content });
-  }
+  // Initial message
+  context.enqueueMessage("USER", "ORCHESTRATOR", createUserInputMessage(desc));
 
-  async function processMessage(context: MessageContext): Promise<void> {
-    const { originator, recipient, content } = context;
-    const originatorName = getAgentName(originator);
-    const recipientName = getAgentName(recipient);
-    console.log(
-      `Processing message from ${originatorName} to ${recipientName}: ${extractMessageContent(content)}`
-    );
+  while (context.messageQueue.length > 0) {
+    const message = context.messageQueue.shift()!;
+    logMessage(agents, message.originator, message.recipient, message.content);
 
-    if (recipient === "ORCHESTRATOR") {
-      const messageContent = extractMessageContent(content);
-      console.log("messageContent:", messageContent);
-      if (!orchestratorSession) {
-        orchestratorSession = await orchestratorAgent.createSession(
-          "User",
-          messageContent
-        );
+    try {
+      if (message.recipient === "ORCHESTRATOR") {
+        await processOrchestratorMessage(context, message);
+      } else if (message.recipient === "USER") {
+        const userInput = await getUserInput(`Message from ${message.originator}: ${extractMessageContent(message.content)}\n\nYour response: `);
+        context.enqueueMessage("USER", "ORCHESTRATOR", createUserInputMessage(userInput));
       } else {
-        orchestratorSession.chat(messageContent);
+        await processAgentMessage(context, message);
       }
-
-      const response = await new Promise<AgentMessage>((resolve) => {
-        orchestratorSession.onEvent((data) => {
-          resolve(data as AgentMessage);
-        });
-      });
-
-      if (
-        response.messageType === DefaultSchemaBuilder.CLARIFICATION_NEEDED ||
-        response.messageType === DefaultSchemaBuilder.CONFIRMATION_NEEDED ||
-        response.messageType === DefaultSchemaBuilder.ERROR_OR_UNABLE
-      ) {
-        let prompt: string;
-
-        if (
-          response.messageType === DefaultSchemaBuilder.CLARIFICATION_NEEDED
-        ) {
-          prompt = response.content.questions.join("\n");
-        } else if (
-          response.messageType === DefaultSchemaBuilder.CONFIRMATION_NEEDED
-        ) {
-          prompt = `${response.content.prompt}\nOptions:\n${response.content.options.join("\n")}`;
-        } else {
-          prompt = `${response.content.reason}\n${response.content.suggestedAction}`;
-        }
-
-        if (originator === "USER") {
-          const userInput = await getUserInput(prompt + "\n\nYour response: ");
-          enqueueMessage("USER", "ORCHESTRATOR", {
-            messageType: "USER_INPUT",
-            content: userInput,
-          });
-        } else {
-          const userInput = await getUserInput(prompt + "\n\nYour response: ");
-          enqueueMessage("ORCHESTRATOR", originator, {
-            messageType: "USER_INPUT",
-            content: userInput,
-          });
-        }
-        return;
-      }
-
-      if (response.messageType === DefaultSchemaBuilder.COMMAND) {
-        console.log("command===>:", response.content);
-        return;
-      }
-
-      // The orchestrator agent has classified the task and the confidence level
-      const task = JSON.parse(extractMessageContent(response));
-      const { taskType, confidence } = task;
-
-      if (confidence < 70 && originator === "USER") {
-        const confirmation = await getUserInput(
-          `Low confidence classification. Proceed with ${taskType}? (yes/no): `
-        );
-        if (confirmation.toLowerCase() !== "yes") {
-          const newInput = await getUserInput("Please rephrase your request: ");
-          enqueueMessage("USER", "ORCHESTRATOR", {
-            messageType: "USER_INPUT",
-            content: newInput,
-          });
-          return;
-        }
-      }
-
-      if (taskType == "DECISION_MAKING") {
-        const decisionMakingMessage: ConfirmationNeededMessage = {
-          messageType: DefaultSchemaBuilder.CONFIRMATION_NEEDED,
-          content: {
-            prompt: task.result.prompt  ,
-            options: task.result.options,
-          },
-        };
-        enqueueMessage("ORCHESTRATOR", "USER", decisionMakingMessage);
-        return;
-      }
-
-      if (taskType == "OTHER") {
-        const otherMessage: ErrorOrUnableMessage = {
-          messageType: DefaultSchemaBuilder.ERROR_OR_UNABLE,
-          content: {
-            reason: "The topic is not clear. Please rephrase your request.",
-            suggestedAction: "Please provide a clear and concise request.",
-          },
-        };
-        enqueueMessage("ORCHESTRATOR", "USER", otherMessage);
-        return;
-      }
-
-      // The task is classified and can be handled by the target agent and the confidence level is high enough to proceed
-      const targetAgent = agents[taskType];
-      if (!targetAgent) {
-        console.log(`No agent available for ${taskType}. Skipping.`);
-        if (originator === "USER") {
-          const newInput = await getUserInput(
-            "Please provide the next instruction: "
-          );
-          enqueueMessage("USER", "ORCHESTRATOR", {
-            messageType: "USER_INPUT",
-            content: newInput,
-          });
-        }
-        return;
-      }
-
-      console.log(
-        `Enqueueing message from ORCHESTRATOR to ${getAgentName(taskType)}`
-      );
-      enqueueMessage("ORCHESTRATOR", taskType, content);
-
-    } else if (recipient === "USER") {
-      let userInput: string;
-      if (content.messageType === DefaultSchemaBuilder.CLARIFICATION_NEEDED) {
-        userInput = await getUserInput(
-          `Clarification needed:\n${content.content.questions.join("\n")}\n\nYour response: `
-        );
-      } else if (
-        content.messageType === DefaultSchemaBuilder.CONFIRMATION_NEEDED
-      ) {
-        userInput = await getUserInput(
-          `Confirmation needed:\n${content.content.prompt}\nOptions:\n${content.content.options.join("\n")}\n\nYour response: `
-        );
-      } else if (content.messageType === DefaultSchemaBuilder.ERROR_OR_UNABLE) {
-        userInput = await getUserInput(
-          `Error: ${content.content.reason}\n${content.content.suggestedAction}\n\nPlease provide new instructions: `
-        );
-      } else {
-        userInput = await getUserInput(
-          `Message from ${originator}: ${JSON.stringify(content)}\n\nYour response: `
-        );
-      }
-      enqueueMessage("USER", "ORCHESTRATOR", {
-        messageType: "USER_INPUT",
-        content: userInput,
-      });
-    } else {
-      // Message is for a specific agent
-      const messageContent = extractMessageContent(content);
-
-      if (!sessions[recipient]) {
-        sessions[recipient] = await agents[recipient].createSession(
-          "Orchestrator",
-          messageContent
-        );
-      } else {
-        sessions[recipient].chat(messageContent);
-      }
-
-      const agentResponse = await new Promise<AgentMessage>((resolve) => {
-        sessions[recipient].onEvent((data) => {
-          resolve(data as AgentMessage);
-        });
-      });
-
-      if (agentResponse.messageType === DefaultSchemaBuilder.TASK_COMPLETE) {
-
-        if (recipient === "FRONTEND_DEVELOPMENT") {  
-          console.log("agentResponse:", agentResponse.content.result);
-          const val = JSON.parse(agentResponse.content.result);
-          const generatedCode = val.generatedCode;
-          console.log("generatedCode:", generatedCode);
-          deserializeMiniProgram(JSON.stringify(generatedCode), projectDir);
-          console.log("Project completed successfully!");
-          return;
-        }
-
-        const agentName = getAgentName(recipient);
-        const originatorName = getAgentName(originator);
-        console.log(`Enqueueing message from agent ${agentName} to ${originatorName}`);
-
-        const taskCompleteMessage: TaskCompleteMessage = {
-          messageType: DefaultSchemaBuilder.TASK_COMPLETE,
-          content: {
-            result: JSON.stringify(agentResponse.content.result),
-          },
-        };
-        enqueueMessage(recipient, originator, taskCompleteMessage);
-      } else if (agentResponse.messageType === DefaultSchemaBuilder.ERROR_OR_UNABLE) {
-        const errorOrUnableMessage: ErrorOrUnableMessage = {
-          messageType: DefaultSchemaBuilder.ERROR_OR_UNABLE,
-          content: {
-            reason: agentResponse.content.reason,
-            suggestedAction: agentResponse.content.suggestedAction,
-          },
-        };
-        enqueueMessage(recipient, originator, errorOrUnableMessage);
-      } else if (agentResponse.messageType === DefaultSchemaBuilder.CLARIFICATION_NEEDED) {
-        const clarificationNeededMessage: ClarificationNeededMessage = {    
-          messageType: DefaultSchemaBuilder.CLARIFICATION_NEEDED,
-          content: {
-            questions: agentResponse.content.questions,
-          },
-        };
-        enqueueMessage(recipient, originator, clarificationNeededMessage);
-      } else if (agentResponse.messageType === DefaultSchemaBuilder.CONFIRMATION_NEEDED) {
-        const confirmationNeededMessage: ConfirmationNeededMessage = {
-          messageType: DefaultSchemaBuilder.CONFIRMATION_NEEDED,
-          content: {
-            prompt: agentResponse.content.prompt,
-            options: agentResponse.content.options,
-          },
-        };
-        enqueueMessage(recipient, originator, confirmationNeededMessage);
-      }
+    } catch (error) {
+      console.error(`Error processing message: ${error.message}`);
+      context.enqueueMessage(message.recipient, message.originator, createErrorMessage(error));
     }
   }
 
-  // Initial message
-  enqueueMessage("USER", "ORCHESTRATOR", {
-    messageType: "USER_INPUT",
-    content: desc,
-  });
-
-  while (messageQueue.length > 0) {
-    const message = messageQueue.shift()!;
-    await processMessage(message);
-  }
+  console.log("Workflow completed.");
 }
 
 // Main program
@@ -455,7 +247,6 @@ async function main() {
   } catch (error) {
     console.error("An error occurred during the development process:", error);
   } finally {
-    rl.close();
     process.exit(0);
   }
 }
