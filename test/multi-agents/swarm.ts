@@ -11,8 +11,12 @@ import { productManagerAgent } from "./agents/ProductManagerAgent";
 import { specWriterAgent } from "./agents/SpecWriterAgent";
 import { frontendDevAgent } from "./agents/FrontendDevAgent";
 import {
-  AgentMessage,
   MessageContext,
+  ConversationContext,
+  AgentMessage,
+  ContextAwareMessage,
+} from "./ConversationContext";
+import {
   getUserInput,
   logMessage,
   extractMessageContent,
@@ -27,7 +31,7 @@ import {
 } from "./swarm_helper";
 
 const agents = {
-  REQUIREMENTS: orchestratorAgent,
+  REQUIREMENTS: productManagerAgent,
   PRODUCT_MANAGEMENT: productManagerAgent,
   SPEC_WRITING: specWriterAgent,
   FRONTEND_DEVELOPMENT: frontendDevAgent,
@@ -41,55 +45,111 @@ function expandTilde(filePath: string): string {
   return filePath;
 }
 
+// Modify the createContextAwareMessage function
+function createContextAwareMessage(
+  originator: string,
+  recipient: string,
+  content: AgentMessage,
+  context: ConversationContext
+): ContextAwareMessage {
+  const recentMessages = context.getRecentContext(3); // Get last 5 messages
+
+  let conversationContext = "Conversation context:\n\n";
+  for (const msg of recentMessages) {
+    conversationContext += `[${msg.originator} to ${msg.recipient}]: ${extractMessageContent(msg.content)}\n`;
+  }
+
+  // Add the current message to the context
+  conversationContext += `[${originator} to ${recipient}]: ${extractMessageContent(content)}`;
+
+  return {
+    messageType: "CONTEXT_AWARE",
+    content: conversationContext,
+  };
+}
+
 type WorkflowContext = {
   sessions: { [key: string]: Session };
   orchestratorSession: Session | null;
   messageQueue: MessageContext[];
   projectDir: string;
-  enqueueMessage: (originator: string, recipient: string, content: AgentMessage) => void;
+  conversationContext: ConversationContext;
+  enqueueMessage: (
+    originator: string,
+    recipient: string,
+    content: AgentMessage
+  ) => void;
 };
 
-async function processOrchestratorMessage(context: WorkflowContext, messageContext: MessageContext): Promise<void> {
+async function processOrchestratorMessage(
+  context: WorkflowContext,
+  messageContext: MessageContext
+): Promise<void> {
   const { originator, content } = messageContext;
   const messageContent = extractMessageContent(content);
 
   if (!context.orchestratorSession) {
-    context.orchestratorSession = await orchestratorAgent.createSession("User", messageContent);
+    context.orchestratorSession = await orchestratorAgent.createSession(
+      "User",
+      messageContent
+    );
   } else {
     context.orchestratorSession.chat(messageContent);
   }
 
   const response = await new Promise<AgentMessage>((resolve) => {
-    context.orchestratorSession!.onEvent((data) => resolve(data as AgentMessage));
+    context.orchestratorSession!.onEvent((data) =>
+      resolve(data as AgentMessage)
+    );
   });
 
   await handleOrchestratorResponse(context, response, originator);
 }
 
-async function handleOrchestratorResponse(context: WorkflowContext, response: AgentMessage, originator: string): Promise<void> {
-  if (isInteractionNeeded(response)) {
-    await handleUserInteraction(context, response, originator);
-  } else if (response.messageType === DefaultSchemaBuilder.COMMAND) {
-    console.log("Command received:", response.content);
+async function handleOrchestratorResponse(
+  context: WorkflowContext,
+  msg: AgentMessage,
+  originator: string
+): Promise<void> {
+  if (isInteractionNeeded(msg)) {
+    await handleUserInteraction(context, msg, originator);
+  } else if (msg.messageType === DefaultSchemaBuilder.COMMAND) {
+    console.log("Command received:", msg.content);
   } else {
-    await handleTaskClassification(context, response, originator);
+    await handleTaskClassification(context, msg, originator);
   }
 }
 
-async function handleUserInteraction(context: WorkflowContext, response: AgentMessage, originator: string): Promise<void> {
+async function handleUserInteraction(
+  context: WorkflowContext,
+  response: AgentMessage,
+  originator: string
+): Promise<void> {
   const prompt = getPromptFromResponse(response);
   const userInput = await getUserInput(prompt + "\n\nYour response: ");
-  context.enqueueMessage(originator === "USER" ? "USER" : "ORCHESTRATOR", "ORCHESTRATOR", createUserInputMessage(userInput));
+  context.enqueueMessage(
+    originator === "USER" ? "USER" : "ORCHESTRATOR",
+    "ORCHESTRATOR",
+    createUserInputMessage(userInput)
+  );
 }
 
-async function handleTaskClassification(context: WorkflowContext, response: AgentMessage, originator: string): Promise<void> {
-  const task = JSON.parse(extractMessageContent(response));
+async function handleTaskClassification(
+  context: WorkflowContext,
+  msg: AgentMessage,
+  originator: string
+): Promise<void> {
+  const task = JSON.parse(extractMessageContent(msg));
   const { taskType, confidence } = task;
 
   if (confidence < 70 && originator === "USER") {
     const result = await handleLowConfidence(taskType);
     if (typeof result === "string" && result !== taskType) {
-      context.enqueueMessage("USER", "ORCHESTRATOR", createUserInputMessage(result));
+      context.enqueueMessage(
+        "USER",
+        "ORCHESTRATOR",
+        createUserInputMessage(result)
+      );
       return;
     }
   }
@@ -104,37 +164,60 @@ async function handleTaskClassification(context: WorkflowContext, response: Agen
   } else {
     const targetAgent = agents[taskType];
     if (targetAgent) {
-      context.enqueueMessage("ORCHESTRATOR", taskType, response);
+      context.enqueueMessage("ORCHESTRATOR", taskType, msg);
     } else {
-      const newInput = await getUserInput("No agent available for this task type. Please provide the next instruction: ");
-      context.enqueueMessage("USER", "ORCHESTRATOR", createUserInputMessage(newInput));
+      const newInput = await getUserInput(
+        "No agent available for this task type. Please provide the next instruction: "
+      );
+      context.enqueueMessage(
+        "USER",
+        "ORCHESTRATOR",
+        createUserInputMessage(newInput)
+      );
     }
   }
 }
 
-async function processAgentMessage(context: WorkflowContext, messageContext: MessageContext): Promise<void> {
+async function processAgentMessage(
+  context: WorkflowContext,
+  messageContext: MessageContext
+): Promise<void> {
   const { originator, recipient, content } = messageContext;
   const messageContent = extractMessageContent(content);
 
   if (!context.sessions[recipient]) {
-    context.sessions[recipient] = await agents[recipient].createSession("Orchestrator", messageContent);
+    context.sessions[recipient] = await agents[recipient].createSession(
+      "Orchestrator",
+      messageContent
+    );
   } else {
     context.sessions[recipient].chat(messageContent);
   }
 
   const agentResponse = await new Promise<AgentMessage>((resolve) => {
-    context.sessions[recipient].onEvent((data) => resolve(data as AgentMessage));
+    context.sessions[recipient].onEvent((data) =>
+      resolve(data as AgentMessage)
+    );
   });
 
   await handleAgentResponse(context, agentResponse, recipient, originator);
 }
 
-async function handleAgentResponse(context: WorkflowContext, response: AgentMessage, recipient: string, originator: string): Promise<void> {
+async function handleAgentResponse(
+  context: WorkflowContext,
+  response: AgentMessage,
+  recipient: string,
+  originator: string
+): Promise<void> {
   if (response.messageType === DefaultSchemaBuilder.TASK_COMPLETE) {
     if (recipient === "FRONTEND_DEVELOPMENT") {
       await handleFrontendDevelopmentComplete(response, context.projectDir);
     } else {
-      context.enqueueMessage(recipient, originator, createTaskCompleteMessage(response));
+      context.enqueueMessage(
+        recipient,
+        originator,
+        createTaskCompleteMessage(response)
+      );
     }
   } else {
     context.enqueueMessage(recipient, originator, response);
@@ -162,8 +245,22 @@ async function orchestrateWorkflow(
     orchestratorSession: null,
     messageQueue: [],
     projectDir,
+    conversationContext: new ConversationContext(),
     enqueueMessage: (originator, recipient, content) => {
-      context.messageQueue.push({ originator, recipient, content });
+      let msg: AgentMessage;
+      if (recipient === "ORCHESTRATOR") {
+        msg = content;
+      } else {
+        msg = createContextAwareMessage(
+          originator,
+          recipient,
+          content,
+          context.conversationContext
+        );
+      }
+
+      context.messageQueue.push({ originator, recipient, content: msg });
+      context.conversationContext.addEntry(originator, recipient, content);
     },
   };
 
@@ -172,20 +269,32 @@ async function orchestrateWorkflow(
 
   while (context.messageQueue.length > 0) {
     const message = context.messageQueue.shift()!;
-    logMessage(agents, message.originator, message.recipient, message.content);
+    console.log(JSON.stringify(message, null, 2));
 
     try {
       if (message.recipient === "ORCHESTRATOR") {
+        console.log("====Orchestrator message received====");
         await processOrchestratorMessage(context, message);
       } else if (message.recipient === "USER") {
-        const userInput = await getUserInput(`Message from ${message.originator}: ${extractMessageContent(message.content)}\n\nYour response: `);
-        context.enqueueMessage("USER", "ORCHESTRATOR", createUserInputMessage(userInput));
+        const userInput = await getUserInput(
+          `Message from ${message.originator}: ${extractMessageContent(message.content)}\n\nYour response: `
+        );
+        context.enqueueMessage(
+          "USER",
+          "ORCHESTRATOR",
+          createUserInputMessage(userInput)
+        );
       } else {
+        console.log("====Agent message received====");
         await processAgentMessage(context, message);
       }
     } catch (error) {
       console.error(`Error processing message: ${error.message}`);
-      context.enqueueMessage(message.recipient, message.originator, createErrorMessage(error));
+      context.enqueueMessage(
+        message.recipient,
+        message.originator,
+        createErrorMessage(error)
+      );
     }
   }
 
@@ -236,7 +345,7 @@ async function main() {
     await agent.run(loggingConfig);
 
     agent.registerStreamCallback((delta: string) => {
-      console.log(`${agent.getName()}:`, delta);
+      //console.log(`${agent.getName()}:`, delta);
     });
   }
 

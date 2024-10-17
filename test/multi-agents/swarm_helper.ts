@@ -1,69 +1,12 @@
 import { DefaultSchemaBuilder } from "@finogeeks/actgent";
 import { deserializeMiniProgram } from "./utils";
 import readline from "readline";
-
+import { AgentMessage, ConfirmationNeededMessage, TaskCompleteMessage, ErrorOrUnableMessage, CommandMessage, UserInputMessage, ContextAwareMessage } from "./ConversationContext";
 // Create readline interface for user input
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout,
 });
-
-export type ClarificationNeededMessage = {
-  messageType: typeof DefaultSchemaBuilder.CLARIFICATION_NEEDED;
-  content: {
-    questions: string[];
-  };
-};
-
-export type ConfirmationNeededMessage = {
-  messageType: typeof DefaultSchemaBuilder.CONFIRMATION_NEEDED;
-  content: {
-    prompt: string;
-    options: string[];
-  };
-};
-
-export type TaskCompleteMessage = {
-  messageType: typeof DefaultSchemaBuilder.TASK_COMPLETE;
-  content: {
-    result: string;
-  };
-};
-
-export type ErrorOrUnableMessage = {
-  messageType: typeof DefaultSchemaBuilder.ERROR_OR_UNABLE;
-  content: {
-    reason: string;
-    suggestedAction: string;
-  };
-};
-
-export type CommandMessage = {
-  messageType: typeof DefaultSchemaBuilder.COMMAND;
-  content: {
-    action: string;
-    parameters: Record<string, string>;
-  };
-};
-
-export type UserInputMessage = {
-  messageType: "USER_INPUT";
-  content: string;
-};
-
-export type AgentMessage =
-  | ClarificationNeededMessage
-  | ConfirmationNeededMessage
-  | TaskCompleteMessage
-  | ErrorOrUnableMessage
-  | CommandMessage
-  | UserInputMessage;
-
-export interface MessageContext {
-  originator: string;
-  recipient: string;
-  content: AgentMessage;
-}
 
 export async function getUserInput(prompt: string): Promise<string> {
   return new Promise((resolve) => {
@@ -73,11 +16,9 @@ export async function getUserInput(prompt: string): Promise<string> {
   });
 }
 
-export function logMessage(agents: Record<string, any>, originator: string, recipient: string, content: AgentMessage): void {
-  const originatorName = getAgentName(agents, originator);
-  const recipientName = getAgentName(agents, recipient);
+export function logMessage(content: AgentMessage): void {
   console.log(
-    `Processing message from ${originatorName} to ${recipientName}: ${extractMessageContent(content)}`
+    `==>${extractMessageContent(content)}`
   );
 }
 
@@ -90,6 +31,11 @@ export function getAgentName(agents: Record<string, any>, taskType: string): str
 }
 
 export function extractMessageContent(message: AgentMessage): string {
+  if (message.messageType === "CONTEXT_AWARE") {
+    // For ContextAwareMessage, return a summary of recent messages
+    return message.content;
+  }
+
   switch (message.messageType) {
     case DefaultSchemaBuilder.CLARIFICATION_NEEDED:
       return message.content.questions.join("\n");
