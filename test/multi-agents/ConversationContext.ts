@@ -73,6 +73,11 @@ export class ConversationContext {
   }
 
   addEntry(originator: string, recipient: string, content: AgentMessage): void {
+    // Skip orchestrator's internal messages
+    if (originator === "ORCHESTRATOR" && recipient !== "USER") {
+      return;
+    }
+
     const entry: MessageContext = {
       originator,
       recipient,
@@ -84,6 +89,10 @@ export class ConversationContext {
     if (this.context.length > this.maxEntries) {
       this.context.shift(); // Remove oldest entry if we exceed maxEntries
     }
+
+    // Log the current conversation context
+    // console.log("Current Conversation Context:");
+    // console.log(this.getFullContext());
   }
 
   getRecentContext(count: number = 5): MessageContext[] {
@@ -113,5 +122,20 @@ export class ConversationContext {
       )
       .join("\n");
   }
-}
 
+  getFullContext(): string {
+    return this.context
+      .map((entry) => {
+        let content: string;
+        if (typeof entry.content === 'string') {
+          content = entry.content;
+        } else if (entry.content.messageType === 'CONTEXT_AWARE') {
+          content = entry.content.content;
+        } else {
+          content = JSON.stringify(entry.content);
+        }
+        return `[${entry.originator} to ${entry.recipient}]: ${content}`;
+      })
+      .join("\n");
+  }
+}

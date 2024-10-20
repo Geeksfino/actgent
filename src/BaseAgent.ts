@@ -18,6 +18,7 @@ export abstract class BaseAgent<
 >  {
   protected core!: AgentCore;
   private classifier!: K;
+  private promptTemplate!: P;
   
   protected abstract useClassifierClass(schemaTypes: T): new () => K;
   protected abstract usePromptTemplateClass(): new (classificationTypes: T) => P;
@@ -50,9 +51,9 @@ export abstract class BaseAgent<
     const llmConfig = svc_config.llmConfig;
 
     this.classifier = this.createClassifier(schemaTypes);
-    const promptTemplate = this.createPromptTemplate(schemaTypes);
+    this.promptTemplate = this.createPromptTemplate(schemaTypes);
 
-    this.core = new AgentCore(core_config, llmConfig!, promptTemplate, undefined, loggingConfig);
+    this.core = new AgentCore(core_config, llmConfig!, this.promptTemplate, undefined, loggingConfig);
     this.core.addLLMResponseHandler(this.handleLLMResponse.bind(this));
   }
 
@@ -91,8 +92,12 @@ export abstract class BaseAgent<
     this.core.start();
   }
 
-  public async createSession(owner: string, description: string): Promise<Session> {
-    return await this.core.createSession(owner, description);
+  public async createSession(owner: string, description: string, enhancePrompt: boolean = false): Promise<Session> {
+    let prompt = description;
+    if (enhancePrompt) {
+      prompt = await this.enhancePrompt(description);
+    }
+    return await this.core.createSession(owner, prompt);
   }
 
   protected handleLLMResponse(response: string | InferClassificationUnion<T>, session: Session) {
@@ -123,6 +128,42 @@ export abstract class BaseAgent<
 
   public resolvePrompt(sessionContext: any, input: string, context: any): Object {
     return this.core.resolvePrompt(sessionContext, input, context);
+  }
+
+  public async enhancePrompt(message: string): Promise<string> {
+    try {
+      let responseContent = "";
+      const stream = await this.core.llmClient.chat.completions.create({
+        model: this.core.llmConfig?.model || "gpt-4",
+        messages: [
+          { role: "system", content: this.promptTemplate.getMetaPrompt() },
+          { role: "user", content: message },
+        ],
+        stream: true,
+      });
+
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta?.content || "";
+        responseContent += delta;
+        this.core.streamBuffer += delta;
+        this.core.processStreamBuffer();
+      }
+      // Process any remaining content in the buffer
+      this.core.processStreamBuffer(true);
+
+      return responseContent || "{}";
+    } catch (error) {
+      console.log(`Error interacting with LLM: ${error}`);
+      throw error;
+    }
+  }
+
+  public registerTool(schemaName: string, tool: Tool): void {
+    this.core.registerTool(schemaName, tool);
+  }
+
+  public getTool(schemaName: string): Tool | undefined {
+    return this.core.getTool(schemaName);
   }
 
   private async findHelperAgent(subtask: string): Promise<AgentCore | null> {

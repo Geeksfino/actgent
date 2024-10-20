@@ -52,20 +52,43 @@ function createContextAwareMessage(
   content: AgentMessage,
   context: ConversationContext
 ): ContextAwareMessage {
-  const recentMessages = context.getRecentContext(3); // Get last 5 messages
+  const recentMessages = context.getRecentContext(3); // Get last 3 messages
 
   let conversationContext = "Conversation context:\n\n";
   for (const msg of recentMessages) {
+    // Skip orchestrator's internal messages
+    if (msg.originator === "ORCHESTRATOR" && msg.recipient !== "USER") {
+      continue;
+    }
     conversationContext += `[${msg.originator} to ${msg.recipient}]: ${extractMessageContent(msg.content)}\n`;
   }
 
-  // Add the current message to the context
-  conversationContext += `[${originator} to ${recipient}]: ${extractMessageContent(content)}`;
+  // Add the current message to the context only if it's not an orchestrator's internal message
+  if (originator !== "ORCHESTRATOR" || recipient === "USER") {
+    conversationContext += `[${originator} to ${recipient}]: ${extractMessageContent(content)}`;
+  }
 
   return {
     messageType: "CONTEXT_AWARE",
     content: conversationContext,
   };
+}
+
+// Add this new function
+function prettyPrintContextAwareMessage(message: ContextAwareMessage): string {
+  const lines = message.content.split('\n');
+  let prettyOutput = 'Context Aware Message:\n';
+  
+  for (const line of lines) {
+    if (line.startsWith('[') && line.includes(']:')) {
+      const [header, content] = line.split(']: ');
+      prettyOutput += `${header}]:\n  ${content}\n`;
+    } else {
+      prettyOutput += `${line}\n`;
+    }
+  }
+  
+  return prettyOutput;
 }
 
 type WorkflowContext = {
@@ -89,11 +112,13 @@ async function processOrchestratorMessage(
   const messageContent = extractMessageContent(content);
 
   if (!context.orchestratorSession) {
+
     context.orchestratorSession = await orchestratorAgent.createSession(
       "User",
-      messageContent
+      messageContent,
     );
   } else {
+    console.log("existing orchestrator session");
     context.orchestratorSession.chat(messageContent);
   }
 
@@ -102,7 +127,7 @@ async function processOrchestratorMessage(
       resolve(data as AgentMessage)
     );
   });
-
+  console.log("Orchestrator response:", response);
   await handleOrchestratorResponse(context, response, originator);
 }
 
@@ -128,8 +153,8 @@ async function handleUserInteraction(
   const prompt = getPromptFromResponse(response);
   const userInput = await getUserInput(prompt + "\n\nYour response: ");
   context.enqueueMessage(
-    originator === "USER" ? "USER" : "ORCHESTRATOR",
-    "ORCHESTRATOR",
+    "USER" ,
+    originator,
     createUserInputMessage(userInput)
   );
 }
@@ -140,7 +165,7 @@ async function handleTaskClassification(
   originator: string
 ): Promise<void> {
   const task = JSON.parse(extractMessageContent(msg));
-  const { taskType, confidence } = task;
+  const { taskType, confidence} = task;
 
   if (confidence < 70 && originator === "USER") {
     const result = await handleLowConfidence(taskType);
@@ -154,9 +179,6 @@ async function handleTaskClassification(
     }
   }
 
-  // if the incoming message is from an agent and orchestrator determines that it needs to make a decision from user,
-  // then orchestrator will send it to USER with decision or confirmation. Note this is not covered in DefaultSchemaBuilder.
-  // So it needs to be handled here.
   if (taskType === "DECISION_MAKING") {
     context.enqueueMessage("ORCHESTRATOR", "USER", handleDecisionMaking(task));
   } else if (taskType === "OTHER") {
@@ -248,7 +270,7 @@ async function orchestrateWorkflow(
     conversationContext: new ConversationContext(),
     enqueueMessage: (originator, recipient, content) => {
       let msg: AgentMessage;
-      if (recipient === "ORCHESTRATOR") {
+      if (recipient === "USER") {
         msg = content;
       } else {
         msg = createContextAwareMessage(
@@ -261,15 +283,26 @@ async function orchestrateWorkflow(
 
       context.messageQueue.push({ originator, recipient, content: msg });
       context.conversationContext.addEntry(originator, recipient, content);
+
+      // Log the updated conversation context
+      console.log("Updated Conversation Context after enqueue:");
+      console.log(context.conversationContext.getFullContext());
     },
   };
 
   // Initial message
+  
   context.enqueueMessage("USER", "ORCHESTRATOR", createUserInputMessage(desc));
 
   while (context.messageQueue.length > 0) {
     const message = context.messageQueue.shift()!;
-    console.log(JSON.stringify(message, null, 2));
+    
+    // Pretty print ContextAwareMessage
+    if (message.content.messageType === 'CONTEXT_AWARE') {
+      console.log(prettyPrintContextAwareMessage(message.content));
+    } else {
+      console.log(JSON.stringify(message, null, 2));
+    }
 
     try {
       if (message.recipient === "ORCHESTRATOR") {
@@ -351,7 +384,8 @@ async function main() {
 
   try {
     const desc = await getUserInput("Please enter the project description: ");
-    await orchestrateWorkflow(desc, projectDir);
+    const enhancedPrompt = await orchestratorAgent.enhancePrompt(desc);
+    await orchestrateWorkflow(enhancedPrompt, projectDir);
     console.log("Project completed successfully!");
   } catch (error) {
     console.error("An error occurred during the development process:", error);

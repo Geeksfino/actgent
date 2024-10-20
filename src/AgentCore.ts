@@ -29,15 +29,17 @@ export class AgentCore {
   public goal: string;
   public capabilities: string;
   public instructions: Map<string, string> | undefined;
+  public llmConfig: LLMConfig | null;
+  streamCallback?: (delta: string) => void;
+  streamBuffer: string = "";
+  llmClient: OpenAI;
+  tools: Map<string, Tool> = new Map<string, Tool>();
+
   private memory: Memory;
   private inbox: PriorityInbox;
-  private llmConfig: LLMConfig | null;
-  private llmClient: OpenAI;
   private promptManager: PromptManager;
   private contextManager: { [sessionId: string]: SessionContext } = {};
   private llmResponseHandler!: (response: any, session: Session) => void;
-  private streamCallback?: (delta: string) => void;
-  private streamBuffer: string = "";
   private logger: (sessionId: string, message: string) => void;
 
   constructor(
@@ -154,22 +156,47 @@ export class AgentCore {
     this.streamCallback = callback;
   }
 
-  private processStreamBuffer(force: boolean = false) {
-    const lines = this.streamBuffer.split("\n");
-    const completeLines = lines.slice(0, -1);
-    this.streamBuffer = lines[lines.length - 1];
+  // processStreamBuffer(force: boolean = false) {
+  //   const lines = this.streamBuffer.split("\n");
+  //   const completeLines = lines.slice(0, -1);
+  //   this.streamBuffer = lines[lines.length - 1];
 
+  //   for (const line of completeLines) {
+  //     if (this.streamCallback) {
+  //       this.streamCallback(line + "\n");
+  //     }
+  //   }
+
+  //   if (force && this.streamBuffer) {
+  //     if (this.streamCallback) {
+  //       this.streamCallback(this.streamBuffer);
+  //     }
+  //     this.streamBuffer = "";
+  //   }
+  // }
+
+  processStreamBuffer(force: boolean = false) {
+    // Split the buffer on newline characters
+    const lines = this.streamBuffer.split("\n");
+    
+    // Separate complete lines from the last potentially incomplete line
+    const completeLines = lines.slice(0, -1);
+    this.streamBuffer = lines[lines.length - 1]; // Incomplete line remains in the buffer
+  
+    // Process all complete lines
     for (const line of completeLines) {
       if (this.streamCallback) {
-        this.streamCallback(line + "\n");
+        this.streamCallback(line + "\n"); // Call the callback with each complete line
       }
     }
-
-    if (force && this.streamBuffer) {
-      if (this.streamCallback) {
-        this.streamCallback(this.streamBuffer);
+  
+    // Flush the buffer if it's too large (threshold) or force flush is true
+    const bufferThreshold = 100; // You can adjust this value as needed
+    if (force || this.streamBuffer.length > bufferThreshold) {
+      if (this.streamCallback && this.streamBuffer) {
+        this.streamCallback(this.streamBuffer); // Flush the remaining content in the buffer
       }
-      this.streamBuffer = "";
+      this.streamBuffer = ""; // Clear the buffer after flushing
     }
   }
 
@@ -185,18 +212,10 @@ export class AgentCore {
     await this.memory.processMessage(message, sessionContext);
 
     const context = await this.memory.generateContext(sessionContext);
-    const useStreamMode = false; // Set this to true if you want to use streaming mode
-    const streamCallback = useStreamMode
-      ? (delta: string) => {
-          console.log("Received delta:", delta);
-        }
-      : undefined;
 
     const response = await this.promptLLM(
       message,
-      context,
-      useStreamMode,
-      streamCallback
+      context
     );
 
     // Handle the response based on message type
@@ -224,9 +243,7 @@ export class AgentCore {
 
   private async promptLLM(
     message: Message,
-    context: any,
-    streamMode: boolean = false,
-    streamCallback?: (delta: string) => void
+    context: any
   ): Promise<string> {
     //this.log(`System prompt: ${this.promptManager.getSystemPrompt()}`);
     const sessionContext = this.contextManager[message.sessionId];
@@ -240,7 +257,7 @@ export class AgentCore {
     //         sessionContext,
     //       message.payload.input,
     //       context
-    //     ),
+    //     ), 
     //     null,
     //       2
     //     )
@@ -341,6 +358,14 @@ export class AgentCore {
     const sessionContext = new SessionContext(session); // Create a SessionContext
     this.contextManager[sessionId] = sessionContext; // Store it in the context manager
     return sessionId; // Return the generated session ID
+  }
+
+  public registerTool(schemaName: string, tool: Tool): void {
+    this.tools.set(schemaName, tool);
+  }
+
+  public getTool(schemaName: string): Tool | undefined {
+    return this.tools.get(schemaName);
   }
 
   public toJSON(): string {

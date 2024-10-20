@@ -12,6 +12,7 @@ const specTemplate = {
         name: "<PAGE_NAME>",
         description: "<PAGE_DESCRIPTION>",
         uiComponents: ["<COMPONENT_1_DESCRIPTION>", "<COMPONENT_2_DESCRIPTION>"],
+        data: "<DATA_DESCRIPTION>",
         layout: "<LAYOUT_DESCRIPTION>"
       }
     ],
@@ -31,8 +32,6 @@ const specWriterCoreConfig: AgentCoreConfig = {
     role: "Software Functional Specification Writer",
     goal: 
       `Your task is to creatively design a software specification for a WeChat mini-program based on the following requirement description:
-  
-      **Requirement Description:** {input}
   
       You need to generate a detailed and innovative software specification that not only meets the core functional requirements but also 
       immediately impresses users, even as a prototype. Your design should emphasize user engagement, delightful interactions, and modern user 

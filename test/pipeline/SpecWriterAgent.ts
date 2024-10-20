@@ -6,31 +6,19 @@ import { DefaultClassifier } from '../../src/DefaultClassifier';
 const specWriterTypes = [
   {
     name: "SPEC_DESIGN",
-    prompt: "Design a software specification for a WeChat mini-program.",
+    description: "Design a software specification for a WeChat mini-program.",
     schema: {
       spec: {
         name: "<APP_NAME>",
         description: "<APP_DESCRIPTION>",
         category: "<APP_CATEGORY>",
-        pages: [
-          {
-            name: "<PAGE_NAME>",
-            description: "<PAGE_DESCRIPTION>",
-            uiComponents: ["<COMPONENT_1_DESCRIPTION>", "<COMPONENT_2_DESCRIPTION>"],
-            layout: "<LAYOUT_DESCRIPTION>"
-          }
-        ],
-        homePage: "<HOMEPAGE_NAME>",
-        userEngagement: "<ENGAGEMENT_FEATURES_DESCRIPTION>",
-        innovativeInteractions: "<INTERACTION_DETAILS>",
-        scalability: "<SCALABILITY_FEATURES>",
-        internationalization: "<LANGUAGE_SUPPORT>"
+        details: "<DETAILS_OF_THE_SPECIFICATION>",
       }
     },
   },
   {
     name: "ERROR",
-    prompt: "An error occurred during specification design.",
+    description: "An error occurred during specification design.",
     schema: {
       message: "<ERROR_MESSAGE>",
     },
@@ -42,13 +30,13 @@ const coreConfig: AgentCoreConfig = {
   name: "SpecWriterAgent",
   role: "Software Product Manager",
   goal: 
-    `As a product manager, your task is to creatively design a software specification for a WeChat mini-program based on the following requirement description:
-
-    **Requirement Description:** {input}
+    `As a spec writer, your task is to creatively design a software specification for a WeChat mini-program based on the following requirement description:
 
     You need to generate a detailed and innovative software specification that not only meets the core functional requirements but also 
     immediately impresses users, even as a prototype. Your design should emphasize user engagement, delightful interactions, and modern user 
     interface (UI) principles.
+
+    When being given a description, you need to 
 
     The specification should include the following:
 
@@ -85,7 +73,14 @@ const coreConfig: AgentCoreConfig = {
        - Ensure the design is easily adaptable for different languages and regions.
        - Specify if certain features need to be localized.
 
+    8. **Data specification:**
+       - Specify the data that the mini-program will use, including the data source, format, and any necessary transformations or calculations.
+       - Include some sample data to illustrate the data structure so that developers can design corresponding data model, backend services, and mock objects.
+
     Your design should focus on user experience and functionality, ensuring that each page is well-described and meets the needs of the intended users.
+
+    The output shall be in the following JSON format:
+    ${JSON.stringify(specWriterTypes[0].schema)}
 
     Important Notice: when the input description is written in a certain language, the language of the output must be the same.
       For example, if the input description is in Chinese, the <PAGE_DESCRIPTION> of pages in output specification must be in Chinese;

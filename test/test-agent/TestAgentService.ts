@@ -75,3 +75,4 @@ const handler = (data: InferClassificationUnion<readonly ClassificationTypeConfi
 
 // Pass the handler to the session
 session.onEvent(handler);
+console.log("session completed");
