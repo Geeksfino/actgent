@@ -1,4 +1,4 @@
-import { MemoryStorage } from './Memory';
+import { MemoryStorage } from "./Memory";
 
 export class LongTermMemory {
   private storage: MemoryStorage<any>;

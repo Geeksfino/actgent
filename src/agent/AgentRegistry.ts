@@ -2,7 +2,7 @@ import { OpenAI } from 'openai';
 import { v4 as uuidv4 } from 'uuid';
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
-import { AgentCore } from './AgentCore';
+import { AgentCore } from '../core/AgentCore';
 
 export class AgentRegistry {
 	private static instance: AgentRegistry;

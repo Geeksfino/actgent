@@ -1,4 +1,4 @@
-import { ClassificationTypeConfig } from "./IClassifier";
+import { ClassificationTypeConfig } from "../core/IClassifier";
 import { z } from "zod";
 
 function convertTemplateToSchema(

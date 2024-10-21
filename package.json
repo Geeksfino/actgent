@@ -3,6 +3,12 @@
   "version": "1.0.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./core": "./dist/core/index.js",
+    "./agent": "./dist/agent/index.js",
+    "./helpers": "./dist/helpers/index.js"
+  },
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch"

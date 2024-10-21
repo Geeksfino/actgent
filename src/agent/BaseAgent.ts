@@ -1,13 +1,13 @@
-import { AgentCoreConfig, Tool, LLMConfig, CommunicationConfig, AgentServiceConfig  } from './interfaces';
+import { AgentCoreConfig, Tool, LLMConfig, CommunicationConfig, AgentServiceConfig  } from '../core/interfaces';
 import { Communication } from './Communication';
 import { AgentRegistry } from './AgentRegistry';
-import { AgentCore } from './AgentCore';
-import { IAgentPromptTemplate } from './IPromptTemplate';
-import { ClassificationTypeConfig, IClassifier} from './IClassifier';
-import { Message } from './Message';
-import { InferClassificationUnion } from './TypeInference';  
-import { Session } from './Session';
-import { LoggingConfig } from './interfaces';
+import { AgentCore } from '../core/AgentCore';
+import { IAgentPromptTemplate } from '../core/IPromptTemplate';
+import { ClassificationTypeConfig, IClassifier} from '../core/IClassifier';
+import { Message } from '../core/Message';
+import { InferClassificationUnion } from '../core/TypeInference';  
+import { Session } from '../core/Session';
+import { LoggingConfig } from '../core/interfaces';
 
 const defaultCommunicationConfig: CommunicationConfig = {};
 

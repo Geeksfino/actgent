@@ -1,9 +1,9 @@
 import {
-  AgentBuilder,
-  AgentServiceConfigurator,
   AgentCoreConfig,
   Tool,
-} from "@finogeeks/actgent";
+} from "@finogeeks/actgent/core";
+import { AgentBuilder } from "@finogeeks/actgent/agent";
+import { AgentServiceConfigurator } from "@finogeeks/actgent/agent";
 import { FrontendDevSchemaBuilder }  from "./MiniAppSchemaBuilder";
 import { generateMiniProgram } from '../multi-agents/code_parser';
 import fs from 'fs';

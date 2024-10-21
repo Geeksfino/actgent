@@ -1,4 +1,4 @@
-import { DefaultSchemaBuilder } from "@finogeeks/actgent";
+import { DefaultSchemaBuilder } from "@finogeeks/actgent/helpers";
 import { z } from "zod";
 
 const frontendDevTemplate = {

@@ -2,7 +2,7 @@ import dotenv from "dotenv"; // Import dotenv
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { AgentServiceConfig } from "./interfaces";
+import { AgentServiceConfig } from "../core/interfaces";
 
 /**
  * AgentServiceConfigurator is responsible for loading the agent service configuration from the environment file.

@@ -178,8 +178,6 @@ export class AgentCore {
   processStreamBuffer(force: boolean = false) {
     // Split the buffer on newline characters
     const lines = this.streamBuffer.split("\n");
-    
-    // Separate complete lines from the last potentially incomplete line
     const completeLines = lines.slice(0, -1);
     this.streamBuffer = lines[lines.length - 1]; // Incomplete line remains in the buffer
   

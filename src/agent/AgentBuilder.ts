@@ -1,8 +1,8 @@
 import { BaseAgent } from './BaseAgent';
-import { AgentCoreConfig, AgentServiceConfig } from './interfaces';
-import { DefaultPromptTemplate } from './DefaultPromptTemplate';
-import { DefaultClassifier } from './DefaultClassifier';
-import { ClassificationTypeConfig } from './IClassifier';
+import { AgentCoreConfig, AgentServiceConfig } from '../core/interfaces';
+import { DefaultPromptTemplate } from '../core/DefaultPromptTemplate';
+import { DefaultClassifier } from '../core/DefaultClassifier';
+import { ClassificationTypeConfig } from '../core/IClassifier';
 
 export class AgentBuilder {
   private coreConfig: AgentCoreConfig;

@@ -1,6 +1,6 @@
 import { NatsConnection, connect, StringCodec } from 'nats';
-import { CommunicationConfig } from './interfaces';
-import { Message } from './Message'; // Import the Message class
+import { CommunicationConfig } from '../core/interfaces';
+import { Message } from '../core/Message'; 
 
 export class Communication {
   public host: string;
