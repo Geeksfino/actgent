@@ -1,7 +1,7 @@
 import { BaseAgent } from '@finogeeks/actgent/agent';
 import { AgentCoreConfig, AgentServiceConfig } from '@finogeeks/actgent/core';
-import { DefaultPromptTemplate } from '@finogeeks/actgent/core';
-import { DefaultClassifier } from '@finogeeks/actgent/core';
+import { DefaultPromptTemplate } from '@finogeeks/actgent/agent';
+import { DefaultClassifier } from '@finogeeks/actgent/agent';
 
 const specWriterTypes = [
   {

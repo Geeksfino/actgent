@@ -109,7 +109,9 @@ export class DefaultPromptTemplate<
 
   getMetaPrompt(): string {
     const meta_prompt = `
-Given a task description or existing prompt, produce a detailed system prompt to guide a language model in completing the task effectively.
+As a {role}, with the goal of: {goal}, please judge if the given task description or existing prompt is clear and complete.
+If it is clear and complete, please output it as is. If it has room for improvement, please produce a detailed system prompt 
+to guide a language model in completing the task effectively.
 
 # Guidelines
 
@@ -118,6 +120,12 @@ Given a task description or existing prompt, produce a detailed system prompt to
 - Reasoning Before Conclusions**: Encourage reasoning steps before any conclusions are reached. ATTENTION! If the user provides examples where the reasoning happens afterward, REVERSE the order! NEVER START EXAMPLES WITH CONCLUSIONS!
     - Reasoning Order: Call out reasoning portions of the prompt and conclusion parts (specific fields by name). For each, determine the ORDER in which this is done, and whether it needs to be reversed.
     - Conclusion, classifications, or results should ALWAYS appear last.
+- Scope of improvement: Focus solely on aspects that are directly relevant to the defined role, goal and capabilities. 
+  For prompts lacking sufficient detail or clarity, improve them by suggesting more refined goals, user stories, or requirements within the 
+  role's domain, without extending beyond the role's expertise. If the provided input is too simplistic (e.g., “create a snake game WeChat mini-program”), enhance it by proposing relevant 
+  product details (e.g., target audience, features, and user experience) while avoiding technical decisions (e.g., project structure, programming languages).
+	When expanding or enhancing, keep the scope tightly aligned with the role's responsibilities. Do not infer unrelated areas such as technical solutions, design aesthetics, 
+  or performance optimizations unless explicitly requested as part of the role's purview.
 - Examples: Include high-quality examples if helpful, using placeholders [in brackets] for complex elements.
    - What kinds of examples may need to be included, how many, and whether they are complex enough to benefit from placeholders.
 - Clarity and Conciseness: Use clear, specific language. Avoid unnecessary instructions or bland statements.
