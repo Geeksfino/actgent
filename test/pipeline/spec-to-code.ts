@@ -1,6 +1,6 @@
-import { ClassificationTypeConfig, InferClassificationUnion, AgentServiceConfigurator } from '@finogeeks/actgent';
+import { ClassificationTypeConfig, InferClassificationUnion, AgentServiceConfigurator, LoggingConfig } from '@finogeeks/actgent';
 import { SpecWriterAgent } from './SpecWriterAgent';
-import { frontendDevAgent } from './FrontendDevAgent';
+import { frontendDevAgent } from './MiniAppDevAgent';
 import { generateMiniProgram } from '../multi-agents/code_parser';
 import fs from 'fs';
 import path from 'path';
@@ -20,16 +20,6 @@ if (process.argv.length < 5) {
   process.exit(1);
 }
 
-function deserializeMiniProgram(inputJson: string, outputDir: string) {
-
-    if (fs.existsSync(outputDir)) {
-        fs.rmdirSync(outputDir, { recursive: true });
-    }
-
-    // Call the function to generate the mini-program
-    generateMiniProgram(inputJson, outputDir);
-}
-
 const prompt = process.argv[4];
 
 const baseDir = process.cwd();
@@ -43,17 +33,27 @@ if (!fs.existsSync(projectDir)) {
 }
 
 const svcConfig = AgentServiceConfigurator.getAgentConfiguration("test/pipeline");
-
 const specWriterAgent = new SpecWriterAgent(svcConfig);
 specWriterAgent.registerStreamCallback((delta: string) => {
   console.log(delta);
 });
-specWriterAgent.run();
+const swLogFile = path.join(workareaDir, `${specWriterAgent.getName()}.log`);
+// Create a loggingConfig for each agent
+const swLoggingConfig: LoggingConfig = {
+  destination: swLogFile,
+};
+specWriterAgent.run(swLoggingConfig);
+
 
 frontendDevAgent.registerStreamCallback((delta: string) => {
   console.log(delta);
 });
-frontendDevAgent.run();
+const fdLogFile = path.join(workareaDir, `${frontendDevAgent.getName()}.log`);
+// Create a loggingConfig for each agent
+const fdLoggingConfig: LoggingConfig = {
+  destination: fdLogFile,
+};
+frontendDevAgent.run(fdLoggingConfig);
 
 const enhancedPrompt = await specWriterAgent.enhancePrompt(prompt);
 
@@ -72,7 +72,7 @@ const resolvedSpec = await new Promise<InferClassificationUnion<readonly Classif
     });
 });
 const spec = JSON.stringify(resolvedSpec.spec, null, 2);
-console.log("---------- Spec generated ----------\n", spec);
+console.log("---------- Spec generated ----------\n");
 
 const codeSession = await frontendDevAgent.createSession("owner", spec);
 const resolvedCode = await new Promise<InferClassificationUnion<readonly ClassificationTypeConfig[]>>((resolve) => {
