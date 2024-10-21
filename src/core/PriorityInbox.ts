@@ -2,12 +2,14 @@ import { Message } from "./Message";
 import Bottleneck from "bottleneck";
 import { interval, from } from 'rxjs';
 import { switchMap } from 'rxjs/operators';
+import { Subject, Subscription } from 'rxjs';
 
 export class PriorityInbox {
     private limiter: Bottleneck;
     private pendingMessages: number; // Tracks the number of pending messages
     private messageQueue: Message[]; 
     private processMessage: (message: Message) => Promise<void>;
+    private subscription: Subscription | null = null;
 
     constructor() {
         this.pendingMessages = 0; // Initialize with no pending messages
@@ -21,20 +23,20 @@ export class PriorityInbox {
     }
 
     public init(processMessage: (message: Message) => Promise<void>): void {
-        //console.log('initializing priority inbox');
         this.processMessage = processMessage;
+        this.subscription = interval(1000).pipe(
+            switchMap(() => from(this.checkPriorityInbox()))
+        ).subscribe();
+    }
 
-        // Set up RxJS interval to check the inbox
-        interval(1000).pipe(
-          switchMap(() => from(this.checkPriorityInbox()))
-        ).subscribe({
-          next: (result) => console.log(result),
-          error: (err) => console.error('Error:', err),
-          complete: () => console.log('Completed')
-        });
-      }
-    
-      private async checkPriorityInbox(): Promise<string> {
+    public stop(): void {
+        if (this.subscription) {
+            this.subscription.unsubscribe();
+            this.subscription = null;
+        }
+    }
+
+    private async checkPriorityInbox(): Promise<string> {
         //console.log('Checking priority inbox...');
         return new Promise((resolve) => {
           setTimeout(() => {
@@ -45,8 +47,7 @@ export class PriorityInbox {
             }
           }, 1000);
         });
-      }
-    
+    }
 
     enqueue(message: Message, priority = 'normal') {
         // Increase the pending message count
@@ -66,6 +67,7 @@ export class PriorityInbox {
     dequeue(): Message | null {
       return this.messageQueue.length > 0 ? this.messageQueue.shift() || null : null;
     }
+
     hasPendingMessages(): boolean {
         return this.pendingMessages > 0;
     }

@@ -87,7 +87,7 @@ export abstract class BaseAgent<
 
   public async run(loggingConfig?: LoggingConfig) {
     if (loggingConfig) {
-        this.core.setLoggingConfig(loggingConfig);
+      this.core.setLoggingConfig(loggingConfig);
     }
     this.core.start();
   }
@@ -170,5 +170,11 @@ export abstract class BaseAgent<
     console.log('findHelperAgent called with subtask:', subtask);
     const agent = await AgentRegistry.getInstance().findAgentByCapabilities(subtask);
     return agent;
+  }
+
+  public async shutdown(): Promise<void> {
+    this.log('default', 'Shutting down agent...');
+    await this.core.shutdown();
+    this.log('default', 'Agent shutdown complete.');
   }
 }

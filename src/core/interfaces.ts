@@ -3,13 +3,13 @@ import { ClassificationTypeConfig } from "./IClassifier";
 export interface AgentCoreConfig {
   name: string;                             // Agent name
   role: string;                             // Agent role
+  goal: string;                         // Long-term and short-term goals for the agent
   capabilities: string;  // Capabilities the agent has
   instructions?: Map<string, string>;
-  tools?: { [key: string]: Tool };        // Custom tools the agent can use
-  goal: string;                         // Long-term and short-term goals for the agent
-  inboxConfig?: InboxConfig;              // Configuration for task inbox settings (priority, queue, etc.)
-  memoryConfig?: MemoryConfig;            // Configuration for memory persistence (in-memory, DB, etc.)
-  classificationTypeConfigs?: ClassificationTypeConfig[]; 
+  // tools?: { [key: string]: Tool };        // Custom tools the agent can use
+  //inboxConfig?: InboxConfig;              // Configuration for task inbox settings (priority, queue, etc.)
+  // memoryConfig?: MemoryConfig;            // Configuration for memory persistence (in-memory, DB, etc.)
+  // classificationTypeConfigs?: ClassificationTypeConfig[]; 
 }
 
 export interface AgentServiceConfig {

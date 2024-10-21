@@ -11,6 +11,7 @@ import { Session } from "./Session";
 import { SessionContext } from "./SessionContext";
 import fs from "fs";
 import path from "path";
+import { Subject } from 'rxjs';
 
 interface StorageConfig {
   shortTerm?: MemoryStorage<any>;
@@ -41,6 +42,7 @@ export class AgentCore {
   private contextManager: { [sessionId: string]: SessionContext } = {};
   private llmResponseHandler!: (response: any, session: Session) => void;
   private logger: (sessionId: string, message: string) => void;
+  private shutdownSubject: Subject<void> = new Subject<void>();
 
   constructor(
     config: AgentCoreConfig,
@@ -431,4 +433,26 @@ export class AgentCore {
     return formattedContent;
   }
 
+  public async shutdown(): Promise<void> {
+    this.log('default', 'Initiating core shutdown...');
+    
+    // Stop processing new messages
+    this.inbox.stop();
+    
+    // Cancel any ongoing LLM requests (if possible)
+    // Note: OpenAI doesn't provide a way to cancel ongoing requests,
+    // so we'll just have to wait for them to complete
+
+    // Clean up memory
+    await this.memory.optimizeMemory();
+
+    // Emit shutdown signal
+    this.shutdownSubject.next();
+    this.shutdownSubject.complete();
+
+    // Close LLM client if necessary
+    // Note: As of now, OpenAI's Node.js client doesn't require explicit closure
+
+    this.log('default', 'Core shutdown complete.');
+  }
 }
