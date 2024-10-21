@@ -1,5 +1,5 @@
-import { ClassificationTypeConfig, ClassifiedTypeHandlers } from "./IClassifier";
-import { AbstractClassifier } from "./AbstractClassifier";
+import { ClassificationTypeConfig, ClassifiedTypeHandlers } from "../core/IClassifier";
+import { AbstractClassifier } from "../core/AbstractClassifier";
 
 export class DefaultClassifier<T extends readonly ClassificationTypeConfig[]> extends AbstractClassifier<T> {
   constructor(schemaTypes: T) {

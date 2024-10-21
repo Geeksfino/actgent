@@ -2,7 +2,6 @@
 export * from './interfaces';
 export { AgentCore } from './AgentCore';
 export { AbstractClassifier } from './AbstractClassifier';
-export { DefaultClassifier } from './DefaultClassifier';
 export { IClassifier, ClassificationTypeConfig, ClassifiedTypeHandlers } from './IClassifier';
 
 // Memory components
@@ -15,7 +14,6 @@ export { InMemoryStorage } from './InMemoryStorage';
 
 // Prompt handling
 export { IAgentPromptTemplate } from './IPromptTemplate';
-export { DefaultPromptTemplate } from './DefaultPromptTemplate';
 export { PromptManager } from './PromptManager';
 
 // Message handling

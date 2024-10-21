@@ -1,5 +1,5 @@
-import { IAgentPromptTemplate } from "./IPromptTemplate";
-import { ClassificationTypeConfig } from "./IClassifier";
+import { IAgentPromptTemplate } from "../core/IPromptTemplate";
+import { ClassificationTypeConfig } from "../core/IClassifier";
 
 export class DefaultPromptTemplate<
   T extends ReadonlyArray<ClassificationTypeConfig>,
