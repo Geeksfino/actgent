@@ -1,6 +1,6 @@
 import { ClassificationTypeConfig } from '@finogeeks/actgent/core';
 import { InferClassificationUnion } from '@finogeeks/actgent/core';
-import { AgentServiceConfigurator } from '@finogeeks/actgent/agent';
+import { AgentServiceConfigurator } from '@finogeeks/actgent/helpers';
 import { AgentBuilder } from '@finogeeks/actgent/agent';
 
 const coreConfig = {

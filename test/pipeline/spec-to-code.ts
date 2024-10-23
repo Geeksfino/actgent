@@ -1,7 +1,7 @@
 import { ClassificationTypeConfig, InferClassificationUnion, AgentServiceConfigurator, LoggingConfig } from '@finogeeks/actgent';
 import { SpecWriterAgent } from './SpecWriterAgent';
 import { frontendDevAgent } from './MiniAppDevAgent';
-import { generateMiniProgram } from '../multi-agents/code_parser';
+
 import fs from 'fs';
 import path from 'path';
 import os from 'os';

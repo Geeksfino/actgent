@@ -1,0 +1,9 @@
+{
+  "instructions": [
+    {
+      "name": "<meaningful and unique name for this instruction>",
+      "description": "<logical, clear and concise description of what to do and how to do for this routine>",
+      "schemaTemplate": "<optional, if this instruction, upon submitting as a prompt to a large language model, will result in some data output that is suitable to be returned in a JSON template or string template format, define such a template>"
+    }
+  ]
+}

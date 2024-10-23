@@ -1,0 +1,6 @@
+{
+  "exception": {
+    "reason": "<ERROR_DESCRIPTION_OR_CONSTRAINT>",
+    "suggestedAction": "<SUGGESTED_NEXT_STEP_IF_APPLICABLE>"
+  }
+}
