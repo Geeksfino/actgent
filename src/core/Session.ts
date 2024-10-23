@@ -2,7 +2,7 @@ import { AgentCore } from "./AgentCore";
 import { ClassificationTypeConfig } from "./IClassifier";
 import { Message } from "./Message";
 import { InferClassificationUnion } from "./TypeInference";
-
+import { Tool } from "./interfaces";
 export class Session {
     core: AgentCore;
     owner: string;
@@ -12,6 +12,9 @@ export class Session {
     subtasks?: Session[];  
 
     private eventHandlers: Array<(obj: any) => void> = [];
+
+    // Add new property for tool result handlers
+    private toolResultHandlers: Array<(result: any) => void> = [];
 
     constructor(core: AgentCore, owner: string, sessionId: string, description: string, parentSessionId?: string) {
         this.core = core;
@@ -36,11 +39,27 @@ export class Session {
         this.eventHandlers.push(handler);
     }
 
-    // Method to trigger clarification needed handlers
-    public triggerEventHandlers<T extends readonly ClassificationTypeConfig[]>(obj: InferClassificationUnion<T>): void {
-        //console.log("trigger:" + JSON.stringify(obj));
+    // Add method to register tool result handlers
+    public onToolResult(handler: (result: any) => void): void {
+        this.toolResultHandlers.push(handler);
+    }
+
+    // Updated triggerEventHandlers method
+    public async triggerEventHandlers<T extends readonly ClassificationTypeConfig[]>(obj: InferClassificationUnion<T>): Promise<void> {
+        const instructionName = obj.messageType;
+        const tool:Tool | undefined = this.core.getTool(instructionName);
+        if (tool) {
+            const result = await tool.execute(obj);
+            // Notify tool result handlers
+            this.toolResultHandlers.forEach(handler => {
+                if (typeof handler === 'function') {
+                    handler(result);
+                }
+            });
+        }
+        
         this.eventHandlers.forEach(handler => {
-            if (typeof handler === 'function') {  // Check if handler is a function
+            if (typeof handler === 'function') {
                 handler(obj);
             }
         });

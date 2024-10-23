@@ -178,3 +178,4 @@ agent.db
 .agent.env
 .env
 dist/
+.log
