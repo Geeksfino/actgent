@@ -1,17 +1,60 @@
 # Actgent: An Actor-based Agent Development Framework
 
-Actgent is a powerful and flexible message-driven framework for developing AI agents. It provides a structured approach to creating, testing, and deploying intelligent agents for various applications. Each agent employs an Actor-like mailbox to process incoming messages. 
+Actgent is a powerful and flexible message-driven framework for developing AI agents. It provides a structured approach to creating, testing, and deploying intelligent agents for various applications. Each agent employs an Actor-like mailbox to process incoming messages.
 
-## Architecture Overview
+## Design Philosophy
 
-Actgent follows a modular architecture designed to facilitate the development of scalable and maintainable agent systems:
+The Actgent framework is built on several key principles:
 
-1. **Agent Core**: The central component that defines the agent's behavior, decision-making processes, and interaction capabilities. It assembles various components
-   of priority inbox, memory and prompt manager to support an agent's core capabilities
+1. **Modularity**: The framework is divided into Core, Agent, and Helpers modules, allowing for separation of concerns and easy extensibility.
+2. **Flexibility**: Developers can work at different levels of abstraction, from high-level agent creation to low-level core functionality customization.
+3. **Type Safety**: Extensive use of TypeScript ensures type safety throughout the framework.
+4. **Standardization**: The framework provides standard structures for agent responses and behaviors, ensuring consistency across different agents.
+5. **Ease of Use**: Helper components simplify the process of creating and configuring agents, allowing developers to focus on defining agent behavior and knowledge.
 
-2. **Service Layer**: Provides essential services and utilities that agents can leverage, such as communication protocols, data processing, and external integrations.
 
-An agent can be instantiated and called in process, in a non-blocking fashion. So if you are building a desktop application or a service that aggregates a few agents, you can treat this framework as a library and make use of it, straight. Alternatively, if you want to build a networked "community" of agents, each of which running as independent service to be called upon remotely, you can enable the network mode of the agents to support various protocols.
+## Framework Architecture
+
+![Actgent Framework Architecture](path/to/architecture/diagram.png)
+
+Actgent follows a modular architecture designed to facilitate the development of scalable and maintainable agent systems. The framework is structured into three layers: Core, Agent, and Helpers. This architecture allows for a separation of concerns and provides different levels of abstraction for developers working with the framework.
+
+### 1. Core Layer
+
+The foundation of the framework, containing fundamental components:
+
+- **Actor Inbox**: Manages incoming messages for agents.
+- **Decision Loop**: Handles the main processing loop for agents.
+- **Prompt Management**: Manages the creation and handling of prompts.
+- **Memory**: Provides storage and retrieval mechanisms for agent knowledge.
+- **Tools Registry**: Manages available tools for agents.
+- **Workflow**: Handles the flow of tasks and processes.
+
+### 2. Agent Layer
+
+Builds upon the Core, providing higher-level abstractions:
+
+- **Service Configuration**: Manages agent-specific configurations.
+- **Network Communication**: Handles inter-agent communication.
+- **Agent Registry**: Manages the registration and discovery of agents.
+- **Base Agent**: Provides a foundation for creating specific agents.
+- **Swarm**: Enables the creation of agent swarms for complex tasks.
+
+### 3. Helpers Layer
+
+Provides utilities to simplify agent creation and management:
+
+- **Schema Builder**: Defines response structures and generates validation schemas.
+- **Agent Builder**: Simplifies the process of creating new agents.
+- **Knowledge Builder**: Facilitates loading and validating agent configurations from Markdown files.
+- **CLI**: Provides command-line tools for agent management and development.
+
+This architecture enables developers to work at different levels of abstraction:
+- Using the Helpers module for rapid agent development and configuration.
+- Working with the Agent layer for more customized agent behaviors.
+- Directly using the Core layer for low-level control over agent functionality.
+
+By providing these layers of abstraction, the Actgent framework allows for both quick prototyping and deep customization of agent behaviors.
 
 ## Key Concepts
 
@@ -36,11 +79,225 @@ One of the key strengths of the Actgent framework is its focus on matching promp
 
 This allows agent developers to define prompts and expect corresponding outputs in a structural way, which is mandatory for writing handlers to process responses programmatically. This approach significantly simplifies the development process and makes it easier to create robust, predictable agents.
 
+## Execution Flow
+
+The Actgent framework follows a structured flow from user input to agent response:
+
+1. User Input and Session Creation:
+   - User input is received through `BaseAgent.createSession` and `Session.chat`.
+   - A new session is created with the initial user input.
+
+2. Message Creation and Enqueueing:
+   - `Session.chat` creates a new `Message` object.
+   - The message is sent to the agent's core and enqueued in the PriorityInbox.
+
+3. Message Processing:
+   - The AgentCore's `processMessage` method dequeues and processes the message.
+   - The SessionContext is updated with the new message.
+
+4. Prompt Construction:
+   The PromptManager is responsible for constructing three types of prompts:
+   a. System Prompt: Defines the agent's role and capabilities.
+   b. Assistant Prompt: Provides instructions for message analysis and classification.
+   c. User Prompt: Contains the actual user input and context.
+
+   Each of these prompts is dynamically constructed using various components of the Actgent framework:
+
+   a. System Prompt:
+   - Constructed using information from the agent's configuration (AgentCoreConfig).
+   - Typically includes the agent's name, role, goal, capabilities, and additional instructions.
+   - This information is usually loaded from Markdown files with YAML front matter using the KnowledgeBuilder.
+   - The template might look like this:
+     ```typescript
+     getSystemPrompt(): string {
+       return `
+         You are designated as: {name} with the role of: {role}.
+         Your goal is: {goal}. 
+         Your capabilities are: {capabilities}.
+         Your objective is to align every action with this overarching mission while processing specific tasks efficiently and effectively.
+         Keep this goal in mind for every task you undertake. 
+
+         Additional Important Instructions:
+         {instructions}
+       `;
+     }
+     ```
+
+   b. Assistant Prompt:
+   - Dynamically constructed based on the classification types defined for the agent.
+   - Uses information from the SchemaBuilder (specifically, the DefaultSchemaBuilder).
+   - Includes descriptions of each classification type and their expected JSON response formats.
+   - The template might look like this:
+     ```typescript
+     getAssistantPrompt(): string {
+       const typesDescription = this.classificationTypes
+         .map((type) => `- ${type.name}: ${type.description}`)
+         .join("\n");
+
+       const jsonFormats = this.classificationTypes
+         .map(
+           (type) =>
+             `${type.name}:\n\`\`\`json\n${JSON.stringify(type.schema, null, 2)}\n\`\`\``
+         )
+         .join("\n\n");
+
+       return `
+       You are an AI assistant capable of analyzing and classifying messages into the following types:
+
+       ${typesDescription}
+
+       Based on the message type, provide a response in one of the following JSON formats:
+
+       ${jsonFormats}
+
+       Ensure that your response strictly adheres to these formats based on the identified message type.
+       `;
+     }
+     ```
+
+   c. User Prompt:
+   - Dynamically constructed based on the current message being processed and the session context.
+   - Typically includes:
+     - The current message content
+     - Relevant context from previous messages in the session
+     - Any additional context or variables passed to the prompt manager
+   - The template might look like this:
+     ```typescript
+     getUserPrompt(sessionContext: SessionContext, message: string, variables: { [key: string]: string }): string {
+       const contextMessages = sessionContext.getRelevantMessages();
+       const contextString = contextMessages.map(m => `${m.role}: ${m.content}`).join("\n");
+
+       return `
+       Previous context:
+       ${contextString}
+
+       Current message:
+       ${message}
+
+       Additional variables:
+       ${Object.entries(variables).map(([key, value]) => `${key}: ${value}`).join("\n")}
+
+       Please analyze and respond to this message based on the given context and your capabilities.
+       `;
+     }
+     ```
+
+   These prompts are then combined in the `resolvePrompt` method of the PromptManager:
+
+   ```typescript
+   public resolvePrompt(sessionContext: SessionContext, message: string, variables: { [key: string]: string }): Object {
+     return {
+       "system": this.getSystemPrompt(),
+       "assistant": this.getAssistantPrompt(),
+       "user": this.getUserPrompt(sessionContext, message, variables)
+     };
+   }
+   ```
+
+   This combined prompt is what gets sent to the LLM for processing. The dynamic construction of these prompts allows for flexible and context-aware interactions with the LLM, tailored to the specific agent's configuration and the current conversation state.
+
+5. LLM Interaction:
+   - The constructed prompts are sent to the Language Model (LLM) for processing.
+   - The LLM generates a response based on these prompts.
+
+6. Response Parsing and Classification:
+   - The LLM's response is parsed and classified according to the schemas defined by the SchemaBuilder.
+   - The DefaultClassifier structures the output based on predefined classification types.
+
+7. Handling Classified Response:
+   - The classified response is handled by the appropriate method in the agent.
+   - This typically occurs in the `handleLLMResponse` method of BaseAgent.
+
+8. Event Triggering:
+   - The structured response triggers appropriate event handlers in the Session.
+   - These events can lead to further actions or responses from the agent.
+
+This flow ensures a systematic process from user input to agent response, leveraging the various components of the Actgent framework to produce coherent and structured interactions.
+
+## The Builders
+
+In order to further simplify agent creation, a few Builders are provided. They use some default implementations such as the default message classifier and default prompt template, which ought to be generic enough for most cases. If customization is needed, developers can always fall back to the core and agent layers, bypassing the builders.
+
+Another purpose for existence of the builders is to support even higher level tools, particularly UI tools such as "Agent Editor" and "Swarm Composer", where an end user just inputs some configurations and textual information from the UI frontend, which would be passed to the builder to construct the agents and relay them.
+
+#### AgentBuilder
+
+The AgentBuilder simplifies the process of creating new agents by abstracting away much of the complexity involved in configuring the Core and Agent components. It:
+
+- Initializes the AgentCore with necessary configurations
+- Sets up the PromptManager with appropriate templates
+- Configures the Classifier based on provided classification types
+- Initializes the Memory and other Core components
+- Creates an instance of BaseAgent with all required dependencies
+
+This approach allows developers to create new agents with minimal boilerplate code, focusing on defining the agent's behavior rather than its infrastructure.
+
+### SchemaBuilder and Prompt Construction
+The SchemaBuilder plays a crucial role in defining agent response structures and impacting 
+prompt construction:
+- It defines standard classification types with associated schemas.
+- These schemas are used to generate assistant prompts in the DefaultPromptTemplate.
+- The SchemaBuilder can generate Zod schemas for runtime type checking and validation.
+- It allows for dynamic modification of schemas and descriptions, enabling customization for 
+specific agent needs.
+- By defining classification types and schemas, it shapes the possible behaviors and outputs 
+of agents.
+
+The SchemaBuilder, specifically the DefaultSchemaBuilder in this framework, plays a crucial 
+role in defining the structure of agent responses and impacting prompt construction. Here's 
+how it works:
+
+1. Classification Type Definition:
+The SchemaBuilder defines a set of standard classification types (e.g., 
+CLARIFICATION_NEEDED, CONFIRMATION_NEEDED, TASK_COMPLETE) with associated schemas.
+2. Schema Structure:
+Each classification type has a schema that defines the expected structure of the response 
+for that type.
+3. Dynamic Schema Modification:
+The builder allows for dynamic modification of schemas and descriptions, enabling 
+customization for specific agent needs.
+4. Zod Schema Generation:
+For JSON responses, the builder can generate Zod schemas for runtime type checking and 
+validation.
+5. Formatted Output Setting:
+It allows setting a formatted output template for completed tasks, which can be either JSON 
+or non-JSON.
+
+The SchemaBuilder impacts prompt construction and response handling in several ways:
+1. Prompt Template Generation:
+The classification types and schemas defined by the SchemaBuilder are used to generate the 
+assistant prompt in the DefaultPromptTemplate. This prompt instructs the LLM on how to 
+structure its responses.
+2. Response Validation:
+The generated Zod schemas are used to validate and parse the LLM's responses, ensuring they 
+conform to the expected structure.
+3. Agent Behavior Definition:
+By defining the classification types and their schemas, the SchemaBuilder effectively shapes 
+the possible behaviors and outputs of the agent.
+4. Consistency Across Agents:
+Using a standardized SchemaBuilder ensures consistency in response structures across 
+different agents in a project.
+
+### Agent Creation and Configuration
+The AgentBuilder and KnowledgeBuilder in the Helpers module simplify agent creation:
+- AgentBuilder provides a high-level interface for creating agents with specific 
+configurations and classification types.
+- KnowledgeBuilder allows loading agent configurations from Markdown files, including 
+instructions and other metadata.
+
+This architecture enables developers to work at different levels of abstraction:
+- Using the Helpers module for rapid agent development and configuration.
+- Working with the Agent module for more customized agent behaviors.
+- Directly using the Core module for low-level control over agent functionality.
+
+By providing these layers of abstraction, the Actgent framework allows for both quick 
+prototyping and deep customization of agent behaviors.
+
 ## Getting Started: Developing Agents with Actgent
 
 Let's walk through the process of creating a custom agent using the Actgent framework. We'll use the TestAgent as our guide and then create a new SoftwareSpecWriterAgent to illustrate the flexibility of the framework.
 
-### Dynamically create a custom agent using AgentBuilder
+### Option 1: Dynamically create a custom agent using convenient AgentBuilder
 
 AgentBuilder is a utility class that help to make custom agent creation easy. Pass to its build method a target agent's class name and type schema definition, and a subclass of BaseAgent will be dynamically created, ready to be used.
 
@@ -123,7 +380,7 @@ const handler = (data: InferClassificationUnion<readonly ClassificationTypeConfi
 session.onEvent(handler);
 ```
 
-### Steps to Create a Custom Agent
+### Option 2: Create a Custom Agent by class extension
 
 Use the AgentBuilder class for easy creation of agents. But in this section we "manually" construct agents without using the AgentBuilder, just to demonstrate
 the procedure of creating an agent anatomically. It is highly recommended to use the AgentBuilder instead, however.
@@ -282,4 +539,6 @@ To get started with Actgent, follow these steps:
 
 These commands will set up your development environment and run the test suite to ensure everything is working correctly.
 
-// ... existing code ...
+
+
+

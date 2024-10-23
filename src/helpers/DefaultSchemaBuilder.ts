@@ -1,4 +1,6 @@
 import { ClassificationTypeConfig } from "../core/IClassifier";
+import { Instruction } from "../core/interfaces";
+import { BaseAgent } from "../agent/BaseAgent";
 import { z } from "zod";
 
 function convertTemplateToSchema(
@@ -74,10 +76,15 @@ export class DefaultSchemaBuilder {
       {
         name: DefaultSchemaBuilder.TASK_COMPLETE,
         description:
-          "When a final result or answer has been generated and no further action is required, use this output structure.",
+          `When you are able to generate a direct result to the user's request or you determine there is an instruction that can be used to generate the result, use this output structure. 
+          Then, when there is no instruction or no applicable instruction, set the method to "single". set the instruction to "none". The result can be plain text. 
+          When there are multiple instructions, set the method to "multi", evaluate carefully the intent of the request and which instruction can fulfill the request, 
+          and set the instruction to the chosen instruction name.`,
         schema: {
           content: {
-            result: "<FINAL_RESULT_OR_ANSWER>",
+            method: "<EITHER_SINGLE_OR_MULTI>",
+            instruction: "<INSTRUCTION_NAME>",
+            result: "<RESULT_CONFORMING_TO_INSTRUCTION_SCHEMA>",
           },
         },
       },

@@ -1,4 +1,4 @@
-import { AgentCoreConfig, Tool, LLMConfig } from "./interfaces";
+import { AgentCoreConfig, Tool, LLMConfig, Instruction } from "./interfaces";
 import { DefaultAgentMemory, Memory, MemoryStorage } from "./Memory";
 import { InMemoryStorage } from "./InMemoryStorage";
 import { PromptManager } from "./PromptManager";
@@ -29,7 +29,7 @@ export class AgentCore {
   public role: string;
   public goal: string;
   public capabilities: string;
-  public instructions: Map<string, string> | undefined;
+  public instructions: Instruction[] = [];
   public llmConfig: LLMConfig | null;
   streamCallback?: (delta: string) => void;
   streamBuffer: string = "";
@@ -56,7 +56,7 @@ export class AgentCore {
     this.role = config.role;
     this.goal = config.goal || "";
     this.capabilities = config.capabilities;
-    this.instructions = config.instructions || undefined;
+    this.instructions = config.instructions || [];
     this.inbox = new PriorityInbox();
     this.llmConfig = llmConfig || null;
 
@@ -102,16 +102,16 @@ export class AgentCore {
     return this.capabilities;
   }
 
-  public addInstruction(name: string, instruction: string): void {
-    if (!this.instructions) {
-      this.instructions = new Map<string, string>();
-    }
-    this.instructions.set(name, instruction);
-    this.promptManager.setInstructions(this.instructions);
+  public addInstruction(name: string, description: string, schemaTemplate?: string): void {
+    this.instructions.push({ name, description, schemaTemplate });
   }
 
-  public getInstructions(): Map<string, string> | undefined {
+  public getInstructions(): Instruction[] {
     return this.instructions;
+  }
+
+  public getInstructionByName(name: string): Instruction | undefined {
+    return this.instructions.find(instruction => instruction.name === name);
   }
 
   public async receive(message: Message): Promise<void> {

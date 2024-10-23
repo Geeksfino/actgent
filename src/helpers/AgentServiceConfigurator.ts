@@ -1,4 +1,4 @@
-import dotenv from "dotenv"; // Import dotenv
+import dotenv from "dotenv"; 
 import fs from "fs";
 import path from "path";
 import os from "os";

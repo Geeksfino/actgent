@@ -1,3 +1,3 @@
-
+export { AgentServiceConfigurator } from './AgentServiceConfigurator';
 export { DefaultSchemaBuilder } from './DefaultSchemaBuilder';
-export { KnowledgeBuilder } from './KnowledgeBuilder';
+export { AgentCoreConfigurator } from './AgentCoreConfigurator';

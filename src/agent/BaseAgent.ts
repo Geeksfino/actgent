@@ -1,4 +1,4 @@
-import { AgentCoreConfig, Tool, LLMConfig, CommunicationConfig, AgentServiceConfig  } from '../core/interfaces';
+import { AgentCoreConfig, Tool, LLMConfig, CommunicationConfig, AgentServiceConfig, Instruction  } from '../core/interfaces';
 import { Communication } from './Communication';
 import { AgentRegistry } from './AgentRegistry';
 import { AgentCore } from '../core/AgentCore';
@@ -73,12 +73,16 @@ export abstract class BaseAgent<
     return this.core.capabilities;
   } 
 
-  public getInstructions(): Map<string, string> | undefined {
+  public getInstructions(): Instruction[] {
     return this.core.getInstructions();
   }
 
-  public addInstruction(name: string, instruction: string): void {
-    this.core.addInstruction(name, instruction);
+  public getInstructionByName(name: string): Instruction | undefined {
+    return this.core.getInstructionByName(name);
+  }
+
+  public addInstruction(name: string, description: string, schemaTemplate?: string): void {
+    this.core.addInstruction(name, description, schemaTemplate);
   }
 
   public log(sessionId: string, message: string): void {

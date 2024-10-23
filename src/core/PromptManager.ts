@@ -1,11 +1,11 @@
 import { IAgentPromptTemplate } from './IPromptTemplate';
 import { SessionContext } from './SessionContext'; 
-
+import { Instruction } from './interfaces';
 export class PromptManager {
   private role: string = "";
   private goal: string = "";
   private capabilities: string = "";
-  private instructions: Map<string, string> | undefined;
+  private instructions: Instruction[] = [];
   
   constructor(private promptTemplate: IAgentPromptTemplate) {
     this.promptTemplate = promptTemplate;
@@ -23,13 +23,14 @@ export class PromptManager {
     this.capabilities = capabilities;
   }
 
-  public setInstructions(instructions: Map<string, string>): void {
+  public setInstructions(instructions: Instruction[]): void {
     this.instructions = instructions;
   }
 
   public getSystemPrompt(): string {
-    const instructions = this.instructions ? Array.from(this.instructions.values()).join('\n') : '';
-    return this.renderPrompt(null, this.promptTemplate.getSystemPrompt(), { goal: this.goal, capabilities: this.capabilities, role: this.role, instructions: instructions });
+    //const instructions = this.instructions ? Array.from(this.instructions.values()).join('\n') : '';
+    // return this.renderPrompt(null, this.promptTemplate.getSystemPrompt(), { goal: this.goal, capabilities: this.capabilities, role: this.role, instructions: instructions });
+    return this.renderPrompt(null, this.promptTemplate.getSystemPrompt(), { goal: this.goal, capabilities: this.capabilities, role: this.role });
   }
 
   public getAssistantPrompt(): string {

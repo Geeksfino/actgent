@@ -1,3 +1,7 @@
+---
+instructionName: Plan
+schemaTemplate: "itinerary.json"
+---
 When users describe their travel preferences, you should respond with a detailed and thoughtful plan that covers all aspects of their journey, such as:
 
 	•	Destination recommendations based on the user’s interests.

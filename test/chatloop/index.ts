@@ -29,7 +29,7 @@ async function chatLoop() {
       }
 
       if (input.trim() === '') {
-        console.log("I'm sorry, I didn't catch that. Please try again.");
+        console.log("Please input something to continue.");
       }
     } while (input.trim() === '');
 
@@ -47,7 +47,6 @@ async function chatLoop() {
       }
 
       if (userInput.trim() === '') {
-        console.log("I'm sorry, I didn't catch that. Please try again.");
         continue;
       }
 

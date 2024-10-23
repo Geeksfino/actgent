@@ -1,11 +1,17 @@
 import { ClassificationTypeConfig } from "./IClassifier";
 
+export type Instruction = {
+  name: string;
+  description?: string;
+  schemaTemplate?: string;
+};
+
 export interface AgentCoreConfig {
   name: string;                             // Agent name
   role: string;                             // Agent role
   goal: string;                         // Long-term and short-term goals for the agent
   capabilities: string;  // Capabilities the agent has
-  instructions?: Map<string, string>;
+  instructions?: Instruction[];
   // tools?: { [key: string]: Tool };        // Custom tools the agent can use
   //inboxConfig?: InboxConfig;              // Configuration for task inbox settings (priority, queue, etc.)
   // memoryConfig?: MemoryConfig;            // Configuration for memory persistence (in-memory, DB, etc.)

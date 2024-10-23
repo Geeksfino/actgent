@@ -35,8 +35,6 @@ export class DefaultPromptTemplate<
 	7.	After trying these principles and you still cannot understand the intent of an input message or you carefully review that it is not aligned with your goal or capabilities, 
       you should ask the user for clarification.
 
-      Additional Important Instructions:
-      {instructions}
     `;
   }
 

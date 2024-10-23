@@ -1,0 +1,50 @@
+{
+  "itinerary": {
+    "total_trip_duration": "<number_of_days>",
+    "legs": [
+      {
+        "leg_number": "<leg_number>",
+        "origin_city": "<origin_city>",
+        "destination_city": "<destination_city>",
+        "travel_dates": {
+          "departure_date": "<YYYY-MM-DD>",
+          "arrival_date": "<YYYY-MM-DD>"
+        },
+        "transportation": {
+          "mode": "<transportation_mode>",
+          "departure_time": "<YYYY-MM-DDTHH:MM>",
+          "arrival_time": "<YYYY-MM-DDTHH:MM>",
+          "ticket_price": "<currency_value>",
+          "ticket_class": "<class_type>"
+        },
+        "accommodation": {
+          "hotel_name": "<hotel_name>",
+          "check_in": "<YYYY-MM-DDTHH:MM>",
+          "check_out": "<YYYY-MM-DDTHH:MM>",
+          "room_type": "<room_type>",
+          "price_per_night": "<currency_value>"
+        },
+        "daily_schedule": [
+          {
+            "date": "<YYYY-MM-DD>",
+            "activities": [
+              {
+                "time": "<HH:MM>",
+                "activity_name": "<activity_name>",
+                "location": "<activity_location>",
+                "description": "<activity_description>",
+                "price": "<currency_value>"
+              }
+            ]
+          }
+        ],
+        "notes": "<additional_notes_for_leg>"
+      }
+    ],
+    "overall_budget": {
+      "total_amount": "<currency_value>",
+      "currency": "<currency_type>"
+    }
+  },
+  "general_notes": "<additional_overall_notes>"
+}

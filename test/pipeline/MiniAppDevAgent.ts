@@ -3,7 +3,7 @@ import {
   Tool,
 } from "@finogeeks/actgent/core";
 import { AgentBuilder } from "@finogeeks/actgent/agent";
-import { AgentServiceConfigurator } from "@finogeeks/actgent/agent";
+import { AgentServiceConfigurator } from "@finogeeks/actgent/helpers";
 import { FrontendDevSchemaBuilder }  from "./MiniAppSchemaBuilder";
 import { generateMiniProgram } from '../multi-agents/code_parser';
 import fs from 'fs';

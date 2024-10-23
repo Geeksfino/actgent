@@ -3,6 +3,7 @@ import { AgentCoreConfig, AgentServiceConfig } from '../core/interfaces';
 import { DefaultPromptTemplate } from './DefaultPromptTemplate';
 import { DefaultClassifier } from './DefaultClassifier';
 import { ClassificationTypeConfig } from '../core/IClassifier';
+import { SchemaBuilder } from './SchemaBuilder';
 
 export class AgentBuilder {
   private coreConfig: AgentCoreConfig;
@@ -11,6 +12,12 @@ export class AgentBuilder {
   constructor(coreConfig: AgentCoreConfig, serviceConfig: AgentServiceConfig) {
     this.coreConfig = coreConfig;
     this.serviceConfig = serviceConfig;
+  }
+
+  public create(): BaseAgent<Readonly<ClassificationTypeConfig[]>, DefaultClassifier<Readonly<ClassificationTypeConfig[]>>, DefaultPromptTemplate<Readonly<ClassificationTypeConfig[]>>> {
+    const schemaBuilder = new SchemaBuilder(this.coreConfig.instructions || []);
+    const schemaTypes = schemaBuilder.build();
+    return this.build(this.coreConfig.name, schemaTypes);
   }
 
   public build<T extends ClassificationTypeConfig[]>(
