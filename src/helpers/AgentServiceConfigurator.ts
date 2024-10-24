@@ -27,12 +27,23 @@ export class AgentServiceConfigurator {
     // Use process.cwd() as default if basePath is not provided
     const actualBasePath = basePath || process.cwd();
     const configurator = new AgentServiceConfigurator(actualBasePath);
+ 
+    // First read from shell environment variables
+    configurator.agentServiceConf = {
+      llmConfig: {
+        apiKey: process.env.LLM_API_KEY || '',
+        baseURL: process.env.LLM_PROVIDER_URL,
+        model: process.env.LLM_MODEL || "",
+        streamMode: process.env.LLM_STREAM_MODE === 'true'
+      }
+    };
 
     // Expand tilde to home directory if present
     if (configurator.basePath?.startsWith("~")) {
       configurator.basePath = path.join(os.homedir(), configurator.basePath.slice(1));
     }
 
+    // Then try to load and override from env file if it exists
     const envPath = configurator.basePath && envFile
       ? path.join(configurator.basePath, envFile)
       : undefined;
@@ -40,16 +51,17 @@ export class AgentServiceConfigurator {
       dotenv.config({ path: envPath });
       //console.log(`Agent service configuration loaded from ${envPath}`);
 
+      // Override with values from env file
       configurator.agentServiceConf = {
         llmConfig: {
-          apiKey: process.env.LLM_API_KEY || '',
-          baseURL: process.env.LLM_PROVIDER_URL,
-          model: process.env.LLM_MODEL || "",
-          streamMode: process.env.LLM_STREAM_MODE === 'true'
+          apiKey: process.env.LLM_API_KEY || configurator.agentServiceConf.llmConfig?.apiKey || '',
+          baseURL: process.env.LLM_PROVIDER_URL || configurator.agentServiceConf.llmConfig?.baseURL,
+          model: process.env.LLM_MODEL || configurator.agentServiceConf.llmConfig?.model || "",
+          streamMode: process.env.LLM_STREAM_MODE === 'true' || configurator.agentServiceConf.llmConfig?.streamMode || false
         }
       };
     } else {
-      console.warn(`Environment file not found at ${envPath}. Using default or existing environment variables.`);
+      console.warn(`Environment file not found at ${envPath}. Using shell environment variables.`);
     }
 
     return configurator.agentServiceConf;
