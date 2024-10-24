@@ -1,5 +1,5 @@
 import { ClassificationTypeConfig } from "./IClassifier";
-
+import { ExecutionContext } from "./ExecutionContext";
 export type Instruction = {
   name: string;
   description?: string;
@@ -12,6 +12,7 @@ export interface AgentCoreConfig {
   goal: string;                         // Long-term and short-term goals for the agent
   capabilities: string;  // Capabilities the agent has
   instructions?: Instruction[];
+  instructionToolMap?: { [key: string]: string };
   // tools?: { [key: string]: Tool };        // Custom tools the agent can use
   //inboxConfig?: InboxConfig;              // Configuration for task inbox settings (priority, queue, etc.)
   // memoryConfig?: MemoryConfig;            // Configuration for memory persistence (in-memory, DB, etc.)
@@ -36,7 +37,7 @@ export interface LLMConfig {
 export interface Tool {
   name: string;
   description: string;
-  execute: (...args: any[]) => Promise<any>;
+  execute: (context: ExecutionContext, ...args: any[]) => Promise<any>;
 }
 
 export interface MemoryConfig {

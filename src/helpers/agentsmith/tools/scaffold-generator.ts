@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 
-interface AgentScaffoldOptions {
+export interface AgentScaffoldOptions {
     name: string;
     outputDir: string;
 }
@@ -41,6 +41,8 @@ async function copyDirectory(src: string, dest: string) {
 async function generateAgentScaffold({ name, outputDir }: AgentScaffoldOptions) {
     // Handle tilde expansion
     outputDir = outputDir.replace(/^~/, os.homedir());
+    console.log(`Scaffold output directory: ${outputDir}`);
+    console.log(`Scaffold agent name: ${name}`);
     const agentDir = path.join(outputDir, name);
 
     // Create main directory and instructions subdirectory

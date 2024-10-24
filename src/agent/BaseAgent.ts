@@ -4,7 +4,7 @@ import { AgentRegistry } from './AgentRegistry';
 import { AgentCore } from '../core/AgentCore';
 import { IAgentPromptTemplate } from '../core/IPromptTemplate';
 import { ClassificationTypeConfig, IClassifier} from '../core/IClassifier';
-import { Message } from '../core/Message';
+import { ExecutionContext } from '../core/ExecutionContext';
 import { InferClassificationUnion } from '../core/TypeInference';  
 import { Session } from '../core/Session';
 import { LoggingConfig } from '../core/interfaces';
@@ -55,6 +55,14 @@ export abstract class BaseAgent<
 
     this.core = new AgentCore(core_config, llmConfig!, this.promptTemplate, undefined, loggingConfig);
     this.core.addLLMResponseHandler(this.handleLLMResponse.bind(this));
+  }
+
+  public getExecutionContext(): ExecutionContext {
+    return this.core.executionContext;
+  }
+
+  public setExecutionContext(executionContext: ExecutionContext): void {
+    this.core.executionContext = executionContext;
   }
 
   public getName(): string {
@@ -162,12 +170,12 @@ export abstract class BaseAgent<
     }
   }
 
-  public registerTool(schemaName: string, tool: Tool): void {
-    this.core.registerTool(schemaName, tool);
+  public registerTool(tool: Tool): void {
+    this.core.registerTool(tool);
   }
 
-  public getTool(schemaName: string): Tool | undefined {
-    return this.core.getTool(schemaName);
+  public getTool(name: string): Tool | undefined {
+    return this.core.getTool(name);
   }
 
   private async findHelperAgent(subtask: string): Promise<AgentCore | null> {

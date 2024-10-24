@@ -47,9 +47,12 @@ export class Session {
     // Updated triggerEventHandlers method
     public async triggerEventHandlers<T extends readonly ClassificationTypeConfig[]>(obj: InferClassificationUnion<T>): Promise<void> {
         const instructionName = obj.messageType;
-        const tool:Tool | undefined = this.core.getTool(instructionName);
-        if (tool) {
-            const result = await tool.execute(obj);
+        const toolName = this.core.getToolForInstruction(instructionName);
+        console.log(`Session: Tool for instruction "${instructionName}":`, toolName);
+        if (toolName) {
+            const tool:Tool | undefined = this.core.getTool(toolName);
+            if (tool) {
+            const result = await tool.execute(this.core.executionContext, obj);
             // Notify tool result handlers
             this.toolResultHandlers.forEach(handler => {
                 if (typeof handler === 'function') {
@@ -62,6 +65,7 @@ export class Session {
             if (typeof handler === 'function') {
                 handler(obj);
             }
-        });
+            });
+        }
     }
 }

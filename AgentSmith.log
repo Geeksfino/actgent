@@ -1,0 +1,732 @@
+2024-10-24T02:21:04.256Z - [Session: 3262db96-2c66-4b1f-88f0-f2e57eca885d] [AgentSmith] createSession called with description:
+2024-10-24T02:21:04.257Z - [Session: 3262db96-2c66-4b1f-88f0-f2e57eca885d] [AgentSmith] a travel agent to help customers plan itinerary
+2024-10-24T02:21:04.684Z - [Session: 3262db96-2c66-4b1f-88f0-f2e57eca885d] Input: a travel agent to help customers plan itinerary
+2024-10-24T02:21:35.858Z - [Session: 3262db96-2c66-4b1f-88f0-f2e57eca885d] Output: {
+  "messageType": "creation",
+  "instructions": [
+    {
+      "name": "propose_itinerary",
+      "description": "Generate a detailed itinerary for a given number of days in a specified location, including suggested activities, accommodations, and dining options.",
+      "schemaTemplate": {
+        "itinerary": [
+          {
+            "date": "<YYYY-MM-DD>",
+            "activities": [
+              {
+                "time": "<HH:MM>",
+                "activity_name": "<activity_name>",
+                "location": "<activity_location>",
+                "description": "<activity_description>",
+                "price": "<currency_value>"
+              }
+            ],
+            "accommodation": {
+              "name": "<accommodation_name>",
+              "location": "<accommodation_location>",
+              "description": "<accommodation_description>",
+              "price": "<currency_value>"
+            },
+            "dining": [
+              {
+                "time": "<HH:MM>",
+                "restaurant_name": "<restaurant_name>",
+                "location": "<restaurant_location>",
+                "description": "<restaurant_description>",
+                "price": "<currency_value>"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "book_flight",
+      "description": "Search for and book flights based on user-provided travel dates, departure and arrival locations, and preferences.",
+      "schemaTemplate": {
+        "flight_booking": {
+          "booking_id": "<booking_id>",
+          "flight_details": {
+            "departure_date": "<YYYY-MM-DD>",
+            "arrival_date": "<YYYY-MM-DD>",
+            "departure_location": "<departure_location>",
+            "arrival_location": "<arrival_location>",
+            "airline": "<airline_name>",
+            "price": "<currency_value>"
+          }
+        }
+      }
+    },
+    {
+      "name": "provide_information",
+      "description": "Provide detailed information about a specific activity, accommodation, or dining option based on user query.",
+      "schemaTemplate": {
+        "information": {
+          "name": "<name>",
+          "location": "<location>",
+          "description": "<description>",
+          "price": "<currency_value>",
+          "additional_details": "<additional_details>"
+        }
+      }
+    }
+  ]
+}
+2024-10-24T02:22:00.890Z - [Session: default] [AgentSmith] Shutting down agent...
+2024-10-24T02:22:00.891Z - [Session: default] [AgentSmith] Initiating core shutdown...
+2024-10-24T02:22:00.892Z - [Session: default] [AgentSmith] Core shutdown complete.
+2024-10-24T02:22:00.892Z - [Session: default] [AgentSmith] Agent shutdown complete.
+2024-10-24T02:26:28.533Z - [Session: e2e1177a-9ec1-4acd-96e1-80975fafde28] [AgentSmith] createSession called with description:
+2024-10-24T02:26:28.534Z - [Session: e2e1177a-9ec1-4acd-96e1-80975fafde28] [AgentSmith] a travel agent to plan itinerary for customers
+2024-10-24T02:26:28.685Z - [Session: e2e1177a-9ec1-4acd-96e1-80975fafde28] Input: a travel agent to plan itinerary for customers
+2024-10-24T02:27:04.265Z - [Session: e2e1177a-9ec1-4acd-96e1-80975fafde28] Output: {
+  "messageType": "creation",
+  "instructions": [
+    {
+      "name": "propose_itinerary",
+      "description": "Generate a detailed itinerary for a given number of days in a specified location, including suggested activities, accommodations, and dining options.",
+      "schemaTemplate": {
+        "itinerary": [
+          {
+            "date": "<YYYY-MM-DD>",
+            "activities": [
+              {
+                "time": "<HH:MM>",
+                "activity_name": "<activity_name>",
+                "location": "<activity_location>",
+                "description": "<activity_description>",
+                "price": "<currency_value>"
+              }
+            ],
+            "accommodation": {
+              "name": "<accommodation_name>",
+              "location": "<accommodation_location>",
+              "description": "<accommodation_description>",
+              "price": "<currency_value>"
+            },
+            "dining": [
+              {
+                "time": "<HH:MM>",
+                "restaurant_name": "<restaurant_name>",
+                "location": "<restaurant_location>",
+                "description": "<restaurant_description>",
+                "price": "<currency_value>"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "book_accommodation",
+      "description": "Book accommodations based on the proposed itinerary, ensuring availability and confirming reservations.",
+      "schemaTemplate": {
+        "booking_confirmation": {
+          "accommodation_name": "<accommodation_name>",
+          "check_in_date": "<YYYY-MM-DD>",
+          "check_out_date": "<YYYY-MM-DD>",
+          "confirmation_number": "<confirmation_number>"
+        }
+      }
+    },
+    {
+      "name": "book_activities",
+      "description": "Book activities and tours as per the proposed itinerary, ensuring availability and confirming reservations.",
+      "schemaTemplate": {
+        "booking_confirmation": {
+          "activity_name": "<activity_name>",
+          "date": "<YYYY-MM-DD>",
+          "time": "<HH:MM>",
+          "confirmation_number": "<confirmation_number>"
+        }
+      }
+    },
+    {
+      "name": "provide_travel_information",
+      "description": "Provide essential travel information such as local transportation options, safety tips, and currency exchange details.",
+      "schemaTemplate": {
+        "travel_information": {
+          "transportation": "<transportation_options>",
+          "safety_tips": "<safety_tips>",
+          "currency_exchange": "<currency_exchange_details>"
+        }
+      }
+    }
+  ]
+}
+2024-10-24T03:05:41.222Z - [Session: default] [AgentSmith] Shutting down agent...
+2024-10-24T03:05:41.224Z - [Session: default] [AgentSmith] Initiating core shutdown...
+2024-10-24T03:05:41.226Z - [Session: default] [AgentSmith] Core shutdown complete.
+2024-10-24T03:05:41.227Z - [Session: default] [AgentSmith] Agent shutdown complete.
+2024-10-24T03:05:55.038Z - [Session: 8af33d83-a9c0-49dd-a91f-b722fb8d8577] [AgentSmith] createSession called with description:
+2024-10-24T03:05:55.038Z - [Session: 8af33d83-a9c0-49dd-a91f-b722fb8d8577] [AgentSmith] a travel agent to book flights for customers
+2024-10-24T03:05:55.159Z - [Session: 8af33d83-a9c0-49dd-a91f-b722fb8d8577] Input: a travel agent to book flights for customers
+2024-10-24T03:06:38.681Z - [Session: 8af33d83-a9c0-49dd-a91f-b722fb8d8577] Output: {
+  "messageType": "creation",
+  "instructions": [
+    {
+      "name": "search_flights",
+      "description": "Search for available flights based on user-provided criteria such as departure and arrival cities, dates, and preferences (e.g., non-stop, economy class).",
+      "schemaTemplate": {
+        "flight_options": [
+          {
+            "airline": "<airline_name>",
+            "flight_number": "<flight_number>",
+            "departure": {
+              "city": "<departure_city>",
+              "airport": "<departure_airport>",
+              "date": "<YYYY-MM-DD>",
+              "time": "<HH:MM>"
+            },
+            "arrival": {
+              "city": "<arrival_city>",
+              "airport": "<arrival_airport>",
+              "date": "<YYYY-MM-DD>",
+              "time": "<HH:MM>"
+            },
+            "duration": "<HH:MM>",
+            "price": "<currency_value>",
+            "class": "<class_type>"
+          }
+        ]
+      }
+    },
+    {
+      "name": "book_flight",
+      "description": "Book a selected flight for the customer, capturing necessary details such as passenger information and payment details.",
+      "schemaTemplate": {
+        "booking_confirmation": {
+          "booking_id": "<booking_id>",
+          "passenger_name": "<passenger_name>",
+          "flight_details": {
+            "airline": "<airline_name>",
+            "flight_number": "<flight_number>",
+            "departure": {
+              "city": "<departure_city>",
+              "airport": "<departure_airport>",
+              "date": "<YYYY-MM-DD>",
+              "time": "<HH:MM>"
+            },
+            "arrival": {
+              "city": "<arrival_city>",
+              "airport": "<arrival_airport>",
+              "date": "<YYYY-MM-DD>",
+              "time": "<HH:MM>"
+            },
+            "duration": "<HH:MM>",
+            "class": "<class_type>"
+          },
+          "payment_status": "<payment_status>"
+        }
+      }
+    },
+    {
+      "name": "confirm_booking",
+      "description": "Send a confirmation to the customer with all the details of the booked flight, including booking ID, flight details, and payment status.",
+      "schemaTemplate": {
+        "confirmation_message": {
+          "booking_id": "<booking_id>",
+          "passenger_name": "<passenger_name>",
+          "flight_details": {
+            "airline": "<airline_name>",
+            "flight_number": "<flight_number>",
+            "departure": {
+              "city": "<departure_city>",
+              "airport": "<departure_airport>",
+              "date": "<YYYY-MM-DD>",
+              "time": "<HH:MM>"
+            },
+            "arrival": {
+              "city": "<arrival_city>",
+              "airport": "<arrival_airport>",
+              "date": "<YYYY-MM-DD>",
+              "time": "<HH:MM>"
+            },
+            "duration": "<HH:MM>",
+            "class": "<class_type>"
+          },
+          "payment_status": "<payment_status>"
+        }
+      }
+    }
+  ]
+}
+2024-10-24T03:13:16.272Z - [Session: ee7cbf3e-9287-4e8c-bf81-71ec89f65599] [AgentSmith] createSession called with description:
+2024-10-24T03:13:16.274Z - [Session: ee7cbf3e-9287-4e8c-bf81-71ec89f65599] [AgentSmith] a flight booking assistant to book flights
+2024-10-24T03:13:16.896Z - [Session: ee7cbf3e-9287-4e8c-bf81-71ec89f65599] Input: a flight booking assistant to book flights
+2024-10-24T03:13:56.410Z - [Session: ee7cbf3e-9287-4e8c-bf81-71ec89f65599] Output: {
+  "messageType": "creation",
+  "instructions": [
+    {
+      "name": "search_flights",
+      "description": "Search for available flights based on user-provided criteria such as departure and arrival cities, dates, and preferred airlines.",
+      "schemaTemplate": {
+        "flights": [
+          {
+            "flight_number": "<flight_number>",
+            "airline": "<airline_name>",
+            "departure": {
+              "city": "<departure_city>",
+              "airport": "<departure_airport>",
+              "date_time": "<YYYY-MM-DDTHH:MM:SS>"
+            },
+            "arrival": {
+              "city": "<arrival_city>",
+              "airport": "<arrival_airport>",
+              "date_time": "<YYYY-MM-DDTHH:MM:SS>"
+            },
+            "price": "<currency_value>",
+            "available_seats": "<number_of_seats>"
+          }
+        ]
+      }
+    },
+    {
+      "name": "book_flight",
+      "description": "Book a selected flight for the user based on the flight details provided.",
+      "schemaTemplate": {
+        "booking_confirmation": {
+          "booking_id": "<booking_id>",
+          "flight_number": "<flight_number>",
+          "airline": "<airline_name>",
+          "departure": {
+            "city": "<departure_city>",
+            "airport": "<departure_airport>",
+            "date_time": "<YYYY-MM-DDTHH:MM:SS>"
+          },
+          "arrival": {
+            "city": "<arrival_city>",
+            "airport": "<arrival_airport>",
+            "date_time": "<YYYY-MM-DDTHH:MM:SS>"
+          },
+          "price": "<currency_value>",
+          "passenger_details": [
+            {
+              "name": "<passenger_name>",
+              "age": "<passenger_age>",
+              "seat_number": "<seat_number>"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "confirm_booking",
+      "description": "Confirm the flight booking with the user and provide a summary of the booking details.",
+      "schemaTemplate": {
+        "confirmation_message": "<confirmation_message>",
+        "booking_details": {
+          "booking_id": "<booking_id>",
+          "flight_number": "<flight_number>",
+          "airline": "<airline_name>",
+          "departure": {
+            "city": "<departure_city>",
+            "airport": "<departure_airport>",
+            "date_time": "<YYYY-MM-DDTHH:MM:SS>"
+          },
+          "arrival": {
+            "city": "<arrival_city>",
+            "airport": "<arrival_airport>",
+            "date_time": "<YYYY-MM-DDTHH:MM:SS>"
+          },
+          "price": "<currency_value>",
+          "passenger_details": [
+            {
+              "name": "<passenger_name>",
+              "age": "<passenger_age>",
+              "seat_number": "<seat_number>"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
+2024-10-24T03:32:06.230Z - [Session: 1e8e5ecc-68a6-4573-abfa-7f81a715a2f7] [AgentSmith] createSession called with description:
+2024-10-24T03:32:06.232Z - [Session: 1e8e5ecc-68a6-4573-abfa-7f81a715a2f7] [AgentSmith] a travel agent to book hotels for customers
+
+The name of this agent is HotelAgent.
+2024-10-24T03:32:06.679Z - [Session: 1e8e5ecc-68a6-4573-abfa-7f81a715a2f7] Input: a travel agent to book hotels for customers
+
+The name of this agent is HotelAgent.
+2024-10-24T03:32:29.815Z - [Session: 1e8e5ecc-68a6-4573-abfa-7f81a715a2f7] Output: {
+  "messageType": "creation",
+  "instructions": [
+    {
+      "name": "search_hotels",
+      "description": "Search for available hotels based on user-provided criteria such as location, dates, and preferences.",
+      "schemaTemplate": {
+        "hotels": [
+          {
+            "hotel_name": "<hotel_name>",
+            "location": "<hotel_location>",
+            "price_per_night": "<currency_value>",
+            "availability": "<available/not_available>",
+            "rating": "<rating_value>"
+          }
+        ]
+      }
+    },
+    {
+      "name": "book_hotel",
+      "description": "Book a selected hotel based on the user's choice from the search results.",
+      "schemaTemplate": {
+        "booking_confirmation": {
+          "hotel_name": "<hotel_name>",
+          "booking_id": "<booking_id>",
+          "check_in_date": "<YYYY-MM-DD>",
+          "check_out_date": "<YYYY-MM-DD>",
+          "total_price": "<currency_value>"
+        }
+      }
+    },
+    {
+      "name": "provide_booking_details",
+      "description": "Provide detailed information about the booked hotel, including check-in/check-out times, address, and contact information.",
+      "schemaTemplate": {
+        "booking_details": {
+          "hotel_name": "<hotel_name>",
+          "address": "<hotel_address>",
+          "check_in_time": "<HH:MM>",
+          "check_out_time": "<HH:MM>",
+          "contact_info": "<hotel_contact_info>"
+        }
+      }
+    }
+  ]
+}
+2024-10-24T03:33:56.376Z - [Session: 0ca25304-7d98-414b-96d7-af588de70c94] [AgentSmith] createSession called with description:
+2024-10-24T03:33:56.377Z - [Session: 0ca25304-7d98-414b-96d7-af588de70c94] [AgentSmith] a travel to book hotels
+
+The name of this agent is HotelAgent.
+2024-10-24T03:33:56.976Z - [Session: 0ca25304-7d98-414b-96d7-af588de70c94] Input: a travel to book hotels
+
+The name of this agent is HotelAgent.
+2024-10-24T03:34:20.467Z - [Session: 0ca25304-7d98-414b-96d7-af588de70c94] Output: {
+  "messageType": "creation",
+  "instructions": [
+    {
+      "name": "search_hotels",
+      "description": "Search for available hotels based on user-provided criteria such as location, dates, and preferences.",
+      "schemaTemplate": {
+        "hotels": [
+          {
+            "hotel_name": "<hotel_name>",
+            "location": "<hotel_location>",
+            "price_per_night": "<currency_value>",
+            "availability": "<available/not_available>",
+            "rating": "<rating_value>"
+          }
+        ]
+      }
+    },
+    {
+      "name": "book_hotel",
+      "description": "Book a selected hotel based on the user's choice from the search results.",
+      "schemaTemplate": {
+        "booking_confirmation": {
+          "hotel_name": "<hotel_name>",
+          "booking_id": "<booking_id>",
+          "check_in_date": "<YYYY-MM-DD>",
+          "check_out_date": "<YYYY-MM-DD>",
+          "total_price": "<currency_value>"
+        }
+      }
+    },
+    {
+      "name": "provide_booking_details",
+      "description": "Provide detailed information about the booked hotel, including check-in/check-out times, address, and contact information.",
+      "schemaTemplate": {
+        "booking_details": {
+          "hotel_name": "<hotel_name>",
+          "address": "<hotel_address>",
+          "check_in_time": "<HH:MM>",
+          "check_out_time": "<HH:MM>",
+          "contact_info": "<hotel_contact_info>"
+        }
+      }
+    }
+  ]
+}
+2024-10-24T03:36:37.045Z - [Session: b5351f8e-d610-44d3-8193-cff0a8841b1f] [AgentSmith] createSession called with description:
+2024-10-24T03:36:37.046Z - [Session: b5351f8e-d610-44d3-8193-cff0a8841b1f] [AgentSmith] a travel agent to book hotels
+
+The name of this agent is TravelAgent.
+2024-10-24T03:36:37.427Z - [Session: b5351f8e-d610-44d3-8193-cff0a8841b1f] Input: a travel agent to book hotels
+
+The name of this agent is TravelAgent.
+2024-10-24T03:36:59.455Z - [Session: b5351f8e-d610-44d3-8193-cff0a8841b1f] Output: {
+  "messageType": "creation",
+  "instructions": [
+    {
+      "name": "search_hotels",
+      "description": "Search for available hotels based on user-provided criteria such as location, dates, and preferences.",
+      "schemaTemplate": {
+        "hotels": [
+          {
+            "hotel_name": "<hotel_name>",
+            "location": "<hotel_location>",
+            "price_per_night": "<currency_value>",
+            "availability": "<true_or_false>",
+            "rating": "<rating_value>"
+          }
+        ]
+      }
+    },
+    {
+      "name": "book_hotel",
+      "description": "Book a selected hotel based on the user's choice from the search results.",
+      "schemaTemplate": {
+        "booking_confirmation": {
+          "hotel_name": "<hotel_name>",
+          "booking_id": "<booking_id>",
+          "check_in_date": "<YYYY-MM-DD>",
+          "check_out_date": "<YYYY-MM-DD>",
+          "total_price": "<currency_value>"
+        }
+      }
+    },
+    {
+      "name": "provide_booking_details",
+      "description": "Provide detailed information about the booked hotel, including check-in/check-out times, address, and contact information.",
+      "schemaTemplate": {
+        "booking_details": {
+          "hotel_name": "<hotel_name>",
+          "address": "<hotel_address>",
+          "check_in_time": "<HH:MM>",
+          "check_out_time": "<HH:MM>",
+          "contact_info": "<contact_information>"
+        }
+      }
+    }
+  ]
+}
+2024-10-24T03:37:54.738Z - [Session: ac4d582e-d8aa-4fca-ad46-def1196f91f5] [AgentSmith] createSession called with description:
+2024-10-24T03:37:54.739Z - [Session: ac4d582e-d8aa-4fca-ad46-def1196f91f5] [AgentSmith] a travel agent to book hotels
+
+The name of this agent is TravelAgent.
+2024-10-24T03:37:55.311Z - [Session: ac4d582e-d8aa-4fca-ad46-def1196f91f5] Input: a travel agent to book hotels
+
+The name of this agent is TravelAgent.
+2024-10-24T03:43:11.075Z - [Session: b25dd547-78bd-453a-b82d-be01473edc78] [AgentSmith] createSession called with description:
+2024-10-24T03:43:11.076Z - [Session: b25dd547-78bd-453a-b82d-be01473edc78] [AgentSmith] a travel agent to book flights
+
+The name of this agent is TravelAgent.
+2024-10-24T03:43:11.853Z - [Session: b25dd547-78bd-453a-b82d-be01473edc78] Input: a travel agent to book flights
+
+The name of this agent is TravelAgent.
+2024-10-24T03:48:43.365Z - [Session: 2580cfab-ec52-4af8-b84d-73128e8dc4f1] [AgentSmith] createSession called with description:
+2024-10-24T03:48:43.366Z - [Session: 2580cfab-ec52-4af8-b84d-73128e8dc4f1] [AgentSmith] a travel agent to book flights
+
+The name of this agent is TravelAgent.
+2024-10-24T03:48:44.122Z - [Session: 2580cfab-ec52-4af8-b84d-73128e8dc4f1] Input: a travel agent to book flights
+
+The name of this agent is TravelAgent.
+2024-10-24T03:52:43.164Z - [Session: d2a4bbff-8671-4b6d-87c4-79c52c8e1983] [AgentSmith] createSession called with description:
+2024-10-24T03:52:43.165Z - [Session: d2a4bbff-8671-4b6d-87c4-79c52c8e1983] [AgentSmith] a travel agent to book flights
+
+The name of this agent is Agent.
+2024-10-24T03:52:43.366Z - [Session: d2a4bbff-8671-4b6d-87c4-79c52c8e1983] Input: a travel agent to book flights
+
+The name of this agent is Agent.
+2024-10-24T03:53:11.580Z - [Session: ebe8f8cc-ad9b-4626-a745-202eb070a12f] [AgentSmith] createSession called with description:
+2024-10-24T03:53:11.581Z - [Session: ebe8f8cc-ad9b-4626-a745-202eb070a12f] [AgentSmith] a travel agent to book flights
+
+The name of this agent is agent.
+2024-10-24T03:53:12.102Z - [Session: ebe8f8cc-ad9b-4626-a745-202eb070a12f] Input: a travel agent to book flights
+
+The name of this agent is agent.
+2024-10-24T04:00:01.387Z - [Session: eb496cb6-571c-4459-b4bc-043450d6506b] [AgentSmith] createSession called with description:
+2024-10-24T04:00:01.389Z - [Session: eb496cb6-571c-4459-b4bc-043450d6506b] [AgentSmith] a travel agent to book flights
+
+The name of this agent is agent.
+2024-10-24T04:00:01.434Z - [Session: eb496cb6-571c-4459-b4bc-043450d6506b] Input: a travel agent to book flights
+
+The name of this agent is agent.
+2024-10-24T04:06:07.442Z - [Session: 7876d2b1-f8cf-4984-b236-d20e8d087c98] [AgentSmith] createSession called with description:
+2024-10-24T04:06:07.444Z - [Session: 7876d2b1-f8cf-4984-b236-d20e8d087c98] [AgentSmith] a travel agent to book flights
+
+The name of this agent is agent.
+2024-10-24T04:06:07.738Z - [Session: 7876d2b1-f8cf-4984-b236-d20e8d087c98] Input: a travel agent to book flights
+
+The name of this agent is agent.
+2024-10-24T04:08:47.284Z - [Session: b9e5ee34-bd56-402e-a600-518e067184c9] [AgentSmith] createSession called with description:
+2024-10-24T04:08:47.285Z - [Session: b9e5ee34-bd56-402e-a600-518e067184c9] [AgentSmith] a travel agent to book flights
+
+The name of this agent is agent.
+2024-10-24T04:08:47.907Z - [Session: b9e5ee34-bd56-402e-a600-518e067184c9] Input: a travel agent to book flights
+
+The name of this agent is agent.
+2024-10-24T04:11:30.386Z - [Session: 9b44fbba-f969-44e0-b173-6b782bd39e2c] [AgentSmith] createSession called with description:
+2024-10-24T04:11:30.387Z - [Session: 9b44fbba-f969-44e0-b173-6b782bd39e2c] [AgentSmith] a travel agent to book flights
+
+The name of this agent is agent.
+2024-10-24T04:11:31.201Z - [Session: 9b44fbba-f969-44e0-b173-6b782bd39e2c] Input: a travel agent to book flights
+
+The name of this agent is agent.
+2024-10-24T04:12:01.365Z - [Session: 9b44fbba-f969-44e0-b173-6b782bd39e2c] Output: {
+  "messageType": "creation",
+  "instructions": [
+    {
+      "name": "search_flights",
+      "description": "Search for available flights based on user-provided criteria such as departure city, destination city, travel dates, and preferred airlines.",
+      "schemaTemplate": {
+        "flights": [
+          {
+            "flight_number": "<flight_number>",
+            "airline": "<airline_name>",
+            "departure": {
+              "city": "<departure_city>",
+              "time": "<departure_time>",
+              "date": "<departure_date>"
+            },
+            "arrival": {
+              "city": "<arrival_city>",
+              "time": "<arrival_time>",
+              "date": "<arrival_date>"
+            },
+            "price": "<currency_value>"
+          }
+        ]
+      }
+    },
+    {
+      "name": "book_flight",
+      "description": "Book a selected flight for the user, requiring details such as passenger names, contact information, and payment details.",
+      "schemaTemplate": {
+        "booking_confirmation": {
+          "booking_id": "<booking_id>",
+          "flight_details": {
+            "flight_number": "<flight_number>",
+            "airline": "<airline_name>",
+            "departure": {
+              "city": "<departure_city>",
+              "time": "<departure_time>",
+              "date": "<departure_date>"
+            },
+            "arrival": {
+              "city": "<arrival_city>",
+              "time": "<arrival_time>",
+              "date": "<arrival_date>"
+            }
+          },
+          "passenger_details": [
+            {
+              "name": "<passenger_name>",
+              "contact_info": "<contact_info>"
+            }
+          ],
+          "payment_status": "<payment_status>"
+        }
+      }
+    },
+    {
+      "name": "provide_booking_details",
+      "description": "Provide detailed information about a previously booked flight, including flight status, gate information, and any updates.",
+      "schemaTemplate": {
+        "booking_details": {
+          "booking_id": "<booking_id>",
+          "flight_status": "<flight_status>",
+          "gate_info": "<gate_info>",
+          "updates": "<updates>"
+        }
+      }
+    }
+  ]
+}
+2024-10-24T04:14:09.750Z - [Session: 9c918ae1-4f8c-401c-8dfe-388ae75f95c6] [AgentSmith] createSession called with description:
+2024-10-24T04:14:09.752Z - [Session: 9c918ae1-4f8c-401c-8dfe-388ae75f95c6] [AgentSmith] a travel agent to book flights
+
+The name of this agent is TravelAGent.
+2024-10-24T04:14:09.829Z - [Session: 9c918ae1-4f8c-401c-8dfe-388ae75f95c6] Input: a travel agent to book flights
+
+The name of this agent is TravelAGent.
+2024-10-24T04:14:48.471Z - [Session: 9c918ae1-4f8c-401c-8dfe-388ae75f95c6] Output: {
+  "messageType": "creation",
+  "instructions": [
+    {
+      "name": "search_flights",
+      "description": "Search for available flights based on user-provided criteria such as departure city, destination city, travel dates, and preferred airlines.",
+      "schemaTemplate": {
+        "flights": [
+          {
+            "flight_number": "<flight_number>",
+            "airline": "<airline_name>",
+            "departure": {
+              "city": "<departure_city>",
+              "airport": "<departure_airport>",
+              "time": "<departure_time>"
+            },
+            "arrival": {
+              "city": "<arrival_city>",
+              "airport": "<arrival_airport>",
+              "time": "<arrival_time>"
+            },
+            "price": "<currency_value>",
+            "available_seats": "<number_of_seats>"
+          }
+        ]
+      }
+    },
+    {
+      "name": "book_flight",
+      "description": "Book a selected flight for the user based on the flight details provided.",
+      "schemaTemplate": {
+        "booking_confirmation": {
+          "booking_id": "<booking_id>",
+          "flight_details": {
+            "flight_number": "<flight_number>",
+            "airline": "<airline_name>",
+            "departure": {
+              "city": "<departure_city>",
+              "airport": "<departure_airport>",
+              "time": "<departure_time>"
+            },
+            "arrival": {
+              "city": "<arrival_city>",
+              "airport": "<arrival_airport>",
+              "time": "<arrival_time>"
+            },
+            "price": "<currency_value>"
+          },
+          "passenger_details": {
+            "name": "<passenger_name>",
+            "contact_info": "<contact_info>"
+          }
+        }
+      }
+    },
+    {
+      "name": "confirm_booking",
+      "description": "Send a confirmation message to the user with the details of the booked flight and any additional information such as check-in instructions.",
+      "schemaTemplate": {
+        "confirmation_message": {
+          "booking_id": "<booking_id>",
+          "flight_details": {
+            "flight_number": "<flight_number>",
+            "airline": "<airline_name>",
+            "departure": {
+              "city": "<departure_city>",
+              "airport": "<departure_airport>",
+              "time": "<departure_time>"
+            },
+            "arrival": {
+              "city": "<arrival_city>",
+              "airport": "<arrival_airport>",
+              "time": "<arrival_time>"
+            },
+            "price": "<currency_value>"
+          },
+          "passenger_details": {
+            "name": "<passenger_name>",
+            "contact_info": "<contact_info>"
+          },
+          "additional_info": "<additional_check_in_instructions>"
+        }
+      }
+    }
+  ]
+}
+2024-10-24T04:14:55.089Z - [Session: default] [AgentSmith] Shutting down agent...
+2024-10-24T04:14:55.090Z - [Session: default] [AgentSmith] Initiating core shutdown...
+2024-10-24T04:14:55.092Z - [Session: default] [AgentSmith] Core shutdown complete.
+2024-10-24T04:14:55.092Z - [Session: default] [AgentSmith] Agent shutdown complete.

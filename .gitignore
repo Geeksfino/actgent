@@ -179,3 +179,4 @@ agent.db
 .env
 dist/
 .log
+smith-generated/

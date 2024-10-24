@@ -58,6 +58,12 @@ export class AgentCoreConfigurator {
         };
         
         config.instructions?.push(instruction);
+
+        if (data.tool) {
+          console.log(`Instruction "${name}" tool map:`, data.tool);
+          config.instructionToolMap = config.instructionToolMap || {};
+          config.instructionToolMap[name] = data.tool;
+        }
       }
     }
 

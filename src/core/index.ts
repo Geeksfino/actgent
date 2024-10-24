@@ -3,6 +3,7 @@ export * from './interfaces';
 export { AgentCore } from './AgentCore';
 export { AbstractClassifier } from './AbstractClassifier';
 export { IClassifier, ClassificationTypeConfig, ClassifiedTypeHandlers } from './IClassifier';
+export { ExecutionContext } from './ExecutionContext';
 
 // Memory components
 export { Memory, MemoryStorage, DefaultAgentMemory } from './Memory';

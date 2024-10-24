@@ -1,6 +1,7 @@
 ---
 instructionName: Creation
 schemaTemplate: "creation.json"
+tool: "AgentGenerator"
 ---
 When creating an agent, first analyze the input description to extract the role, goal and capabilities of the agent to be created, then think about what kind of tasks will user ask such an agent to fulfil. Come up with a sample task which is typical and common. Take it as a complex task and decompose it into simple sub tasks. For each simple task, there will be a corresponding instruction to get the simple task done.
 

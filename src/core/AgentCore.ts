@@ -4,6 +4,7 @@ import { InMemoryStorage } from "./InMemoryStorage";
 import { PromptManager } from "./PromptManager";
 import { PriorityInbox } from "./PriorityInbox";
 import { Message } from "./Message";
+import { ExecutionContext } from "./ExecutionContext";
 import crypto from "crypto";
 import { OpenAI } from "openai";
 import { IAgentPromptTemplate } from "./IPromptTemplate";
@@ -31,10 +32,12 @@ export class AgentCore {
   public capabilities: string;
   public instructions: Instruction[] = [];
   public llmConfig: LLMConfig | null;
+  public executionContext: ExecutionContext = ExecutionContext.getInstance();
   streamCallback?: (delta: string) => void;
   streamBuffer: string = "";
   llmClient: OpenAI;
-  tools: Map<string, Tool> = new Map<string, Tool>();
+  toolRegistry: Map<string, Tool> = new Map<string, Tool>();
+  instructionToolMap: { [key: string]: string } = {};
 
   private memory: Memory;
   private inbox: PriorityInbox;
@@ -94,6 +97,9 @@ export class AgentCore {
       this.promptManager.setInstructions(this.instructions);
     }
 
+    if (config.instructionToolMap) {
+      this.instructionToolMap = config.instructionToolMap;
+    }
     // Initialize logger
     this.logger = this.initLogger(loggingConfig);
   }
@@ -112,6 +118,23 @@ export class AgentCore {
 
   public getInstructionByName(name: string): Instruction | undefined {
     return this.instructions.find(instruction => instruction.name === name);
+  }
+
+  public handleInstructionWithTool(instructionName: string, toolName: string): void {
+    const instruction = this.getInstructionByName(instructionName);
+    if (!instruction) {
+      throw new Error(`Instruction with name ${instructionName} not found`);
+    }
+
+    const tool = this.toolRegistry.get(toolName);
+    if (!tool) {
+      throw new Error(`Tool with name ${toolName} not found in tool registry`);
+    }
+    this.instructionToolMap[instructionName] = toolName;
+  }
+
+  public getToolForInstruction(instructionName: string): string | undefined {
+    return this.instructionToolMap[instructionName];
   }
 
   public async receive(message: Message): Promise<void> {
@@ -360,12 +383,12 @@ export class AgentCore {
     return sessionId; // Return the generated session ID
   }
 
-  public registerTool(schemaName: string, tool: Tool): void {
-    this.tools.set(schemaName, tool);
+  public registerTool(tool: Tool): void {
+    this.toolRegistry.set(tool.name, tool);
   }
 
-  public getTool(schemaName: string): Tool | undefined {
-    return this.tools.get(schemaName);
+  public getTool(name: string): Tool | undefined {
+    return this.toolRegistry.get(name);
   }
 
   public toJSON(): string {
