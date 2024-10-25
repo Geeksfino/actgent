@@ -18,7 +18,11 @@ export class AgentGenerator implements Tool {
     console.log(`Tool agent name: ${context.toolPreferences?.get("AgentGenerator")?.customOptions?.agentName}`);
 
     const options: AgentScaffoldOptions = {
-      name: context.toolPreferences?.get("AgentGenerator")?.customOptions?.agentName,
+      //name: context.toolPreferences?.get("AgentGenerator")?.customOptions?.agentName,
+      name: obj.name,
+      role: obj.role,
+      goal: obj.goal,
+      capabilities: obj.capabilities,
       outputDir: output
     };
     const agentDir = await generateAgentScaffold(options);

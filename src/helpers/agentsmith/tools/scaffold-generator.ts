@@ -4,6 +4,9 @@ import os from 'os';
 
 export interface AgentScaffoldOptions {
     name: string;
+    role: string;
+    goal: string;
+    capabilities: string;
     outputDir: string;
 }
 
@@ -38,7 +41,7 @@ async function copyDirectory(src: string, dest: string) {
     }
 }
 
-async function generateAgentScaffold({ name, outputDir }: AgentScaffoldOptions) {
+async function generateAgentScaffold({ name, role, goal, capabilities, outputDir }: AgentScaffoldOptions) {
     // Handle tilde expansion
     outputDir = outputDir.replace(/^~/, os.homedir());
     console.log(`Scaffold output directory: ${outputDir}`);
@@ -65,7 +68,7 @@ async function generateAgentScaffold({ name, outputDir }: AgentScaffoldOptions) 
     }
 
     // Load and process templates
-    const replacements = { name };
+    const replacements = { name, role, goal, capabilities };
     const [agentCode, indexCode, configMd, envContent] = await Promise.all([
         loadTemplate(agentCodeTemplate, replacements),
         loadTemplate(runnerTemplate, replacements),
@@ -92,14 +95,14 @@ async function main() {
     console.log("generating agent");
 
     const args = process.argv.slice(2);
-    if (args.length !== 2) {
-        console.error('Usage: node scaffold-generator.js <agent-name> <output-directory>');
+    if (args.length !== 5) {
+        console.error('Usage: node scaffold-generator.js <agent-name> <role> <goal> <capabilities> <output-directory>');
         process.exit(1);
     }
 
-    const [name, outputDir] = args;
+    const [name, role, goal, capabilities, outputDir] = args;
     try {
-        const createdDir = await generateAgentScaffold({ name, outputDir });
+        const createdDir = await generateAgentScaffold({ name, role, goal, capabilities, outputDir });
         console.log(`Agent scaffold created successfully at: ${createdDir}`);
     } catch (error) {
         console.error('Error creating agent scaffold:', error);

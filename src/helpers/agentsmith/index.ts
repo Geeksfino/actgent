@@ -63,15 +63,15 @@ async function chatLoop() {
       }
 
       if (agentName.trim() === '') {
-        console.log("Please input a name for the agent.");
+        console.log("How would you like to name the agent?");
       }
     } while (agentName.trim() === '');
     executionContext.addToolPreference("AgentGenerator", {
       agentName: agentName  // Direct object without extra nesting
     });
-    console.log(`Agent description: ${description}`);
-    console.log(`Agent name: ${executionContext.toolPreferences.get("AgentGenerator")?.customOptions?.agentName}`);
-    console.log(`Execution context: ${JSON.stringify(executionContext.toJSON(), null, 2)}`);
+    // console.log(`Agent description: ${description}`);
+    // console.log(`Agent name: ${executionContext.toolPreferences.get("AgentGenerator")?.customOptions?.agentName}`);
+    // console.log(`Execution context: ${JSON.stringify(executionContext.toJSON(), null, 2)}`);
 
     const agentDescription = description + `\n\nThe name of this agent is ${agentName}.`;
     const session = await AgentSmith.createSession("user", agentDescription);

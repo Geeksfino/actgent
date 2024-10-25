@@ -63,19 +63,19 @@ export class ExecutionContext {
   }
 
   public addToolPreference(toolName: string, options?: Record<string, any>) {
-    console.log('Before setting:', this.toolPreferences);
+    //console.log('Before setting:', this.toolPreferences);
     const preference: ToolPreference = {
       toolName: toolName,
       customOptions: options
     };
     this.toolPreferences.set(toolName, preference);
-    console.log('After setting:', this.toolPreferences);
-    console.log('Verification - getting value:', this.toolPreferences.get(toolName));
+    // console.log('After setting:', this.toolPreferences);
+    // console.log('Verification - getting value:', this.toolPreferences.get(toolName));
   }
 
   public getToolPreference(toolName: string): ToolPreference | undefined {
     const preference = this.toolPreferences.get(toolName);
-    console.log(`Getting tool preference for ${toolName}:`, preference);
+    // console.log(`Getting tool preference for ${toolName}:`, preference);
     return preference;
   }
 
