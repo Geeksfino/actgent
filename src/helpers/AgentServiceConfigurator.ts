@@ -64,6 +64,19 @@ export class AgentServiceConfigurator {
       console.warn(`Environment file not found at ${envPath}. Using shell environment variables.`);
     }
 
+    // Add validation checks after final configuration is set
+    if (!configurator.agentServiceConf.llmConfig?.baseURL) {
+      throw new Error("LLM_PROVIDER_URL is required but not set");
+    }
+
+    if (!configurator.agentServiceConf.llmConfig?.model) {
+      throw new Error("LLM_MODEL is required but not set");
+    }
+
+    if (!configurator.agentServiceConf.llmConfig?.apiKey) {
+      console.warn("Warning: LLM_API_KEY is not set (API key is possibly optional if using a local LLM provider)");
+    }
+
     return configurator.agentServiceConf;
   }
 }

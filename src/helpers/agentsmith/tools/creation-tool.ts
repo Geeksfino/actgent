@@ -23,6 +23,7 @@ export class AgentGenerator implements Tool {
       role: obj.role,
       goal: obj.goal,
       capabilities: obj.capabilities,
+      instructions: obj.instructions,
       outputDir: output
     };
     const agentDir = await generateAgentScaffold(options);

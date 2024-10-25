@@ -1,12 +1,14 @@
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import { Instruction } from '../../../core/interfaces';
 
 export interface AgentScaffoldOptions {
     name: string;
     role: string;
     goal: string;
     capabilities: string;
+    instructions: Instruction[];
     outputDir: string;
 }
 
@@ -41,7 +43,7 @@ async function copyDirectory(src: string, dest: string) {
     }
 }
 
-async function generateAgentScaffold({ name, role, goal, capabilities, outputDir }: AgentScaffoldOptions) {
+async function generateAgentScaffold({ name, role, goal, capabilities, instructions, outputDir }: AgentScaffoldOptions) {
     // Handle tilde expansion
     outputDir = outputDir.replace(/^~/, os.homedir());
     console.log(`Scaffold output directory: ${outputDir}`);
@@ -84,25 +86,73 @@ async function generateAgentScaffold({ name, role, goal, capabilities, outputDir
         fs.writeFile(path.join(agentDir, '.agent.env'), envContent),
     ]);
 
-    // Copy instructions directory separately
-    await copyDirectory(instructionsDir, path.join(agentDir, 'instructions'));
+    // Create instructions directory
+    const agentInstructionsDir = path.join(agentDir, 'instructions');
+    await fs.mkdir(agentInstructionsDir, { recursive: true });
+
+    // Process each instruction
+    for (const instruction of instructions) {
+        const { name, description, schemaTemplate } = instruction;
+        
+        // Create instruction markdown file
+        const mdContent = `---
+instructionName: ${name}
+schemaTemplate: "${name}.json"
+---
+${description}`;
+        await fs.writeFile(
+            path.join(agentInstructionsDir, `${name}.md`),
+            mdContent
+        );
+
+        // Create schema JSON file if template exists
+        if (schemaTemplate) {
+            await fs.writeFile(
+                path.join(agentInstructionsDir, `${name}.json`),
+                JSON.stringify(schemaTemplate, null, 2)
+            );
+        }
+    }
+
+    // Copy base instructions directory separately
+    await copyDirectory(instructionsDir, agentInstructionsDir);
+
+    // After generating instruction files, update config.md with instructions
+    const configPath = path.join(agentDir, 'config.md');
+    let configContent = await fs.readFile(configPath, 'utf-8');
+    
+    // Format custom instructions in "name": "path" format with consistent 4-space indentation
+    const customInstructionsList = instructions
+        .map(instruction => `    "${instruction.name}": "instructions/${instruction.name}.md"`)
+        .join('\n');
+
+    // Replace the placeholder with formatted instructions, ensuring consistent indentation
+    configContent = configContent.replace(
+        /\$\(agent_domain_instructions\)/g,
+        customInstructionsList ? `${customInstructionsList}\n` : ''
+    );
+
+    // Fix any double indentation issues
+    configContent = configContent.replace(/instructions:\n\s+"/g, 'instructions:\n    "');
+
+    await fs.writeFile(configPath, configContent);
 
     return agentDir;
 }
 
 // CLI implementation
 async function main() {
-    console.log("generating agent");
+    console.log("generating agent scaffold");
 
     const args = process.argv.slice(2);
-    if (args.length !== 5) {
+    if (args.length !== 6) {
         console.error('Usage: node scaffold-generator.js <agent-name> <role> <goal> <capabilities> <output-directory>');
         process.exit(1);
     }
 
     const [name, role, goal, capabilities, outputDir] = args;
     try {
-        const createdDir = await generateAgentScaffold({ name, role, goal, capabilities, outputDir });
+        const createdDir = await generateAgentScaffold({ name, role, goal, capabilities, instructions: [], outputDir });
         console.log(`Agent scaffold created successfully at: ${createdDir}`);
     } catch (error) {
         console.error('Error creating agent scaffold:', error);
