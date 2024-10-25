@@ -48,7 +48,7 @@ export class Session {
     public async triggerEventHandlers<T extends readonly ClassificationTypeConfig[]>(obj: InferClassificationUnion<T>): Promise<void> {
         const instructionName = obj.messageType;
         const toolName = this.core.getToolForInstruction(instructionName);
-        console.log(`Session: Tool for instruction "${instructionName}":`, toolName);
+        //console.log(`Session: Tool for instruction "${instructionName}":`, toolName);
         if (toolName) {
             const tool:Tool | undefined = this.core.getTool(toolName);
             if (tool) {
