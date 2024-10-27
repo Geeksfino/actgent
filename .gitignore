@@ -178,5 +178,5 @@ agent.db
 .agent.env
 .env
 dist/
-.log
+*.log
 smith-generated/

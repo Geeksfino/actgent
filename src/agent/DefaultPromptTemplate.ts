@@ -35,6 +35,23 @@ export class DefaultPromptTemplate<
 	7.	After trying these principles and you still cannot understand the intent of an input message or you carefully review that it is not aligned with your goal or capabilities, 
       you should ask the user for clarification.
 
+      Additionally, follow these reasoning and action principles:
+      1. Thought Process: Before taking any action, explicitly reason about:
+         - What you understand about the task
+         - What information you need
+         - What approach you'll take
+         - What potential challenges might arise
+
+      2. Action Planning: Break down complex tasks into specific actions:
+         - Identify required steps
+         - Consider dependencies between steps
+         - Plan validation checks
+
+      3. Observation & Reflection: After each action:
+         - Analyze the results
+         - Consider if adjustments are needed
+         - Plan next steps based on observations
+
     `;
   }
 
@@ -51,20 +68,30 @@ export class DefaultPromptTemplate<
       .join("\n\n");
 
     const prompt = `
-  # Message Analysis Prompt
-  
-  Analyze the following message comprehensively. Categorize the message into one of these types:
-  ${typesDescription}
-  
-  You shall first try to understand the user's intent to be sure that the user is asking something relevant to your role, goal and capabilities.
-  If the user's intent is not clear or not relevant to your role, goal and capabilities, you shall ask for clarification.
-  
-  Based on the message type, provide a response in one of the following JSON formats:
-  
-  ${jsonFormats}
-  
-  Ensure that your response strictly adheres to these formats based on the identified message type. Provide concise yet comprehensive information 
-  within the constraints of each format.
+Analyze the following message using a structured reasoning and action approach:
+
+1. First, express your thought process about:
+   - Your understanding of the request
+   - The approach you'll take
+   - Any important considerations
+
+2. Then, determine appropriate actions:
+   - Break down the task into specific steps
+   - Explain reasoning for each step
+   - Plan how to execute each step
+
+3. After planning actions, provide observations about:
+   - Expected results
+   - Potential challenges
+   - Next steps based on different outcomes
+
+Based on this analysis, categorize the message into one of these types:
+${typesDescription}
+
+Provide your response in the following JSON format:
+${jsonFormats}
+
+Ensure your response includes explicit reasoning, planned actions, and observation components while adhering to the specified format.
   `;
 
     return prompt.trim();
@@ -91,10 +118,25 @@ export class DefaultPromptTemplate<
     You shall first try to understand the user's intent to be sure that the user is asking something relevant to your role, goal and capabilities.
     If the user's intent is not clear or not relevant to your role, goal and capabilities, you shall ask for clarification.
     
-    Based on the message type, provide a response in one of the following JSON formats:
-    
-    ${jsonFormats}
-    
+    Based on the message type, provide a response_content in one of the following JSON formats:
+
+    {
+      "thought_process": {
+        "understanding": "<Brief description of how you understand the user's request>",
+        "approach": "<How you plan to handle this request>",
+        "considerations": ["<Important point 1>", "<Important point 2>"]
+      },
+      "action": {
+        "response_type": "<type>",
+        "response_content": ${jsonFormats}
+      },
+      "observation": {
+        "results": "<Expected outcome of this response>",
+        "analysis": "<Why this response type was chosen>",
+        "next_steps": ["<Possible next step 1>", "<Possible next step 2>"]
+        }
+    }
+      
     Ensure that your response strictly adheres to these formats based on the identified message type. Provide concise yet comprehensive information within the constraints of each format.
    
     Now, analyze the following message:
