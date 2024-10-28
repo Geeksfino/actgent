@@ -1,5 +1,5 @@
 import { ClassificationTypeConfig } from "../core/IClassifier";
-import { Instruction } from "../core/interfaces";
+import { Instruction } from "../core/configs";
 import { BaseAgent } from "../agent/BaseAgent";
 import { z } from "zod";
 

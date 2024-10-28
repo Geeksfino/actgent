@@ -1,6 +1,6 @@
 import { IAgentPromptTemplate } from './IPromptTemplate';
 import { SessionContext } from './SessionContext'; 
-import { Instruction } from './interfaces';
+import { Instruction } from './configs';
 export class PromptManager {
   private role: string = "";
   private goal: string = "";

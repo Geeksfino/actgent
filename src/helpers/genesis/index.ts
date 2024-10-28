@@ -1,6 +1,5 @@
+import { LoggingConfig } from "../../core/configs";
 import { AgentSmith } from './AgentSmith';
-import { LoggingConfig } from "../../core/interfaces";
-import { ExecutionContext } from "../../core/ExecutionContext";
 import readline from 'readline';
 import path from "path";
 import os from "os";

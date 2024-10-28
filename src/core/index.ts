@@ -1,5 +1,5 @@
 // Core components
-export * from './interfaces';
+export * from './configs';
 export { AgentCore } from './AgentCore';
 export { AbstractClassifier } from './AbstractClassifier';
 export { IClassifier, ClassificationTypeConfig, ClassifiedTypeHandlers } from './IClassifier';

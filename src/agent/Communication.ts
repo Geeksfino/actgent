@@ -1,5 +1,5 @@
 import { NatsConnection, connect, StringCodec } from 'nats';
-import { CommunicationConfig } from '../core/interfaces';
+import { CommunicationConfig } from '../core/configs';
 import { Message } from '../core/Message'; 
 
 export class Communication {

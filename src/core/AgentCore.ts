@@ -1,9 +1,10 @@
-import { AgentCoreConfig, Tool, LLMConfig, Instruction } from "./interfaces";
+import { AgentCoreConfig, LLMConfig, Instruction } from "./configs";
 import { DefaultAgentMemory, Memory, MemoryStorage } from "./Memory";
 import { InMemoryStorage } from "./InMemoryStorage";
 import { PromptManager } from "./PromptManager";
 import { PriorityInbox } from "./PriorityInbox";
 import { Message } from "./Message";
+import { Tool, ToolOptions, ToolOutput } from "./Tool";
 import { ExecutionContext } from "./ExecutionContext";
 import crypto from "crypto";
 import { OpenAI } from "openai";
@@ -36,7 +37,7 @@ export class AgentCore {
   streamCallback?: (delta: string) => void;
   streamBuffer: string = "";
   llmClient: OpenAI;
-  toolRegistry: Map<string, Tool> = new Map<string, Tool>();
+  toolRegistry: Map<string, Tool<any, any, any>> = new Map();
   instructionToolMap: { [key: string]: string } = {};
 
   private memory: Memory;
@@ -383,11 +384,12 @@ export class AgentCore {
     return sessionId; // Return the generated session ID
   }
 
-  public registerTool(tool: Tool): void {
+  public registerTool<TInput, TOutput extends ToolOutput>(tool: Tool<TInput, TOutput, ToolOptions>): void {
     this.toolRegistry.set(tool.name, tool);
+    tool.setContext(this.executionContext);
   }
 
-  public getTool(name: string): Tool | undefined {
+  public getTool(name: string): Tool<any, any, any> | undefined {
     return this.toolRegistry.get(name);
   }
 

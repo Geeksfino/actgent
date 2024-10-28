@@ -1,4 +1,4 @@
-import { AgentCoreConfig, Tool, LLMConfig, CommunicationConfig, AgentServiceConfig, Instruction  } from '../core/interfaces';
+import { AgentCoreConfig, LLMConfig, CommunicationConfig, AgentServiceConfig, Instruction  } from '../core/configs';
 import { Communication } from './Communication';
 import { AgentRegistry } from './AgentRegistry';
 import { AgentCore } from '../core/AgentCore';
@@ -7,7 +7,8 @@ import { ClassificationTypeConfig, IClassifier} from '../core/IClassifier';
 import { ExecutionContext } from '../core/ExecutionContext';
 import { InferClassificationUnion } from '../core/TypeInference';  
 import { Session } from '../core/Session';
-import { LoggingConfig } from '../core/interfaces';
+import { LoggingConfig } from '../core/configs';
+import { Tool } from '../core/Tool';
 
 const defaultCommunicationConfig: CommunicationConfig = {};
 

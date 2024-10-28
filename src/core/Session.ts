@@ -2,7 +2,9 @@ import { AgentCore } from "./AgentCore";
 import { ClassificationTypeConfig } from "./IClassifier";
 import { Message } from "./Message";
 import { InferClassificationUnion } from "./TypeInference";
-import { Tool } from "./interfaces";
+import { Tool } from "./Tool";
+
+
 export class Session {
     core: AgentCore;
     owner: string;
@@ -46,13 +48,14 @@ export class Session {
 
     // Updated triggerEventHandlers method
     public async triggerEventHandlers<T extends readonly ClassificationTypeConfig[]>(obj: InferClassificationUnion<T>): Promise<void> {
+        //console.log(`Session: Triggering event handlers for object:`, obj);
         const instructionName = obj.messageType;
         const toolName = this.core.getToolForInstruction(instructionName);
         //console.log(`Session: Tool for instruction "${instructionName}":`, toolName);
         if (toolName) {
             const tool:Tool | undefined = this.core.getTool(toolName);
             if (tool) {
-            const result = await tool.execute(this.core.executionContext, obj);
+            const result = await tool.run(obj, {});
             // Notify tool result handlers
             this.toolResultHandlers.forEach(handler => {
                 if (typeof handler === 'function') {

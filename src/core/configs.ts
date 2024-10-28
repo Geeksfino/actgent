@@ -1,5 +1,3 @@
-import { ClassificationTypeConfig } from "./IClassifier";
-import { ExecutionContext } from "./ExecutionContext";
 export type Instruction = {
   name: string;
   description?: string;
@@ -32,12 +30,6 @@ export interface LLMConfig {
   model: string;
   baseURL?: string;
   streamMode?: boolean;
-}
-
-export interface Tool {
-  name: string;
-  description: string;
-  execute: (context: ExecutionContext, ...args: any[]) => Promise<any>;
 }
 
 export interface MemoryConfig {

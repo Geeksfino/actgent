@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { Instruction } from '../../../core/interfaces';
+import { Instruction } from '../../../core/configs';
 
 export interface AgentScaffoldOptions {
     name: string;

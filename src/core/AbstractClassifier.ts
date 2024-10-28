@@ -23,13 +23,17 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
   // public abstract getClassificationTypeHandlers(): ClassifiedTypeHandlers<T>;
 
   public handleLLMResponse(
-    response: string | InferClassificationUnion<T>,
+    response: any,
     session: Session
   ): void {
-    if (response && typeof response === 'object' && 'messageType' in response) {
-      session.triggerEventHandlers(response);
-    } else {
-      console.log("Invalid response format: messageType is missing or response is not an object");
-    }
+    const parsedResponse = this.parseLLMResponse(response);
+    session.triggerEventHandlers(parsedResponse);
+    // if (response && typeof response === 'object' && 'messageType' in response) {
+    //   session.triggerEventHandlers(response);
+    // } else {
+    //   console.log("Invalid response format: messageType is missing or response is not an object");
+    // }
   }
+
+  protected abstract parseLLMResponse(response: any): InferClassificationUnion<T>;
 }

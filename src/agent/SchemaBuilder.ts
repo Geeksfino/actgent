@@ -1,4 +1,4 @@
-import { Instruction } from "../core/interfaces";
+import { Instruction } from "../core/configs";
 import { ClassificationTypeConfig } from "../core/IClassifier";
 
 export class SchemaBuilder {

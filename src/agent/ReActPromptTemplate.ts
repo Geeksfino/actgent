@@ -89,7 +89,23 @@ Based on this analysis, categorize the message into one of these types:
 ${typesDescription}
 
 Provide your response in the following JSON format:
-${jsonFormats}
+
+{
+  "thought_process": {
+    "understanding": "<Brief description of how you understand the user's request>",
+    "approach": "<How you plan to handle this request>",
+    "considerations": ["<Important point 1>", "<Important point 2>"]
+  },
+  "action": {
+    "response_type": "<type>",
+    "response_content": ${jsonFormats}
+  },
+  "observation": {
+    "results": "<Expected outcome of this response>",
+    "analysis": "<Why this response type was chosen>",
+    "next_steps": ["<Possible next step 1>", "<Possible next step 2>"]
+    }
+}
 
 Ensure your response includes explicit reasoning, planned actions, and observation components while adhering to the specified format.
   `;
@@ -118,24 +134,8 @@ Ensure your response includes explicit reasoning, planned actions, and observati
     You shall first try to understand the user's intent to be sure that the user is asking something relevant to your role, goal and capabilities.
     If the user's intent is not clear or not relevant to your role, goal and capabilities, you shall ask for clarification.
     
-    Based on the message type, provide a response_content in one of the following JSON formats:
-
-    {
-      "thought_process": {
-        "understanding": "<Brief description of how you understand the user's request>",
-        "approach": "<How you plan to handle this request>",
-        "considerations": ["<Important point 1>", "<Important point 2>"]
-      },
-      "action": {
-        "response_type": "<type>",
-        "response_content": ${jsonFormats}
-      },
-      "observation": {
-        "results": "<Expected outcome of this response>",
-        "analysis": "<Why this response type was chosen>",
-        "next_steps": ["<Possible next step 1>", "<Possible next step 2>"]
-        }
-    }
+    Based on the message type, provide a in one of the following JSON formats:
+    ${jsonFormats}
       
     Ensure that your response strictly adheres to these formats based on the identified message type. Provide concise yet comprehensive information within the constraints of each format.
    
