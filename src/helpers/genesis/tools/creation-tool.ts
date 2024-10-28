@@ -17,7 +17,10 @@ export interface AgentGeneratorOutput extends ToolOutput {
   agentDir: string;
 }
 
-export class AgentGenerator extends Tool {
+export class AgentGenerator extends Tool<
+  AgentGeneratorInput,    // The input type
+  AgentGeneratorOutput    // The output type
+> {
 
   constructor() {
     super(
@@ -60,7 +63,7 @@ export class AgentGenerator extends Tool {
 
     return {
       agentDir: agentDir,
-      getText() { return agentDir; } // Implement ToolOutput interface
+      getContent() { return agentDir; } // Implement ToolOutput interface
     };
   }
 }

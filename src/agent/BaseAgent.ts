@@ -8,7 +8,7 @@ import { ExecutionContext } from '../core/ExecutionContext';
 import { InferClassificationUnion } from '../core/TypeInference';  
 import { Session } from '../core/Session';
 import { LoggingConfig } from '../core/configs';
-import { Tool } from '../core/Tool';
+import { Tool, ToolOutput } from '../core/Tool';
 
 const defaultCommunicationConfig: CommunicationConfig = {};
 
@@ -171,11 +171,11 @@ export abstract class BaseAgent<
     }
   }
 
-  public registerTool(tool: Tool): void {
+  public registerTool<TInput, TOutput extends ToolOutput>(tool: Tool<TInput, TOutput>): void {
     this.core.registerTool(tool);
   }
 
-  public getTool(name: string): Tool | undefined {
+  public getTool<TInput, TOutput extends ToolOutput>(name: string): Tool<TInput, TOutput> | undefined {
     return this.core.getTool(name);
   }
 

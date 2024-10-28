@@ -53,7 +53,7 @@ export class Session {
         const toolName = this.core.getToolForInstruction(instructionName);
         //console.log(`Session: Tool for instruction "${instructionName}":`, toolName);
         if (toolName) {
-            const tool:Tool | undefined = this.core.getTool(toolName);
+            const tool:Tool<T> | undefined = this.core.getTool(toolName);
             if (tool) {
             const result = await tool.run(obj, {});
             // Notify tool result handlers
