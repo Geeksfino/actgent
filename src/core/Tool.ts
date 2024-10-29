@@ -32,7 +32,7 @@ export class JSONOutput<T> extends ToolOutput {
   }
 
   getContent(): string {
-    return JSON.stringify(this.content);
+    return JSON.stringify(this.content, null, 2);
   }
 }
 

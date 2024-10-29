@@ -17,6 +17,6 @@
     "skipLibCheck": true,
     "preserveSymlinks": true
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "src/tools/calculator.ts"],
   "exclude": ["test/**/*", "node_modules", "dist"]
 }

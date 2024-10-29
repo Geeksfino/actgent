@@ -7,7 +7,8 @@
     ".": "./dist/index.js",
     "./core": "./dist/core/index.js",
     "./agent": "./dist/agent/index.js",
-    "./helpers": "./dist/helpers/index.js"
+    "./helpers": "./dist/helpers/index.js",
+    "./tools": "./dist/tools/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -17,8 +18,11 @@
     "@grpc/grpc-js": "^1.11.3",
     "bottleneck": "^2.19.5",
     "bree": "^9.2.4",
+    "cheerio": "^1.0.0",
+    "dotenv": "^16.4.5",
     "gray-matter": "^4.0.3",
     "lru-cache": "^11.0.1",
+    "mathjs": "^13.2.0",
     "nats": "^2.28.2",
     "openai": "^4.63.0",
     "rxjs": "^7.8.1",
@@ -26,7 +30,8 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "bun-types": "^1.1.29"
+    "bun-types": "^1.1.29",
+    "vitest": "^2.1.4"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
