@@ -11,6 +11,8 @@ An instruction is a triplet of:
 - description of instruction: <a description of the scenario when this instruction shall be triggered. This will be used to construct a prompt later to submit to a large language model>
 - output data schema template: <if this instruction, upon submitting as a prompt to a large language model, will result in some data output that is suitable to be returned in a JSON template or string template format, define such a template>
 
+The logical relationship of these three elements in an instruction and optionally, a tool, shall reflect this: WHEN a user request is determined suitable to be handled by a named instruction as described, AND if it results in a structured response, THEN the response shall conform to the given schema. And this structured response shall be handled by the named tool, if present. Note both the schema and the tool are optional. Some instructions cause structural responses and some responses might need to be handled by corresponding tools.
+
 Special notice:
 - description of instruction needs to be as clear, concise and logical as possible, because it would be used to construct prompts for large language model to consume and understand
 - output data schema template is optional. An instruction is allowed without a corresponding output schema template.
