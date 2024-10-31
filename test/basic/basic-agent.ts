@@ -11,7 +11,7 @@ const coreConfig = {
 };
 
 // make sure to set the correct agent configuration in .agent.env file - rename .agent.env.example to .agent.env and edit as needed
-const svcConfig = AgentServiceConfigurator.getAgentConfiguration("test/test-agent");
+const svcConfig = AgentServiceConfigurator.getAgentConfiguration("test/basic");
 console.log("service config: " + JSON.stringify(svcConfig));
 
 // Define the schema types

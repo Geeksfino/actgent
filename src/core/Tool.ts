@@ -229,27 +229,48 @@ export abstract class Tool<
 }
 
 // Dynamic Tool Implementation
-export class DynamicTool<TInput, TOutput extends ToolOutput> extends Tool<
+export class ToolBuilder<TInput, TOutput extends ToolOutput> extends Tool<
   TInput,
   TOutput
 > {
   constructor(
-    name: string,
-    description: string,
-    private inputSchema: z.ZodSchema<TInput>,
-    private handler: (
-      input: TInput,
-      context: ExecutionContext,
-      options: RunOptions
-    ) => Promise<TOutput>,
-    options?: ToolOptions,
-    events?: ToolEvents<TInput, TOutput>
+    private fields: {
+      name: string;
+      description: string;
+      inputSchema: z.ZodSchema<TInput>;
+      handler: (
+        input: TInput,
+        context: ExecutionContext,
+        options: RunOptions,
+        // Add run context for better extensibility
+        runContext?: { tool: ToolBuilder<TInput, TOutput> }
+      ) => Promise<TOutput>;
+      options?: ToolOptions;
+      events?: ToolEvents<TInput, TOutput>;
+    }
   ) {
-    super(name, description, options, events);
+    // Validate the fields before calling super
+    const validationSchema = z.object({
+      name: z
+        .string()
+        .regex(/^[a-zA-Z0-9\-_]+$/, "Tool name must only contain alphanumeric characters, hyphens, or underscores"),
+      description: z.string().min(1, "Description cannot be empty"),
+      inputSchema: z.instanceof(z.ZodSchema),
+      handler: z.function(),
+      options: z.record(z.any()).optional(),
+      events: z.record(z.any()).optional()
+    });
+
+    const result = validationSchema.safeParse(fields);
+    if (!result.success) {
+      throw new ValidationError("Invalid tool configuration", result.error.errors);
+    }
+
+    super(fields.name, fields.description, fields.options, fields.events);
   }
 
   schema(): z.ZodSchema<TInput> {
-    return this.inputSchema;
+    return this.fields.inputSchema;
   }
 
   protected execute(
@@ -257,6 +278,6 @@ export class DynamicTool<TInput, TOutput extends ToolOutput> extends Tool<
     context: ExecutionContext,
     options: RunOptions
   ): Promise<TOutput> {
-    return this.handler(input, context, options);
+    return this.fields.handler(input, context, options, { tool: this });
   }
 }
