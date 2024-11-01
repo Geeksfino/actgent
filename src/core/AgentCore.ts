@@ -13,7 +13,8 @@ import { Session } from "./Session";
 import { SessionContext } from "./SessionContext";
 import fs from "fs";
 import path from "path";
-import { Subject } from 'rxjs';
+import { Subject } from "rxjs";
+import { IClassifier } from "./IClassifier";
 
 interface StorageConfig {
   shortTerm?: MemoryStorage<any>;
@@ -44,7 +45,7 @@ export class AgentCore {
   private inbox: PriorityInbox;
   private promptManager: PromptManager;
   private contextManager: { [sessionId: string]: SessionContext } = {};
-  private llmResponseHandler!: (response: any, session: Session) => void;
+  private classifier: IClassifier<any>;
   private logger: (sessionId: string, message: string) => void;
   private shutdownSubject: Subject<void> = new Subject<void>();
 
@@ -52,6 +53,7 @@ export class AgentCore {
     config: AgentCoreConfig,
     llmConfig: LLMConfig,
     promptTemplate: IAgentPromptTemplate,
+    classifier: IClassifier<any>,
     storageConfig?: StorageConfig,
     loggingConfig?: LoggingConfig
   ) {
@@ -63,6 +65,7 @@ export class AgentCore {
     this.instructions = config.instructions || [];
     this.inbox = new PriorityInbox();
     this.llmConfig = llmConfig || null;
+    this.classifier = classifier;
 
     // Initialize memory with storage backends
     const shortTermStorage =
@@ -109,7 +112,11 @@ export class AgentCore {
     return this.capabilities;
   }
 
-  public addInstruction(name: string, description: string, schemaTemplate?: string): void {
+  public addInstruction(
+    name: string,
+    description: string,
+    schemaTemplate?: string
+  ): void {
     this.instructions.push({ name, description, schemaTemplate });
   }
 
@@ -118,10 +125,13 @@ export class AgentCore {
   }
 
   public getInstructionByName(name: string): Instruction | undefined {
-    return this.instructions.find(instruction => instruction.name === name);
+    return this.instructions.find((instruction) => instruction.name === name);
   }
 
-  public handleInstructionWithTool(instructionName: string, toolName: string): void {
+  public handleInstructionWithTool(
+    instructionName: string,
+    toolName: string
+  ): void {
     const instruction = this.getInstructionByName(instructionName);
     if (!instruction) {
       throw new Error(`Instruction with name ${instructionName} not found`);
@@ -172,48 +182,31 @@ export class AgentCore {
     return response.replace(/`/g, "").trim();
   }
 
-  public addLLMResponseHandler(
-    handler: (response: any, session: Session) => void
-  ) {
-    this.llmResponseHandler = handler;
+  public handleLLMResponse(response: string, session: Session): void {
+    try {
+      this.classifier.handleLLMResponse(response, session);
+    } catch (error) {
+      this.log(session.sessionId, `Error handling LLM response: ${error}`);
+    }
   }
 
   public registerStreamCallback(callback: (delta: string) => void): void {
     this.streamCallback = callback;
   }
 
-  // processStreamBuffer(force: boolean = false) {
-  //   const lines = this.streamBuffer.split("\n");
-  //   const completeLines = lines.slice(0, -1);
-  //   this.streamBuffer = lines[lines.length - 1];
-
-  //   for (const line of completeLines) {
-  //     if (this.streamCallback) {
-  //       this.streamCallback(line + "\n");
-  //     }
-  //   }
-
-  //   if (force && this.streamBuffer) {
-  //     if (this.streamCallback) {
-  //       this.streamCallback(this.streamBuffer);
-  //     }
-  //     this.streamBuffer = "";
-  //   }
-  // }
-
   processStreamBuffer(force: boolean = false) {
     // Split the buffer on newline characters
     const lines = this.streamBuffer.split("\n");
     const completeLines = lines.slice(0, -1);
     this.streamBuffer = lines[lines.length - 1]; // Incomplete line remains in the buffer
-  
+
     // Process all complete lines
     for (const line of completeLines) {
       if (this.streamCallback) {
         this.streamCallback(line + "\n"); // Call the callback with each complete line
       }
     }
-  
+
     // Flush the buffer if it's too large (threshold) or force flush is true
     const bufferThreshold = 100; // You can adjust this value as needed
     if (force || this.streamBuffer.length > bufferThreshold) {
@@ -237,10 +230,7 @@ export class AgentCore {
 
     const context = await this.memory.generateContext(sessionContext);
 
-    const response = await this.promptLLM(
-      message,
-      context
-    );
+    const response = await this.promptLLM(message, context);
 
     // Handle the response based on message type
     const cleanedResponse = this.cleanLLMResponse(response);
@@ -250,7 +240,7 @@ export class AgentCore {
 
     // Log the output message
     this.logger(message.sessionId, `Output: ${cleanedResponse}`);
-    this.llmResponseHandler(cleanedResponse, session);
+    this.handleLLMResponse(cleanedResponse, session);
   }
 
   public async getOrCreateSessionContext(message: Message): Promise<Session> {
@@ -265,10 +255,7 @@ export class AgentCore {
     return this.contextManager[message.sessionId].getSession();
   }
 
-  private async promptLLM(
-    message: Message,
-    context: any
-  ): Promise<string> {
+  private async promptLLM(message: Message, context: any): Promise<string> {
     //this.log(`System prompt: ${this.promptManager.getSystemPrompt()}`);
     const sessionContext = this.contextManager[message.sessionId];
 
@@ -281,7 +268,7 @@ export class AgentCore {
     //         sessionContext,
     //       message.payload.input,
     //       context
-    //     ), 
+    //     ),
     //     null,
     //       2
     //     )
@@ -292,60 +279,98 @@ export class AgentCore {
     try {
       let responseContent = "";
 
+      const unmappedTools = Array.from(this.toolRegistry.values())
+        .filter(
+          (tool) => !Object.values(this.instructionToolMap).includes(tool.name)
+        )
+        .map((tool) => tool.getFunctionDescription());
+
+      const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+        { role: "system", content: this.promptManager.getSystemPrompt() },
+        { role: "assistant", content: this.promptManager.getAssistantPrompt() },
+        {
+          role: "user",
+          content: this.promptManager.getUserPrompt(
+            sessionContext,
+            message.payload.input,
+            context
+          ),
+        },
+      ];
+
+      // Split into separate configs for streaming and non-streaming
+      const baseConfig = {
+        model: this.llmConfig?.model || "gpt-4",
+        messages,
+        tools: unmappedTools.length > 0 ? unmappedTools : undefined,
+      };
+
       if (this.llmConfig?.streamMode && this.streamCallback) {
-        const stream = await this.llmClient.chat.completions.create({
-          model: this.llmConfig?.model || "gpt-4",
-          messages: [
-            { role: "system", content: this.promptManager.getSystemPrompt() },
-            {
-              role: "assistant",
-              content: this.promptManager.getAssistantPrompt(),
-            },
-            {
-              role: "user",
-              content: this.promptManager.getUserPrompt(
-                sessionContext,
-                message.payload.input,
-                context
-              ),
-            },
-          ],
-          stream: true,
-        });
+        const streamConfig: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming =
+          {
+            ...baseConfig,
+            stream: true,
+          };
+
+        const stream =
+          await this.llmClient.chat.completions.create(streamConfig);
 
         for await (const chunk of stream) {
-          const delta = chunk.choices[0]?.delta?.content || "";
-          responseContent += delta;
-          this.streamBuffer += delta;
-          this.processStreamBuffer();
+          const toolCalls = chunk.choices[0]?.delta?.tool_calls;
+
+          if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+            const delta = chunk.choices[0]?.delta?.tool_calls || "";
+            responseContent += delta;
+            this.streamBuffer += delta;
+            this.processStreamBuffer();
+          } else {
+            const delta = chunk.choices[0]?.delta?.content || "";
+            responseContent += delta;
+            this.streamBuffer += delta;
+            this.processStreamBuffer();
+          }
         }
-        // Process any remaining content in the buffer
         this.processStreamBuffer(true);
       } else {
-        const response = await this.llmClient.chat.completions.create({
-          model: this.llmConfig?.model || "gpt-4",
-          messages: [
-            { role: "system", content: this.promptManager.getSystemPrompt() },
-            {
-              role: "assistant",
-              content: this.promptManager.getAssistantPrompt(),
-            },
-            {
-              role: "user",
-              content: this.promptManager.getUserPrompt(
-                sessionContext,
-                message.payload.input,
-                context
-              ),
-            },
-          ],
-        });
-        responseContent = response.choices[0].message.content || "{}";
+        const nonStreamConfig: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming =
+          {
+            ...baseConfig,
+            stream: false,
+          };
+
+        const response =
+          await this.llmClient.chat.completions.create(nonStreamConfig);
+        const message = response.choices[0].message;
+
+        if (message.tool_calls) {
+          responseContent = JSON.stringify({
+            tool_calls: message.tool_calls.map((toolCall) => ({
+              name: toolCall.function.name,
+              arguments: toolCall.function.arguments,
+            })),
+          });
+        } else {
+          responseContent = message.content || "{}";
+        }
+      }
+      //console.log(`Agent Core Response content: ${responseContent}`);
+
+      // Handle function execution
+      try {
+        const parsed = JSON.parse(responseContent);
+
+        if (parsed.tool_calls) {
+          const tool = this.getTool(parsed.tool_calls[0].name);
+          if (tool) {
+            const args = JSON.parse(parsed.tool_calls[0].arguments);
+            const result = await tool.run(args, {});
+            return result.getContent();
+          }
+        }
+      } catch (e) {
+        // Not a valid function call JSON, return original response
       }
 
-      //sessionContext.addMessage(message);
-
-      //console.log("LLM response===>", responseContent);
       return responseContent;
     } catch (error) {
       this.log(message.sessionId, `Error interacting with LLM: ${error}`);
@@ -357,7 +382,6 @@ export class AgentCore {
     owner: string,
     description: string
   ): Promise<Session> {
-
     // Construct a Session object
     const s: Session = new Session(this, owner, "", description, "");
     // Initialize session context and get the session ID
@@ -384,7 +408,9 @@ export class AgentCore {
     return sessionId; // Return the generated session ID
   }
 
-  public registerTool<TInput, TOutput extends ToolOutput>(tool: Tool<TInput, TOutput, ToolOptions>): void {
+  public registerTool<TInput, TOutput extends ToolOutput>(
+    tool: Tool<TInput, TOutput, ToolOptions>
+  ): void {
     this.toolRegistry.set(tool.name, tool);
     tool.setContext(this.executionContext);
   }
@@ -459,11 +485,11 @@ export class AgentCore {
   }
 
   public async shutdown(): Promise<void> {
-    this.log('default', 'Initiating core shutdown...');
-    
+    this.log("default", "Initiating core shutdown...");
+
     // Stop processing new messages
     this.inbox.stop();
-    
+
     // Cancel any ongoing LLM requests (if possible)
     // Note: OpenAI doesn't provide a way to cancel ongoing requests,
     // so we'll just have to wait for them to complete
@@ -478,6 +504,6 @@ export class AgentCore {
     // Close LLM client if necessary
     // Note: As of now, OpenAI's Node.js client doesn't require explicit closure
 
-    this.log('default', 'Core shutdown complete.');
+    this.log("default", "Core shutdown complete.");
   }
 }

@@ -13,7 +13,8 @@ export class CalculatorTool extends Tool<CalculatorInput, StringOutput> {
   constructor(config?: ConfigOptions) {
     super(
       "Calculator",
-      "A calculator tool that performs basic arithmetic operations like addition, subtraction, multiplication, and division."
+      `A calculator tool that performs basic arithmetic operations like addition, subtraction, multiplication, and division. 
+Only use the calculator tool if you need to perform a calculation.`
     );
 
     // Create a restricted math.js instance

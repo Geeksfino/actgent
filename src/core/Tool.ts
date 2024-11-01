@@ -226,6 +226,100 @@ export abstract class Tool<
       throw toolError;
     }
   }
+
+  /**
+   * Generates an OpenAI-compatible function description for this tool
+   */
+  public getFunctionDescription(): {
+    type: 'function';
+    function: {
+      name: string;
+      description: string;
+      parameters: {
+        type: 'object';
+        properties: Record<string, any>;
+        required: string[];
+      };
+    };
+  } {
+    const schema = this.schema();
+    return {
+      type: 'function',
+      function: {
+        name: this.name,
+        description: this.description,
+        parameters: {
+          type: 'object',
+          properties: this.extractSchemaProperties(schema),
+          required: this.extractRequiredFields(schema),
+        }
+      }
+    };
+  }
+
+  private extractSchemaProperties(schema: z.ZodSchema): Record<string, any> {
+    if (schema instanceof z.ZodObject) {
+      const shape = schema._def.shape();
+      const properties: Record<string, any> = {};
+      
+      for (const [key, value] of Object.entries(shape)) {
+        if (value instanceof z.ZodType) {
+          properties[key] = this.zodTypeToJsonSchema(value);
+        }
+      }
+      
+      return properties;
+    }
+    return {};
+  }
+
+  private extractRequiredFields(schema: z.ZodSchema): string[] {
+    if (schema instanceof z.ZodObject) {
+      const shape = schema._def.shape();
+      return Object.entries(shape)
+        .filter(([_, value]) => !(value instanceof z.ZodOptional))
+        .map(([key]) => key);
+    }
+    return [];
+  }
+
+  private zodTypeToJsonSchema(zodSchema: z.ZodTypeAny): any {
+    if (zodSchema instanceof z.ZodString) {
+      return { type: 'string', description: zodSchema.description };
+    }
+    if (zodSchema instanceof z.ZodNumber) {
+      return { type: 'number', description: zodSchema.description };
+    }
+    if (zodSchema instanceof z.ZodBoolean) {
+      return { type: 'boolean', description: zodSchema.description };
+    }
+    if (zodSchema instanceof z.ZodArray) {
+      return {
+        type: 'array',
+        items: this.zodTypeToJsonSchema(zodSchema.element),
+        description: zodSchema.description
+      };
+    }
+    if (zodSchema instanceof z.ZodObject) {
+      return {
+        type: 'object',
+        properties: this.extractSchemaProperties(zodSchema),
+        required: this.extractRequiredFields(zodSchema),
+        description: zodSchema.description
+      };
+    }
+    if (zodSchema instanceof z.ZodEnum) {
+      return {
+        type: 'string',
+        enum: zodSchema._def.values,
+        description: zodSchema.description
+      };
+    }
+    if (zodSchema instanceof z.ZodOptional) {
+      return this.zodTypeToJsonSchema(zodSchema.unwrap());
+    }
+    return { type: 'string' }; // fallback
+  }
 }
 
 // Dynamic Tool Implementation

@@ -34,6 +34,7 @@ export class DefaultPromptTemplate<
       always prioritizing understanding over rigid classification.
 	7.	After trying these principles and you still cannot understand the intent of an input message or you carefully review that it is not aligned with your goal or capabilities, 
       you should ask the user for clarification.
+  8. If you need further information support in order to fulfill the user's request, you should first check available tools under your disposal and try to execute them 
 
       Additionally, follow these reasoning and action principles:
       1. Thought Process: Before taking any action, explicitly reason about:
@@ -68,7 +69,24 @@ export class DefaultPromptTemplate<
       .join("\n\n");
 
     const prompt = `
-Analyze the following message using a structured reasoning and action approach:
+When handling user requests, you have two ways to invoke tools:
+
+    1. Through instruction formats:
+    - Use when the response matches a predefined classification type
+    - Each classification type maps to a specific schema with corresponding tool
+    - Follow the exact format specified for that classification type
+    
+    2. Through function calling:
+    - Use when you need to call a tool directly
+    - Each function has a specific name, description, and parameters
+    - The function call must match the provided function schema exactly
+
+    Choose the appropriate method based on:
+    - Whether the response matches a predefined classification type
+    - Whether you need to call a specific tool function directly
+    
+
+Now analyze the following message using a structured reasoning and action approach:
 
 1. First, express your thought process about:
    - Your understanding of the request
@@ -79,6 +97,7 @@ Analyze the following message using a structured reasoning and action approach:
    - Break down the task into specific steps
    - Explain reasoning for each step
    - Plan how to execute each step
+   - If you need to call a tool, you should first check available tools under your disposal and try to execute them
 
 3. After planning actions, provide observations about:
    - Expected results

@@ -23,7 +23,7 @@ async function chatLoop() {
                 rl.question('How may I help you today? ', resolve);
             });
 
-            if (input.toLowerCase() === '/exit') {
+            if (input.toLowerCase().trim() === '/exit') {
                 console.log("Thank you for using the ${name}. Goodbye!");
                 return;
             }
@@ -40,7 +40,7 @@ async function chatLoop() {
                 rl.question('You: ', resolve);
             });
 
-            if (userInput.toLowerCase() === '/exit') {
+            if (userInput.toLowerCase().trim() === '/exit') {
                 console.log("Thank you for using the ${name}. Shutting down...");
                 await ${name}.shutdown();
                 break;

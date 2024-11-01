@@ -54,8 +54,14 @@ export abstract class BaseAgent<
     this.classifier = this.createClassifier(schemaTypes);
     this.promptTemplate = this.createPromptTemplate(schemaTypes);
 
-    this.core = new AgentCore(core_config, llmConfig!, this.promptTemplate, undefined, loggingConfig);
-    this.core.addLLMResponseHandler(this.handleLLMResponse.bind(this));
+    this.core = new AgentCore(
+      core_config,
+      svc_config.llmConfig!,
+      this.promptTemplate,
+      this.classifier,
+      undefined,
+      loggingConfig
+    );
   }
 
   public getExecutionContext(): ExecutionContext {

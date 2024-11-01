@@ -40,7 +40,7 @@ async function chatLoop() {
         rl.question('What kind of agent do you want to create? ', resolve);
       });
 
-      if (description.toLowerCase() === '/exit') {
+      if (description.trim().toLowerCase() === '/exit') {
         console.log("Thank you for using AgentSmith. Goodbye!");
         return;
       }
@@ -56,7 +56,7 @@ async function chatLoop() {
         rl.question('What would you like to name this agent? ', resolve);
       });
 
-      if (agentName.toLowerCase() === '/exit') {
+      if (agentName.trim().toLowerCase() === '/exit') {
         console.log("Thank you for using AgentSmith. Goodbye!");
         return;
       }

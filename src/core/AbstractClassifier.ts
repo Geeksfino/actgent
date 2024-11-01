@@ -1,7 +1,6 @@
 // AbstractClassifier.ts
 import {
   IClassifier,
-  ClassifiedTypeHandlers,
   ClassificationTypeConfig,
 } from "./IClassifier";
 import { Session } from "./Session";
@@ -23,7 +22,7 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
   // public abstract getClassificationTypeHandlers(): ClassifiedTypeHandlers<T>;
 
   public handleLLMResponse(
-    response: any,
+    response: string,
     session: Session
   ): void {
     const parsedResponse = this.parseLLMResponse(response);
@@ -35,5 +34,5 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
     // }
   }
 
-  protected abstract parseLLMResponse(response: any): InferClassificationUnion<T>;
+  protected abstract parseLLMResponse(response: string): InferClassificationUnion<T>;
 }

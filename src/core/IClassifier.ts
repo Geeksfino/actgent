@@ -17,7 +17,6 @@ export type ClassifiedTypeHandlers<T extends readonly ClassificationTypeConfig[]
 
 export interface IClassifier<T extends readonly ClassificationTypeConfig[]> {
     getClassificationTypeDefinition(): Readonly<T>;
-    //getClassificationTypeHandlers(): ClassifiedTypeHandlers<Readonly<T>>;
-    handleLLMResponse(response: InferClassificationUnion<Readonly<T>>, session: Session): void;
+    handleLLMResponse(response: string, session: Session): void;
 }
 

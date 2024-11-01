@@ -119,6 +119,7 @@ class WeatherTool extends Tool<WeatherToolInput, JSONOutput<WeatherData>> {
     context: ExecutionContext,
     options: RunOptions
   ): Promise<JSONOutput<WeatherData>> {
+    console.log(`WeatherTool: Executing with input:`, input);
     // Resolve coordinates if location name is provided
     let coordinates: { latitude: number; longitude: number };
     if (input.location.name) {
