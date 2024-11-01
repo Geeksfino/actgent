@@ -55,17 +55,18 @@ describe('WikipediaTool', () => {
       query: 'test article',
       includeCategories: true,
       includeImages: true,
+      extractFormat: 'plain'
     });
 
     const content = JSON.parse(result.getContent());
     expect(content).toMatchObject({
       title: 'Test Article',
-      extract: '<p>Test article content</p>', // Match exact HTML content
+      extract: '<p>Test article content</p>',
       pageId: 12345,
-      url: 'https://en.wikipedia.org/wiki/Test%20Article', // Match URL encoding
+      url: 'https://en.wikipedia.org/wiki/Test%20Article',
       categories: ['Category:Test'],
       images: ['https://example.com/test.jpg'],
-      similarityScore: 1, // Expect exact value since it was provided in the mock
+      similarityScore: 1,
       summary: {
         extract: 'Test summary',
         thumbnail: {

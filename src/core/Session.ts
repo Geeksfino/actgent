@@ -47,11 +47,10 @@ export class Session {
     }
 
     // Updated triggerEventHandlers method
-    public async triggerEventHandlers<T extends readonly ClassificationTypeConfig[]>(obj: InferClassificationUnion<T>): Promise<void> {
-        //console.log(`Session: Triggering event handlers for object:`, obj);
+    public async triggerEventHandlers<T extends readonly ClassificationTypeConfig[]>(obj: InferClassificationUnion<T>): Promise<void> { 
+        console.log(`Session: Triggering event handlers for object:`, obj);
         const instructionName = obj.messageType;
         const toolName = this.core.getToolForInstruction(instructionName);
-        //console.log(`Session: Tool for instruction "${instructionName}":`, toolName);
         if (toolName) {
             const tool:Tool<T> | undefined = this.core.getTool(toolName);
             if (tool) {
@@ -65,9 +64,25 @@ export class Session {
         }
         
         this.eventHandlers.forEach(handler => {
-            if (typeof handler === 'function') {
+            if (typeof handler === 'function') {  
                 handler(obj);
             }
+            });
+        }
+    }
+
+    public async triggerToolCallsHandlers<T extends readonly ClassificationTypeConfig[]>(obj: InferClassificationUnion<T>): Promise<void> { 
+        console.log(`Session: Triggering tool call handlers for object:`, obj);
+        const toolName = obj.toolName;
+        const tool: Tool<T> | undefined = this.core.getTool(toolName);
+        if (tool) {
+            // Extract the arguments from the tool call object
+            const toolInput = (obj as any).arguments;
+            const result = await tool.run(toolInput, {});
+            this.toolResultHandlers.forEach(handler => {
+                if (typeof handler === 'function') { 
+                    handler(result);
+                }
             });
         }
     }

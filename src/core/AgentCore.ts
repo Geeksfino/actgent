@@ -315,22 +315,18 @@ export class AgentCore {
         const stream =
           await this.llmClient.chat.completions.create(streamConfig);
 
+        let chunks = [];
         for await (const chunk of stream) {
-          const toolCalls = chunk.choices[0]?.delta?.tool_calls;
-
-          if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-            const delta = chunk.choices[0]?.delta?.tool_calls || "";
-            responseContent += delta;
-            this.streamBuffer += delta;
-            this.processStreamBuffer();
-          } else {
-            const delta = chunk.choices[0]?.delta?.content || "";
-            responseContent += delta;
-            this.streamBuffer += delta;
-            this.processStreamBuffer();
-          }
+          chunks.push(chunk);
+          const delta = chunk.choices[0]?.delta?.content || "";
+          responseContent += delta;
+          this.streamBuffer += delta;
+          this.processStreamBuffer();
         }
         this.processStreamBuffer(true);
+        const lastChunk = chunks[chunks.length - 1];
+        const toolCalls = lastChunk.choices[0];
+        console.log(`toolCalls: ${JSON.stringify(toolCalls, null, 2)}`);
       } else {
         const nonStreamConfig: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming =
           {
@@ -341,8 +337,9 @@ export class AgentCore {
         const response =
           await this.llmClient.chat.completions.create(nonStreamConfig);
         const message = response.choices[0].message;
+        const isToolCalls = response.choices[0].finish_reason === "tool_calls";
 
-        if (message.tool_calls) {
+        if (isToolCalls && message.tool_calls) {
           responseContent = JSON.stringify({
             tool_calls: message.tool_calls.map((toolCall) => ({
               name: toolCall.function.name,

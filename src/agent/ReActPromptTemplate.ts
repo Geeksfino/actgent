@@ -86,7 +86,7 @@ When handling user requests, you have two ways to invoke tools:
     - Whether you need to call a specific tool function directly
     
 
-Now analyze the following message using a structured reasoning and action approach:
+Now analyze user request using a structured reasoning and action approach:
 
 1. First, express your thought process about:
    - Your understanding of the request
@@ -104,8 +104,11 @@ Now analyze the following message using a structured reasoning and action approa
    - Potential challenges
    - Next steps based on different outcomes
 
-Based on this analysis, categorize the message into one of these types:
+Based on this analysis, categorize your response into one of these message types if the response shall be directly relayed to the user:
 ${typesDescription}
+
+Or, if you need to call a tool, you should categorize your response as "BUILTIN_TOOL". 
+
 
 Provide your response in the following JSON format:
 
@@ -116,7 +119,7 @@ Provide your response in the following JSON format:
     "considerations": ["<Important point 1>", "<Important point 2>"]
   },
   "action": {
-    "response_type": "<type>",
+    "response_type": "<BUILTIN_TOOL if using a built-in tool, or CUSTOM for anything else>",
     "response_content": ${jsonFormats}
   },
   "observation": {
@@ -158,7 +161,7 @@ Ensure your response includes explicit reasoning, planned actions, and observati
       
     Ensure that your response strictly adheres to these formats based on the identified message type. Provide concise yet comprehensive information within the constraints of each format.
    
-    Now, analyze the following message:
+    Now, analyze the following message and respond:
     
     ${message}
     `;

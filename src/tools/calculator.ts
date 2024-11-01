@@ -2,6 +2,7 @@ import { Tool, StringOutput, RunOptions } from "../core/Tool";
 import { ExecutionContext } from "../core/ExecutionContext";
 import { z } from "zod";
 import { create, all, evaluate, ConfigOptions } from "mathjs";
+import { program } from 'commander';
 
 interface CalculatorInput {
   expression: string;
@@ -74,7 +75,7 @@ Only use the calculator tool if you need to perform a calculation.`
     try {
       // Use basic arithmetic evaluation instead of the full evaluate function
       const result = this.mathInstance.compile(input.expression).evaluate();
-
+      console.log(`Calculator: Result of ${input.expression} is ${result}`);
       // Convert the result to a string and return
       return new StringOutput(
         result.toString(),
@@ -91,4 +92,43 @@ Only use the calculator tool if you need to perform a calculation.`
       throw new Error('Unknown calculation error occurred');
     }
   }
+}
+
+async function main() {
+  program
+    .name('calculator')
+    .description('Evaluate mathematical expressions from the command line')
+    .option('-e, --expression <string>', 'Mathematical expression to evaluate')
+    .parse();
+
+  const options = program.opts();
+
+  if (!options.expression) {
+    console.error('Error: Expression is required');
+    program.help();
+    process.exit(1);
+  }
+
+  try {
+    const tool = new CalculatorTool();
+    const result = await tool.run({
+      expression: options.expression
+    });
+
+    // Pretty print results
+    console.log('\nCalculation Result:\n');
+    console.log(`Expression: ${options.expression}`);
+    console.log(`Result: ${result.getContent()}\n`);
+
+    // Print metadata
+    console.log('Metadata:', result.metadata);
+  } catch (error) {
+    console.error('Error:', error instanceof Error ? error.message : error);
+    process.exit(1);
+  }
+}
+
+// Only run main when this file is executed directly
+if (require.main === module) {
+  main().catch(console.error);
 }
