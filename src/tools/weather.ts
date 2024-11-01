@@ -40,8 +40,10 @@ interface WeatherToolInput {
     latitude?: number;
     longitude?: number;
   };
-  startDate: string;
+  startDate?: string;
+  start_date?: string;
   endDate?: string;
+  end_date?: string;
   temperatureUnit?: "celsius" | "fahrenheit";
 }
 
@@ -74,6 +76,21 @@ class WeatherTool extends Tool<WeatherToolInput, JSONOutput<WeatherData>> {
   }
 
   schema(): z.ZodSchema<WeatherToolInput> {
+    const dateSchema = z.string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .refine(
+        (date) => {
+          const inputDate = new Date(date);
+          const minDate = new Date('2016-01-01');
+          const maxDate = new Date();
+          maxDate.setDate(maxDate.getDate() + 16); // Add 16 days to current date
+          return inputDate >= minDate && inputDate <= maxDate;
+        },
+        (date) => ({
+          message: `Date must be between 2016-01-01 and ${new Date(Date.now() + 16 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]} (16 days from today)`
+        })
+      );
+
     return z.object({
       location: z.union([
         z.string(),
@@ -88,19 +105,48 @@ class WeatherTool extends Tool<WeatherToolInput, JSONOutput<WeatherData>> {
           "Either provide location name or latitude/longitude coordinates"
         )
       ]),
-      startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-      endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      startDate: dateSchema.optional(),
+      start_date: dateSchema.optional(),
+      endDate: dateSchema.optional(),
+      end_date: dateSchema.optional(),
       temperatureUnit: z.enum(["celsius", "fahrenheit"]).optional().default("celsius"),
-    }).refine(
-      (data) => {
-        // If startDate exists, endDate must also exist
-        return !data.startDate || (data.startDate && data.endDate);
-      },
-      {
-        message: "endDate is required when startDate is provided",
-        path: ["endDate"], // This will show the error on the endDate field
+    }).superRefine((data, ctx) => {
+      // Get the effective start and end dates
+      const startDate = data.startDate || data.start_date;
+      const endDate = data.endDate || data.end_date;
+      
+      // If we have a start date, we must have an end date
+      if (startDate && !endDate) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "endDate is required when startDate is provided",
+          path: ["endDate"],
+        });
       }
-    );
+
+      // Validate that end date is not before start date
+      if (startDate && endDate) {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        if (end < start) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "End date cannot be before start date",
+            path: ["endDate"],
+          });
+        }
+
+        // Check if the date range exceeds 16 days
+        const daysDiff = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+        if (daysDiff > 16) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Date range cannot exceed 16 days",
+            path: ["endDate"],
+          });
+        }
+      }
+    });
   }
 
   private async geocode(location: string, country?: string): Promise<{ latitude: number; longitude: number }> {
@@ -152,6 +198,10 @@ class WeatherTool extends Tool<WeatherToolInput, JSONOutput<WeatherData>> {
       throw new Error("Invalid location input");
     }
 
+    // Get effective dates from either format
+    const effectiveStartDate = input.startDate || input.start_date;
+    const effectiveEndDate = input.endDate || input.end_date;
+
     // Prepare API parameters
     const params = new URLSearchParams({
       latitude: coordinates.latitude.toString(),
@@ -160,11 +210,11 @@ class WeatherTool extends Tool<WeatherToolInput, JSONOutput<WeatherData>> {
       temperature_unit: input.temperatureUnit || "celsius",
     });
 
-    // Add forecast parameters only if both dates are provided
-    if (input.startDate && input.endDate) {
+    // Add forecast parameters if dates are provided
+    if (effectiveStartDate && effectiveEndDate) {
       params.append("daily", "temperature_2m_max,temperature_2m_min,sunrise,sunset");
-      params.append("start_date", input.startDate);
-      params.append("end_date", input.endDate);
+      params.append("start_date", effectiveStartDate);
+      params.append("end_date", effectiveEndDate);
     }
 
     // Always include current weather
@@ -180,7 +230,6 @@ class WeatherTool extends Tool<WeatherToolInput, JSONOutput<WeatherData>> {
     });
 
     if (!response.ok) {
-      // Add more detailed error logging
       const errorText = await response.text();
       console.error('Response status:', response.status);
       console.error('Response status text:', response.statusText);
@@ -201,28 +250,33 @@ class WeatherTool extends Tool<WeatherToolInput, JSONOutput<WeatherData>> {
         rain: rawData.current.rain,
         time: rawData.current.time,
       },
-      daily: {
+      daily: rawData.daily ? {
         time: rawData.daily.time,
         temperatureMax: rawData.daily.temperature_2m_max,
         temperatureMin: rawData.daily.temperature_2m_min,
         sunrise: rawData.daily.sunrise,
         sunset: rawData.daily.sunset,
-      },
+      } : {
+        time: [],
+        temperatureMax: [],
+        temperatureMin: [],
+        sunrise: [],
+        sunset: [],
+      }
     };
 
-    // Add metadata to track API usage and response details
+    // Add metadata
     const metadata = {
       timestamp: new Date().toISOString(),
       source: 'OpenMeteo API',
       coordinates: coordinates,
       requestParams: {
-        startDate: input.startDate,
-        endDate: input.endDate,
+        startDate: effectiveStartDate,
+        endDate: effectiveEndDate,
         temperatureUnit: input.temperatureUnit
       }
     };
 
-    console.log('Creating JSONOutput with metadata:', metadata); // Debug log
     return new JSONOutput(weatherData, metadata);
   }
 }
