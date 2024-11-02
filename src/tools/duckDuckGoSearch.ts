@@ -1,8 +1,8 @@
 import { Tool, JSONOutput, RunOptions } from "../core/Tool";
 import { ExecutionContext } from "../core/ExecutionContext";
 import { z } from "zod";
-import * as cheerio from "cheerio";
-import { program } from 'commander';
+import { HeaderGenerator } from "header-generator";
+import { program } from "commander";
 
 interface SearchResult {
   title: string;
@@ -13,6 +13,18 @@ interface SearchResult {
 interface DuckDuckGoSearchInput {
   query: string;
   maxResults?: number;
+}
+
+interface DuckDuckGoResponse {
+  AbstractText: string;
+  RelatedTopics: Array<{
+    FirstURL?: string;
+    Text?: string;
+    Topics?: Array<{
+      FirstURL: string;
+      Text: string;
+    }>;
+  }>;
 }
 
 export class DuckDuckGoSearchTool extends Tool<DuckDuckGoSearchInput, JSONOutput<SearchResult[]>> {
@@ -46,39 +58,49 @@ export class DuckDuckGoSearchTool extends Tool<DuckDuckGoSearchInput, JSONOutput
     try {
       console.log(`Searching for ${input.query} with ${input.maxResults} results`);
       
-      const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(input.query)}`;
-
-      const response = await fetch(url, {
-        signal: options.signal,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; DuckDuckGoSearchTool/1.0)',
-        },
-      });
+      const headers = new HeaderGenerator().getHeaders();
+      
+      const response = await fetch(
+        `https://api.duckduckgo.com/?q=${encodeURIComponent(input.query)}&format=json&pretty=0`,
+        {
+          headers: {
+            'User-Agent': headers['user-agent'],
+          }
+        }
+      );
 
       if (!response.ok) {
-        throw new Error(`Search failed: ${response.statusText}`);
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const html = await response.text();
-      const $ = cheerio.load(html);
-      const results: SearchResult[] = [];
+      const data = await response.json() as DuckDuckGoResponse;
+      const searchResults: SearchResult[] = [];
 
-      $('.result').slice(0, input.maxResults).each((_, element) => {
-        const $element = $(element);
-        const title = $element.find('.result__title').text().trim();
-        const link = $element.find('.result__url').attr('href') || '';
-        const snippet = $element.find('.result__snippet').text().trim();
-
-        if (title && link) {
-          results.push({ title, link, snippet });
+      for (const topic of data.RelatedTopics) {
+        if (topic.FirstURL && topic.Text) {
+          searchResults.push({
+            title: topic.Text.split(' - ')[0] || topic.Text,
+            link: topic.FirstURL,
+            snippet: topic.Text
+          });
+        } else if (topic.Topics) {
+          for (const subTopic of topic.Topics) {
+            searchResults.push({
+              title: subTopic.Text.split(' - ')[0] || subTopic.Text,
+              link: subTopic.FirstURL,
+              snippet: subTopic.Text
+            });
+          }
         }
-      });
 
-      console.log(results);
+        if (searchResults.length >= (input.maxResults || 10)) {
+          break;
+        }
+      }
 
-      return new JSONOutput(results, {
+      return new JSONOutput(searchResults.slice(0, input.maxResults), {
         query: input.query,
-        totalResults: results.length,
+        totalResults: searchResults.length,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown search error occurred';

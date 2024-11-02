@@ -52,7 +52,8 @@ describe('WeatherTool', () => {
 
       const result = await weatherTool.run({
         location: { name: 'New York' },
-        startDate: '2024-03-20'
+        startDate: '2024-03-20',
+        endDate: '2024-03-20'
       });
 
       const weatherData = JSON.parse(result.getContent());
@@ -68,7 +69,8 @@ describe('WeatherTool', () => {
 
       await expect(weatherTool.run({
         location: { name: 'InvalidLocation123' },
-        startDate: '2024-03-20'
+        startDate: '2024-03-20',
+        endDate: '2024-03-20'
       })).rejects.toThrow("Location 'InvalidLocation123' not found");
     });
   });
@@ -102,7 +104,8 @@ describe('WeatherTool', () => {
           latitude: 51.5074,
           longitude: -0.1278
         },
-        startDate: '2024-03-20'
+        startDate: '2024-03-20',
+        endDate: '2024-03-20'
       });
 
       const weatherData = JSON.parse(result.getContent());
@@ -115,7 +118,8 @@ describe('WeatherTool', () => {
     it('should handle API errors gracefully', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
-        statusText: 'Service Unavailable'
+        statusText: 'Service Unavailable',
+        text: () => Promise.resolve('Service Unavailable')
       });
 
       await expect(weatherTool.run({
@@ -123,14 +127,16 @@ describe('WeatherTool', () => {
           latitude: 51.5074,
           longitude: -0.1278
         },
-        startDate: '2024-03-20'
+        startDate: '2024-03-20',
+        endDate: '2024-03-20'
       })).rejects.toThrow('Weather API request failed');
     });
 
     it('should validate date format', async () => {
       await expect(weatherTool.run({
         location: { name: 'London' },
-        startDate: 'invalid-date'
+        startDate: 'invalid-date',
+        endDate: '2024-03-20'
       })).rejects.toThrow();
     });
   });

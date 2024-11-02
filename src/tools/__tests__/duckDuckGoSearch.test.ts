@@ -13,22 +13,22 @@ describe('DuckDuckGoSearchTool', () => {
   });
 
   it('should parse search results correctly', async () => {
-    const mockHtml = `
-      <div class="result">
-        <h2 class="result__title">Test Title 1</h2>
-        <a class="result__url" href="https://example1.com">Example 1</a>
-        <div class="result__snippet">Test snippet 1</div>
-      </div>
-      <div class="result">
-        <h2 class="result__title">Test Title 2</h2>
-        <a class="result__url" href="https://example2.com">Example 2</a>
-        <div class="result__snippet">Test snippet 2</div>
-      </div>
-    `;
-
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      text: () => Promise.resolve(mockHtml),
+      json: () => Promise.resolve({
+        RelatedTopics: [
+          {
+            Text: 'Test snippet 1',
+            FirstURL: 'https://example1.com',
+            Result: '<a href="https://example1.com">Test snippet 1</a> - Test snippet 1'
+          },
+          {
+            Text: 'Test snippet 2',
+            FirstURL: 'https://example2.com',
+            Result: '<a href="https://example2.com">Test snippet 2</a> - Test snippet 2'
+          }
+        ]
+      })
     });
 
     const result = await searchTool.run({
@@ -39,7 +39,7 @@ describe('DuckDuckGoSearchTool', () => {
     const results = JSON.parse(result.getContent());
     expect(results).toHaveLength(2);
     expect(results[0]).toEqual({
-      title: 'Test Title 1',
+      title: 'Test snippet 1',
       link: 'https://example1.com',
       snippet: 'Test snippet 1',
     });
@@ -48,7 +48,9 @@ describe('DuckDuckGoSearchTool', () => {
   it('should handle empty results', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      text: () => Promise.resolve('<div class="no-results">No results found</div>'),
+      json: () => Promise.resolve({
+        RelatedTopics: []
+      })
     });
 
     const result = await searchTool.run({
@@ -62,11 +64,12 @@ describe('DuckDuckGoSearchTool', () => {
   it('should handle API errors', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
-      statusText: 'Service Unavailable',
+      status: 503,
+      statusText: 'Service Unavailable'
     });
 
     await expect(searchTool.run({
       query: 'test query',
-    })).rejects.toThrow('DuckDuckGo search error: Search failed: Service Unavailable');
+    })).rejects.toThrow('DuckDuckGo search error: HTTP error! status: 503');
   });
 }); 

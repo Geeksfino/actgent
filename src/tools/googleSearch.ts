@@ -1,6 +1,7 @@
 import { Tool, JSONOutput, RunOptions, ToolOptions } from "../core/Tool";
 import { ExecutionContext } from "../core/ExecutionContext";
 import { z } from "zod";
+import { program } from 'commander';
 
 interface SearchResult {
   title: string;
@@ -84,4 +85,61 @@ export class GoogleSearchTool extends Tool<GoogleSearchInput, JSONOutput<SearchR
       throw new Error('Unknown search error occurred');
     }
   }
+}
+
+async function main() {
+  program
+    .name('google-search')
+    .description('Search Google from the command line')
+    .option('-q, --query <string>', 'Search query')
+    .option('-m, --max-results <number>', 'Maximum number of results (1-10)', '5')
+    .option('-k, --api-key <string>', 'Google Custom Search API key')
+    .option('-c, --cx <string>', 'Google Custom Search engine ID')
+    .parse();
+
+  const options = program.opts();
+
+  if (!options.query) {
+    console.error('Error: Query is required');
+    program.help();
+    process.exit(1);
+  }
+
+  const apiKey = options.apiKey || process.env.GOOGLE_API_KEY;
+  const cx = options.cx || process.env.GOOGLE_SEARCH_CX;
+
+  if (!apiKey || !cx) {
+    console.error('Error: API key and Search Engine ID are required');
+    console.error('Set GOOGLE_API_KEY and GOOGLE_SEARCH_CX environment variables or provide via command line options');
+    process.exit(1);
+  }
+
+  try {
+    const tool = new GoogleSearchTool(apiKey, cx);
+    const result = await tool.run({
+      query: options.query,
+      maxResults: parseInt(options.maxResults)
+    });
+
+    const searchResults = JSON.parse(result.getContent());
+    
+    // Pretty print results
+    console.log('\nGoogle Search Results:\n');
+    searchResults.forEach((result: SearchResult, index: number) => {
+      console.log(`${index + 1}. ${result.title}`);
+      console.log(`   ${result.link}`);
+      console.log(`   ${result.snippet}\n`);
+    });
+
+    // Print metadata
+    console.log('Metadata:', result.metadata);
+  } catch (error) {
+    console.error('Error:', error instanceof Error ? error.message : error);
+    process.exit(1);
+  }
+}
+
+// Only run main when this file is executed directly
+if (require.main === module) {
+  main().catch(console.error);
 } 
