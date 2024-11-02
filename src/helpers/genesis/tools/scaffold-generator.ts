@@ -53,13 +53,15 @@ async function generateAgentScaffold({ name, role, goal, capabilities, instructi
     // Create main directory and instructions subdirectory
     await fs.mkdir(agentDir, { recursive: true });
     await fs.mkdir(path.join(agentDir, 'instructions'), { recursive: true });
+    await fs.mkdir(path.join(agentDir, 'conf'), { recursive: true });
 
     // Template paths
     const templatesDir = path.join(__dirname, 'scaffold-template');
     const agentCodeTemplate = path.join(templatesDir, 'agentcode-template.md');
     const runnerTemplate = path.join(templatesDir, 'runner-template.md');
-    const configTemplate = path.join(templatesDir, 'config-template.md');
+    const configTemplate = path.join(templatesDir, 'brain-template.md');
     const envTemplate = path.join(templatesDir, 'env-template.md');
+    const dbConfig = path.join(templatesDir, 'database.yml');
     const instructionsDir = path.join(templatesDir, 'instructions');
 
     // Verify instructions template directory exists
@@ -81,9 +83,10 @@ async function generateAgentScaffold({ name, role, goal, capabilities, instructi
     // Write files first
     await Promise.all([
         fs.writeFile(path.join(agentDir, `${name}.ts`), agentCode),
-        fs.writeFile(path.join(agentDir, 'config.md'), configMd),
+        fs.writeFile(path.join(agentDir, 'brain.md'), configMd),
         fs.writeFile(path.join(agentDir, 'index.ts'), indexCode),
         fs.writeFile(path.join(agentDir, '.agent.env'), envContent),
+        fs.copyFile(dbConfig, path.join(agentDir, 'conf', 'database.yml')),
     ]);
 
     // Create instructions directory
@@ -117,8 +120,8 @@ ${description}`;
     // Copy base instructions directory separately
     await copyDirectory(instructionsDir, agentInstructionsDir);
 
-    // After generating instruction files, update config.md with instructions
-    const configPath = path.join(agentDir, 'config.md');
+    // After generating instruction files, update brain.md with instructions
+    const configPath = path.join(agentDir, 'brain.md');
     let configContent = await fs.readFile(configPath, 'utf-8');
     
     // Format custom instructions in "name": "path" format with consistent 4-space indentation

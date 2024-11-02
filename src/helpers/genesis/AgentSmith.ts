@@ -6,7 +6,7 @@ import { ToolOptions } from "../../core/Tool";
 import { AgentGenerator } from "./tools/creation-tool";
 
 // Load the agent configuration from a markdown file
-const configPath = path.join(__dirname, 'config.md');
+const configPath = path.join(__dirname, 'brain.md');
 const agentConfig = await AgentCoreConfigurator.loadMarkdownConfig(configPath);
 
 const currentDir = process.cwd();

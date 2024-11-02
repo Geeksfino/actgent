@@ -16,11 +16,10 @@ export class ReActClassifier<T extends readonly ClassificationTypeConfig[]> exte
       
       // Special handling for tool/function calling responses
       if (parsed?.action?.response_type === 'BUILTIN_TOOL') {
-        // Transform the tool calling response into a consistent format
         const toolResponse = {
           messageType: 'BUILTIN_TOOL',
           toolName: parsed.action.response_content.name,
-          arguments: parsed.action.response_content.parameters,
+          arguments: parsed.action.response_content.parameters || {},
         };
         
         return {
@@ -37,7 +36,7 @@ export class ReActClassifier<T extends readonly ClassificationTypeConfig[]> exte
       const content = parsed.action.response_content;
       console.log('Validating content:', JSON.stringify(content, null, 2));
       
-      // Validate that the response matches one of our schema types
+      // Validate against schema types
       const matchingSchema = this.schemaTypes.find(type => {
         console.log(`Checking schema type: ${type.name}`);
         const matches = Object.entries(type.schema).every(([key, schemaValue]) => {
@@ -57,7 +56,6 @@ export class ReActClassifier<T extends readonly ClassificationTypeConfig[]> exte
         );
       }
 
-      // Add the messageType if it's not already present
       return {
         isToolCall: false,
         parsedLLMResponse: {
@@ -72,33 +70,55 @@ export class ReActClassifier<T extends readonly ClassificationTypeConfig[]> exte
   }
 
   private validateSchemaValue(value: any, schemaValue: any): boolean {
-    // Handle undefined cases
-    if (value === undefined) {
+    // Handle undefined/null cases
+    if (value === undefined || value === null) {
       return false;
     }
 
-    // Basic type checking
-    if (typeof schemaValue === 'string') {
-      // If schema value is a template (e.g., "<QUESTION_1>"), just check if value is a string
-      if (schemaValue.startsWith('<') && schemaValue.endsWith('>')) {
-        return typeof value === 'string';
-      }
-      return typeof value === schemaValue;
+    // Handle template strings (enclosed in <>)
+    if (typeof schemaValue === 'string' && 
+        schemaValue.startsWith('<') && 
+        schemaValue.endsWith('>')) {
+      return true;  // Accept any non-null value for template fields
     }
-    
-    if (typeof schemaValue === 'object' && schemaValue !== null) {
-      if (Array.isArray(schemaValue)) {
-        return Array.isArray(value) && 
-          (schemaValue.length === 0 || // Empty array schema matches any array
-           value.every(v => this.validateSchemaValue(v, schemaValue[0])));
-      }
+
+    // Handle arrays
+    if (Array.isArray(schemaValue)) {
+      if (!Array.isArray(value)) return false;
+      if (value.length === 0) return false;  // Require at least one item
       
-      return typeof value === 'object' && 
-        Object.entries(schemaValue).every(([k, v]) => 
-          this.validateSchemaValue(value[k], v)
-        );
+      // Get the template item from schema array
+      const templateItem = schemaValue[0];
+      
+      // Validate each item in the array against the template
+      return value.every(item => this.validateSchemaValue(item, templateItem));
     }
-    
-    return true; // Allow other types to pass through
+
+    // Handle objects
+    if (typeof schemaValue === 'object' && schemaValue !== null) {
+      if (typeof value !== 'object') return false;
+      
+      // Check if all required properties exist and are valid
+      return Object.entries(schemaValue).every(([key, subSchema]) => {
+        // For template objects, we only need to verify the structure matches
+        if (typeof subSchema === 'object' && this.isTemplateObject(subSchema)) {
+          return value.hasOwnProperty(key) && typeof value[key] === 'object';
+        }
+        return value.hasOwnProperty(key) && this.validateSchemaValue(value[key], subSchema);
+      });
+    }
+
+    // For all other cases, just verify the value exists
+    return true;
+  }
+
+  private isTemplateObject(obj: any): boolean {
+    // Check if all values in the object are template strings
+    return typeof obj === 'object' && obj !== null &&
+           Object.values(obj).every(value => 
+             typeof value === 'string' && 
+             value.startsWith('<') && 
+             value.endsWith('>')
+           );
   }
 }
