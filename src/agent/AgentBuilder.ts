@@ -1,7 +1,7 @@
 import { BaseAgent } from './BaseAgent';
 import { AgentCoreConfig, AgentServiceConfig } from '../core/configs';
 import { DefaultPromptTemplate } from './ReActPromptTemplate';
-import { ReActClassifier } from './ReActClassifier-old';
+import { ReActClassifier } from './ReActClassifier';
 import { ClassificationTypeConfig } from '../core/IClassifier';
 import { SchemaBuilder } from './SchemaBuilder';
 import { ExecutionContext } from '../core/ExecutionContext';
