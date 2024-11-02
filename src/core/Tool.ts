@@ -34,6 +34,10 @@ export class JSONOutput<T> extends ToolOutput {
   getContent(): string {
     return JSON.stringify(this.content, null, 2);
   }
+
+  getTypedContent(): T {
+    return this.content;
+  }
 }
 
 // Error Types
