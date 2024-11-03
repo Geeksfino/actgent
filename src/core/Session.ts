@@ -2,7 +2,8 @@ import { AgentCore } from "./AgentCore";
 import { ClassificationTypeConfig } from "./IClassifier";
 import { Message } from "./Message";
 import { InferClassificationUnion } from "./TypeInference";
-import { Tool } from "./Tool";
+import { JSONOutput, Tool, ValidationError } from "./Tool";
+import { logger } from '../helpers/Logger';
 
 
 export class Session {
@@ -24,6 +25,7 @@ export class Session {
         this.sessionId = sessionId;
         this.description = description;
         this.parentSessionId = parentSessionId
+        logger.debug('Session created:', this.sessionId);
     }
 
     public createMessage(message: string): Message {
@@ -48,7 +50,7 @@ export class Session {
 
     // Updated triggerEventHandlers method
     public async triggerEventHandlers<T extends readonly ClassificationTypeConfig[]>(obj: InferClassificationUnion<T>): Promise<void> { 
-        console.log(`Session: Triggering event handlers for object:`, obj);
+        logger.debug(`Session: Triggering event handlers for object:`, obj);
         const instructionName = obj.messageType;
         const toolName = this.core.getToolForInstruction(instructionName);
         if (toolName) {
@@ -72,18 +74,39 @@ export class Session {
     }
 
     public async triggerToolCallsHandlers<T extends readonly ClassificationTypeConfig[]>(obj: InferClassificationUnion<T>): Promise<void> { 
-        console.log(`Session: Triggering tool call handlers for object:`, obj);
+        logger.debug(`Session: Triggering tool call handlers for object:`, obj);
         const toolName = obj.toolName;
         const tool: Tool<T> | undefined = this.core.getTool(toolName);
         if (tool) {
-            // Extract the arguments from the tool call object
-            const toolInput = (obj as any).arguments;
-            const result = await tool.run(toolInput, {});
-            this.toolResultHandlers.forEach(handler => {
-                if (typeof handler === 'function') { 
-                    handler(result);
+            try {
+                // Extract the arguments from the tool call object
+                const toolInput = (obj as any).arguments;
+                const result = await tool.run(toolInput, {});
+                this.toolResultHandlers.forEach(handler => {
+                    if (typeof handler === 'function') { 
+                        handler(result);
+                    }
+                });
+            } catch (error) {
+                // Handle validation errors specifically
+                if (error instanceof ValidationError) {
+                    logger.warning(`Validation error in tool ${toolName}:`, error.message, error.errors);
+                    // You might want to notify handlers with the error information
+                    this.toolResultHandlers.forEach(handler => {
+                        if (typeof handler === 'function') {
+                            handler({ error: error.message, details: error.errors });
+                        }
+                    });
+                } else {
+                    // Handle other types of errors
+                    logger.error(`Error executing tool ${toolName}:`, error);
+                    this.toolResultHandlers.forEach(handler => {
+                        if (typeof handler === 'function') {
+                            handler({ error: 'Tool execution failed', details: error instanceof Error ? error.message : String(error) });
+                        }
+                    });
                 }
-            });
+            }
         }
     }
 }

@@ -1,6 +1,15 @@
 import { ${name} } from './${name}';
 import readline from 'readline';
+import { LoggingConfig } from "@finogeeks/actgent/core";
+import { logger, LogLevel} from '@finogeeks/actgent/helpers';
+import path from "path";
+import os from "os";
 
+
+const loggerConfig: LoggingConfig = {
+  destination: path.join(process.cwd(), `${name}.getName().log`)
+};
+logger.setLevel(LogLevel.DEBUG);
 // Create readline interface
 const rl = readline.createInterface({
     input: process.stdin,
@@ -8,9 +17,9 @@ const rl = readline.createInterface({
 });
 
 ${name}.registerStreamCallback((delta: string) => {
-    console.log(delta);
+    logger.info(delta);
 });
-${name}.run();
+${name}.run(loggerConfig);
 
 async function chatLoop() {
     try {

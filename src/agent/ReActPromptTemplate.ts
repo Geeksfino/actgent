@@ -76,10 +76,11 @@ When handling user requests, you have two ways to invoke tools:
     - Each classification type maps to a specific schema with corresponding tool
     - Follow the exact format specified for that classification type
     
-    2. Through function calling:
+    2. Through tools calling:
     - Use when you need to call a tool directly
-    - Each function has a specific name, description, and parameters
-    - The function call must match the provided function schema exactly
+    - Each tool has a specific name, description, and parameters
+    - The tool call must match the corresponding input data schema exactly. If information to 
+      fill in as input data for the tool call is missing, you should ask the user for further clarification.
 
     Choose the appropriate method based on:
     - Whether the response matches a predefined classification type

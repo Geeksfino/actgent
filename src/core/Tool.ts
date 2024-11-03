@@ -134,11 +134,12 @@ export abstract class Tool<
     options: RunOptions
   ): Promise<TOutput>;
 
-  private validateInput(input: ToolInput): asserts input is ToolInput {
+  private validateInput(input: ToolInput): { success: boolean; errors?: any[] } {
     const result = this.schema().safeParse(input);
     if (!result.success) {
-      throw new ValidationError("Input validation failed", result.error.errors);
+      return { success: false, errors: result.error.errors };
     }
+    return { success: true };
   }
 
   protected async withRetry<T>(

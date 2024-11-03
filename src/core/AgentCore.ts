@@ -15,6 +15,7 @@ import fs from "fs";
 import path from "path";
 import { Subject } from "rxjs";
 import { IClassifier } from "./IClassifier";
+import { logger } from '../helpers/Logger';
 
 interface StorageConfig {
   shortTerm?: MemoryStorage<any>;
@@ -46,7 +47,7 @@ export class AgentCore {
   private promptManager: PromptManager;
   private contextManager: { [sessionId: string]: SessionContext } = {};
   private classifier: IClassifier<any>;
-  private logger: (sessionId: string, message: string) => void;
+
   private shutdownSubject: Subject<void> = new Subject<void>();
 
   constructor(
@@ -104,8 +105,13 @@ export class AgentCore {
     if (config.instructionToolMap) {
       this.instructionToolMap = config.instructionToolMap;
     }
-    // Initialize logger
-    this.logger = this.initLogger(loggingConfig);
+
+    // Update logging initialization
+    if (loggingConfig?.destination) {
+      logger.setDestination(loggingConfig.destination);
+    }
+
+    logger.debug('Initializing AgentCore');
   }
 
   public getCapabilities(): string {
@@ -221,7 +227,7 @@ export class AgentCore {
     const sessionContext = this.contextManager[message.sessionId];
 
     // Log the input message
-    this.logger(message.sessionId, `Input: ${message.payload.input}`);
+    logger.info(`Input: ${message.payload.input}`);
 
     sessionContext.addMessage(message);
 
@@ -239,7 +245,7 @@ export class AgentCore {
     sessionContext.addMessage(responseMessage);
 
     // Log the output message
-    this.logger(message.sessionId, `Output: ${cleanedResponse}`);
+    logger.info(`Output: ${cleanedResponse}`);
     this.handleLLMResponse(cleanedResponse, session);
   }
 
@@ -370,7 +376,7 @@ export class AgentCore {
 
       return responseContent;
     } catch (error) {
-      this.log(message.sessionId, `Error interacting with LLM: ${error}`);
+      logger.error(`Error interacting with LLM: ${error}`);
       throw error;
     }
   }
@@ -388,8 +394,7 @@ export class AgentCore {
     // Create a Message object with session ID and description
     const message = new Message(s.sessionId, s.description);
     this.inbox.enqueue(message); // Enqueue the message
-    this.log(message.sessionId, "createSession called with description:");
-    this.log(message.sessionId, description);
+    logger.info(`createSession called with description: ${description}`);
 
     return s;
   }
@@ -447,31 +452,14 @@ export class AgentCore {
     );
   }
 
-  private initLogger(
-    loggingConfig?: LoggingConfig
-  ): (sessionId: string, message: string) => void {
-    if (loggingConfig?.destination) {
-      const logDir = path.dirname(loggingConfig.destination);
-      if (!fs.existsSync(logDir)) {
-        fs.mkdirSync(logDir, { recursive: true });
-      }
-      return (sessionId: string, message: string) => {
-        const logMessage = `${new Date().toISOString()} - [Session: ${sessionId}] ${message}\n`;
-        fs.appendFileSync(loggingConfig.destination!, logMessage);
-      };
-    } else {
-      return (sessionId: string, message: string) => {
-        console.log(`[Session: ${sessionId}] ${message}`);
-      };
-    }
-  }
-
   public log(sessionId: string, message: string): void {
-    this.logger(sessionId, `[${this.name}] ${message}`);
+    logger.info(`[Session: ${sessionId}] [${this.name}] ${message}`);
   }
 
   public setLoggingConfig(loggingConfig: LoggingConfig): void {
-    this.logger = this.initLogger(loggingConfig);
+    if (loggingConfig?.destination) {
+      logger.setDestination(loggingConfig.destination);
+    }
   }
 
   private static formatMulltiLine(multiline: string): string {
@@ -482,7 +470,7 @@ export class AgentCore {
   }
 
   public async shutdown(): Promise<void> {
-    this.log("default", "Initiating core shutdown...");
+    logger.info('Initiating core shutdown...');
 
     // Stop processing new messages
     this.inbox.stop();
@@ -501,6 +489,20 @@ export class AgentCore {
     // Close LLM client if necessary
     // Note: As of now, OpenAI's Node.js client doesn't require explicit closure
 
-    this.log("default", "Core shutdown complete.");
+    logger.info('Core shutdown complete.');
+  }
+
+  handleError(error: Error) {
+    logger.error('AgentCore Error:', error);
+  }
+
+  async run() {
+    logger.info('Agent starting execution');
+    try {
+      // ... execution logic
+    } catch (error) {
+      logger.error('Error during agent execution:', error);
+      throw error;
+    }
   }
 }

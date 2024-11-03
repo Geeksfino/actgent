@@ -1,5 +1,5 @@
 {
-  "conformation": {
+  "confirmation": {
     "prompt": "<DECISION_PROMPT>",
     "options": ["<OPTION_1>", "<OPTION_2>", "..."]
   }

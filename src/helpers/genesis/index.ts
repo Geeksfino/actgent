@@ -1,11 +1,15 @@
 import { LoggingConfig } from "../../core/configs";
 import { AgentSmith } from './AgentSmith';
+import { logger, LogLevel} from '../../helpers/Logger';
 import readline from 'readline';
 import path from "path";
 import os from "os";
+
 const loggerConfig: LoggingConfig = {
   destination: path.join(process.cwd(), `${AgentSmith.getName()}.log`)
 };
+logger.setLevel(LogLevel.DEBUG);
+
 // Create readline interface
 const rl = readline.createInterface({
   input: process.stdin,
@@ -13,16 +17,16 @@ const rl = readline.createInterface({
 });
 
 AgentSmith.registerStreamCallback((delta: string) => {
-  console.log(delta);
+  logger.info(delta);
 });
 
 const executionContext = AgentSmith.getExecutionContext();
 executionContext.environment = {
-  outputDirectory: path.join(process.cwd(), "smith-generated"),
-  tempDirectory: path.join(os.tmpdir(), "smith-temp")
+  outputDirectory: path.join(process.cwd(), "generated-agents"),
+  tempDirectory: path.join(os.tmpdir(), "generated-agents-temp")
 };
 executionContext.addToolPreference("AgentGenerator", {
-  agentName: ''  // Initialize with empty string
+  agentName: 'AgentSmith'  
 });
 AgentSmith.run(loggerConfig);
 
