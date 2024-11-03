@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import matter from 'gray-matter';
 import { AgentCoreConfig, Instruction } from '../core/configs';
+import { logger } from './Logger';
 
 export class AgentCoreConfigurator {
   private static  DEFAULT_CONFIG = "config.md";
@@ -60,7 +61,7 @@ export class AgentCoreConfigurator {
         config.instructions?.push(instruction);
 
         if (data.tool) {
-          console.log(`Instruction "${name}" tool map:`, data.tool);
+          logger.info(`Instruction "${name}" tool map:`, data.tool);
           config.instructionToolMap = config.instructionToolMap || {};
           config.instructionToolMap[name] = data.tool;
         }

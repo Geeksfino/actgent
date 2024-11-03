@@ -1,15 +1,23 @@
 import { ${name} } from './${name}';
 import readline from 'readline';
 import { LoggingConfig } from "@finogeeks/actgent/core";
-import { logger, LogLevel} from '@finogeeks/actgent/helpers';
+import { Logger, logger, LogLevel} from '@finogeeks/actgent/helpers';
 import path from "path";
 import os from "os";
+import { program } from 'commander';
 
+// Configure command line options
+program
+  .option('--log-level <level>', 'set logging level (DEBUG, INFO, WARNING, ERROR)', 'INFO')
+  .parse();
+
+const options = program.opts();
 
 const loggerConfig: LoggingConfig = {
   destination: path.join(process.cwd(), `${name}.getName().log`)
 };
-logger.setLevel(LogLevel.DEBUG);
+logger.setLevel(Logger.parseLogLevel(options.logLevel));
+
 // Create readline interface
 const rl = readline.createInterface({
     input: process.stdin,

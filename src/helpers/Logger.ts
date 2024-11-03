@@ -71,6 +71,17 @@ export class Logger {
     public error(message: string, ...args: any[]) {
         this.log(LogLevel.ERROR, 'ERROR', message, ...args);
     }
+
+    public static parseLogLevel(level: string): LogLevel {
+        const upperLevel = level.toUpperCase();
+        switch (upperLevel) {
+            case 'DEBUG': return LogLevel.DEBUG;
+            case 'INFO': return LogLevel.INFO;
+            case 'WARNING': return LogLevel.WARNING;
+            case 'ERROR': return LogLevel.ERROR;
+            default: return LogLevel.INFO;
+        }
+    }
 }
 
 // Export a singleton instance

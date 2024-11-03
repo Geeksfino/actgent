@@ -1,14 +1,21 @@
 import { LoggingConfig } from "../../core/configs";
 import { AgentSmith } from './AgentSmith';
-import { logger, LogLevel} from '../../helpers/Logger';
+import { Logger, logger, LogLevel} from '../../helpers/Logger';
 import readline from 'readline';
 import path from "path";
 import os from "os";
+import { program } from 'commander';
 
+// Configure command line options
+program
+  .option('--log-level <level>', 'set logging level (DEBUG, INFO, WARNING, ERROR)', 'INFO')
+  .parse();
+
+const options = program.opts();
 const loggerConfig: LoggingConfig = {
   destination: path.join(process.cwd(), `${AgentSmith.getName()}.log`)
 };
-logger.setLevel(LogLevel.DEBUG);
+logger.setLevel(Logger.parseLogLevel(options.logLevel));
 
 // Create readline interface
 const rl = readline.createInterface({

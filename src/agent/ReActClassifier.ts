@@ -1,7 +1,7 @@
 import { ClassificationTypeConfig } from "../core/IClassifier";
 import { AbstractClassifier } from "../core/AbstractClassifier";
 import { InferClassificationUnion } from "../core/TypeInference";
-
+import { logger } from "../helpers/Logger";
 export class ReActClassifier<T extends readonly ClassificationTypeConfig[]> extends AbstractClassifier<T> {
   constructor(schemaTypes: T) {
     super(schemaTypes);
@@ -34,15 +34,15 @@ export class ReActClassifier<T extends readonly ClassificationTypeConfig[]> exte
       }
 
       const content = parsed.action.response_content;
-      console.log('Validating content:', JSON.stringify(content, null, 2));
+      logger.debug('Validating content:', JSON.stringify(content, null, 2));
       
       // Validate against schema types
       const matchingSchema = this.schemaTypes.find(type => {
-        console.log(`Checking schema type: ${type.name}`);
+        logger.debug(`Checking schema type: ${type.name}`);
         const matches = Object.entries(type.schema).every(([key, schemaValue]) => {
           const contentValue = content[key];
           const isValid = this.validateSchemaValue(contentValue, schemaValue);
-          console.log(`  Property ${key}: ${isValid ? 'valid' : 'invalid'} (expected ${JSON.stringify(schemaValue)}, got ${JSON.stringify(contentValue)})`);
+          logger.debug(`  Property ${key}: ${isValid ? 'valid' : 'invalid'} (expected ${JSON.stringify(schemaValue)}, got ${JSON.stringify(contentValue)})`);
           return isValid;
         });
         return matches;
