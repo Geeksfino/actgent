@@ -33,7 +33,7 @@ executionContext.environment = {
   tempDirectory: path.join(os.tmpdir(), "generated-agents-temp")
 };
 executionContext.addToolPreference("AgentGenerator", {
-  agentName: 'AgentSmith'  
+  agentName: ''  
 });
 AgentSmith.run(loggerConfig);
 
@@ -76,6 +76,7 @@ async function chatLoop() {
         console.log("How would you like to name the agent?");
       }
     } while (agentName.trim() === '');
+    
     executionContext.addToolPreference("AgentGenerator", {
       agentName: agentName  // Direct object without extra nesting
     });
@@ -84,7 +85,16 @@ async function chatLoop() {
     // console.log(`Execution context: ${JSON.stringify(executionContext.toJSON(), null, 2)}`);
 
     const agentDescription = description + `\n\nThe name of this agent is ${agentName}.`;
+    
+    // Create session and set up response handler
     const session = await AgentSmith.createSession("user", agentDescription);
+    session.onEvent((response) => {
+      if (typeof response === 'string') {
+        console.log(`${AgentSmith.getName()}:`, response);
+      } else {
+        console.log(`${AgentSmith.getName()}:`, JSON.stringify(response, null, 2));
+      }
+    });
 
     while (true) {
       const userInput = await new Promise<string>((resolve) => {
@@ -101,13 +111,17 @@ async function chatLoop() {
         continue;
       }
 
-      await session.chat(userInput);
+      try {
+        await session.chat(userInput);
+      } catch (error) {
+        console.error("Error during chat:", error);
+      }
     }
   } catch (error) {
     console.error("An error occurred:", error);
   } finally {
     rl.close();
-    process.exit(0);  // Ensure the process exits after shutdown
+    process.exit(0);
   }
 }
 

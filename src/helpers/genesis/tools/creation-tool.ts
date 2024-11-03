@@ -12,14 +12,16 @@ export interface AgentGeneratorInput {
   instructions: Instruction[];
 };
 
-// Make JSONOutput<AgentGeneratorMetadata> explicitly extend ToolOutput
-export interface AgentGeneratorOutput extends ToolOutput {
+// Remove the custom interface and use JSONOutput directly
+export type AgentGeneratorOutput = JSONOutput<{
   agentDir: string;
-}
+  agentName: string;
+  instructions: Instruction[];
+}>;
 
 export class AgentGenerator extends Tool<
-  AgentGeneratorInput,    // The input type
-  AgentGeneratorOutput    // The output type
+  AgentGeneratorInput,
+  AgentGeneratorOutput
 > {
 
   constructor() {
@@ -50,7 +52,6 @@ export class AgentGenerator extends Tool<
     console.log(`Tool agent name: ${context.toolPreferences?.get("AgentGenerator")?.customOptions?.agentName}`);
 
     const options: AgentScaffoldOptions = {
-      //name: context.toolPreferences?.get("AgentGenerator")?.customOptions?.agentName,
       name: input.name,
       role: input.role,
       goal: input.goal,
@@ -61,9 +62,11 @@ export class AgentGenerator extends Tool<
     const agentDir = await generateAgentScaffold(options);
     console.log(`Agent scaffold generated in: ${agentDir}`);
 
-    return {
+    // Return a JSONOutput instance instead of a custom object
+    return new JSONOutput({
       agentDir: agentDir,
-      getContent() { return agentDir; } // Implement ToolOutput interface
-    };
+      agentName: input.name,
+      instructions: input.instructions
+    });
   }
 }

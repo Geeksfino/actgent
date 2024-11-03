@@ -14,7 +14,7 @@ program
 const options = program.opts();
 
 const loggerConfig: LoggingConfig = {
-  destination: path.join(process.cwd(), `${name}.getName().log`)
+  destination: path.join(process.cwd(), `${${name}.getName()}.log`)
 };
 logger.setLevel(Logger.parseLogLevel(options.logLevel));
 
@@ -37,7 +37,7 @@ async function chatLoop() {
         let input = '';
         do {
             input = await new Promise<string>((resolve) => {
-                rl.question('How may I help you today? ', resolve);
+                rl.question('How may I help you today?\n', resolve);
             });
 
             if (input.toLowerCase().trim() === '/exit') {
@@ -51,6 +51,13 @@ async function chatLoop() {
         } while (input.trim() === '');
 
         const session = await ${name}.createSession("user", input);
+        session.onEvent((response) => {
+            if (typeof response === 'string') {
+                console.log(`${${name}.getName()}:`, response);
+            } else {
+                console.log(`${${name}.getName()}:`, JSON.stringify(response, null, 2));
+            }
+        });
 
         while (true) {
             const userInput = await new Promise<string>((resolve) => {
@@ -67,7 +74,11 @@ async function chatLoop() {
                 continue;
             }
 
-            await session.chat(userInput);
+            try {
+                await session.chat(userInput);
+            } catch (error) {
+                console.error("Error during chat:", error);
+            }
         }
     } catch (error) {
         console.error("An error occurred:", error);
