@@ -44,50 +44,95 @@ async function chatLoop() {
 
     let description = '';
     let agentName = '';
+    let isConfirmed = false;
 
-    // Get agent description
-    do {
-      description = await new Promise<string>((resolve) => {
-        rl.question('What kind of agent do you want to create? ', resolve);
+    while (!isConfirmed) {
+      // Get agent description
+      do {
+        description = await new Promise<string>((resolve) => {
+          rl.question('What kind of agent do you want to create?\nYou: ', resolve);
+        });
+
+        if (description.trim().toLowerCase() === '/exit') {
+          console.log("Thank you for using AgentSmith. Goodbye!");
+          return;
+        }
+
+        if (description.trim() === '') {
+          console.log("Please input something to continue.\nYou: ");
+        }
+      } while (description.trim() === '');
+
+      // Get agent name
+      do {
+        agentName = await new Promise<string>((resolve) => {
+          rl.question('What would you like to name this agent?\nYou: ', resolve);
+        });
+
+        if (agentName.trim().toLowerCase() === '/exit') {
+          console.log("Thank you for using AgentSmith. Goodbye!");
+          return;
+        }
+
+        if (agentName.trim() === '') {
+          console.log("How would you like to name the agent?\nYou: ");
+        }
+      } while (agentName.trim() === '');
+      
+      executionContext.addToolPreference("AgentGenerator", {
+        agentName: agentName
       });
 
-      if (description.trim().toLowerCase() === '/exit') {
+      const agentDescription = description + `\n\nThe name of this agent is ${agentName}.`;
+      
+      // Count words in the original description
+      const wordCount = description.trim().split(/\s+/).length;
+      let finalPrompt = agentDescription;
+
+      if (wordCount < 20) {
+        const enhanceConfirmation = await new Promise<string>((resolve) => {
+          rl.question('Your description is quite brief. Would you like me to enhance it? (yes/no): ', resolve);
+        });
+
+        if (enhanceConfirmation.toLowerCase() === '/exit') {
+          console.log("Thank you for using AgentSmith. Goodbye!");
+          return;
+        }
+
+        if (enhanceConfirmation.toLowerCase() === 'yes') {
+          finalPrompt = await AgentSmith.enhancePrompt(agentDescription);
+          console.log(`Enhanced description: ${finalPrompt}`);
+        } else {
+          console.log('Proceeding with original description.');
+        }
+      } else {
+        finalPrompt = await AgentSmith.enhancePrompt(agentDescription);
+        console.log(`Enhanced description: ${finalPrompt}`);
+      }
+      
+      // Add confirmation step
+      const confirmation = await new Promise<string>((resolve) => {
+        rl.question('Would you like to proceed with this agent creation? (yes/no): ', resolve);
+      });
+
+      if (confirmation.toLowerCase() === '/exit') {
         console.log("Thank you for using AgentSmith. Goodbye!");
         return;
       }
 
-      if (description.trim() === '') {
-        console.log("Please input something to continue.");
+      if (confirmation.toLowerCase() === 'yes') {
+        isConfirmed = true;
+        description = finalPrompt;
+      } else if (confirmation.toLowerCase() === 'no') {
+        console.log("Let's try again.");
+        // Loop will continue and ask for description again
+      } else {
+        console.log("Please answer 'yes' or 'no'");
       }
-    } while (description.trim() === '');
-
-    // Get agent name
-    do {
-      agentName = await new Promise<string>((resolve) => {
-        rl.question('What would you like to name this agent? ', resolve);
-      });
-
-      if (agentName.trim().toLowerCase() === '/exit') {
-        console.log("Thank you for using AgentSmith. Goodbye!");
-        return;
-      }
-
-      if (agentName.trim() === '') {
-        console.log("How would you like to name the agent?");
-      }
-    } while (agentName.trim() === '');
-    
-    executionContext.addToolPreference("AgentGenerator", {
-      agentName: agentName  // Direct object without extra nesting
-    });
-    // console.log(`Agent description: ${description}`);
-    // console.log(`Agent name: ${executionContext.toolPreferences.get("AgentGenerator")?.customOptions?.agentName}`);
-    // console.log(`Execution context: ${JSON.stringify(executionContext.toJSON(), null, 2)}`);
-
-    const agentDescription = description + `\n\nThe name of this agent is ${agentName}.`;
+    }
     
     // Create session and set up response handler
-    const session = await AgentSmith.createSession("user", agentDescription);
+    const session = await AgentSmith.createSession("user", description);
     session.onEvent((response) => {
       if (typeof response === 'string') {
         console.log(`${AgentSmith.getName()}:`, response);

@@ -2,7 +2,7 @@ import { AgentCore } from "./AgentCore";
 import { ClassificationTypeConfig } from "./IClassifier";
 import { Message } from "./Message";
 import { InferClassificationUnion } from "./TypeInference";
-import { JSONOutput, Tool, ValidationError } from "./Tool";
+import { JSONOutput, Tool, ValidationError, ToolOutput } from "./Tool";
 import { logger } from '../helpers/Logger';
 
 
@@ -39,47 +39,71 @@ export class Session {
         this.core.receive(msg);
     }
 
-    public onEvent<T extends readonly ClassificationTypeConfig[]>(handler: (obj: InferClassificationUnion<T>) => void): void {
+    public onEvent<
+        InstructionType extends InferClassificationUnion<T>,
+        ToolOutputType extends ToolOutput,
+        T extends readonly ClassificationTypeConfig[]
+    >(handler: (result: ToolOutputType | InstructionType) => void): void {
         this.eventHandlers.push(handler);
     }
 
     // Add method to register tool result handlers
-    public onToolResult(handler: (result: any) => void): void {
+    public onToolResult<TOutput extends ToolOutput>(
+        handler: (result: TOutput) => void
+    ): void {
         this.toolResultHandlers.push(handler);
     }
 
-    // Updated triggerEventHandlers method
-    public async triggerEventHandlers<T extends readonly ClassificationTypeConfig[]>(obj: InferClassificationUnion<T>): Promise<void> { 
+    // Updated triggerEventHandlers method with proper generic typing
+    public async triggerEventHandlers<
+        TInput extends InferClassificationUnion<T>,
+        TOutput extends ToolOutput,
+        T extends readonly ClassificationTypeConfig[]
+    >(obj: TInput): Promise<void> { 
         logger.debug(`Session: Triggering event handlers for object:`, obj);
         const instructionName = obj.messageType;
         const toolName = this.core.getToolForInstruction(instructionName);
-        if (toolName) {
-            const tool:Tool<T> | undefined = this.core.getTool(toolName);
-            if (tool) {
-            const result = await tool.run(obj, {});
-            // Notify tool result handlers
-            this.toolResultHandlers.forEach(handler => {
-                if (typeof handler === 'function') {
-                    handler(result);
-                }
-            });
-        }
         
-        this.eventHandlers.forEach(handler => {
-            if (typeof handler === 'function') {  
-                handler(obj);
+        if (toolName) {
+            const tool = this.core.getTool(toolName) as Tool<TInput, TOutput> | undefined;
+            
+            if (tool) {
+                const result = await tool.run(obj, {});
+                this.eventHandlers.forEach(handler => {
+                    if (typeof handler === 'function') {  
+                        handler(result);
+                    }
+                });
+            } else {
+                // If no tool found, pass through the original object
+                this.eventHandlers.forEach(handler => {
+                    if (typeof handler === 'function') {  
+                        handler(obj);
+                    }
+                });
             }
+        } else {
+            // Handle direct messages or responses without tools
+            this.eventHandlers.forEach(handler => {
+                if (typeof handler === 'function') {  
+                    handler(obj);
+                }
             });
         }
     }
 
-    public async triggerToolCallsHandlers<T extends readonly ClassificationTypeConfig[]>(obj: InferClassificationUnion<T>): Promise<void> { 
+    // Similarly, update triggerToolCallsHandlers with proper typing
+    public async triggerToolCallsHandlers<
+        TInput extends InferClassificationUnion<T>,
+        TOutput extends ToolOutput,
+        T extends readonly ClassificationTypeConfig[]
+    >(obj: TInput): Promise<void> { 
         logger.debug(`Session: Triggering tool call handlers for object:`, obj);
         const toolName = obj.toolName;
-        const tool: Tool<T> | undefined = this.core.getTool(toolName);
+        const tool = this.core.getTool(toolName) as Tool<TInput, TOutput> | undefined;
+        
         if (tool) {
             try {
-                // Extract the arguments from the tool call object
                 const toolInput = (obj as any).arguments;
                 const result = await tool.run(toolInput, {});
                 this.toolResultHandlers.forEach(handler => {
