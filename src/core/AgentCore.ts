@@ -332,7 +332,7 @@ export class AgentCore {
         this.processStreamBuffer(true);
         const lastChunk = chunks[chunks.length - 1];
         const toolCalls = lastChunk.choices[0];
-        console.log(`toolCalls: ${JSON.stringify(toolCalls, null, 2)}`);
+        logger.debug(`toolCalls: ${JSON.stringify(toolCalls, null, 2)}`);
       } else {
         const nonStreamConfig: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming =
           {
