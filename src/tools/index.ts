@@ -4,3 +4,7 @@ export * from './googleSearch';
 export * from './duckDuckGoSearch';
 export * from './webCrawler';
 export * from './wikipedia';
+export * from './appleScript';
+export * from './bingSearch';
+export * from './serp';
+export * from './sql';

@@ -1,5 +1,5 @@
 /// <reference types="vitest" />
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
 import { WikipediaTool } from '../wikipedia';
 import wiki from 'wikipedia';
 import { Page } from 'wikipedia/dist/page';
@@ -10,6 +10,56 @@ describe('WikipediaTool', () => {
   beforeEach(() => {
     wikiTool = new WikipediaTool();
     vi.clearAllMocks();
+
+    // Mock fetch globally with proper search results structure
+    const mockFetch = vi.fn();
+    
+    // First call - search results
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        query: {
+          search: [
+            {
+              title: 'Test Article',
+              pageid: 12345,
+              snippet: 'Test snippet',
+              timestamp: '2024-01-01T00:00:00Z'
+            }
+          ]
+        }
+      })
+    });
+
+    // Second call - page content
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        query: {
+          pages: {
+            '12345': {
+              pageid: 12345,
+              title: 'Test Article',
+              extract: '<p>Test article content</p>',
+              fullurl: 'https://en.wikipedia.org/wiki/Test%20Article',
+              categories: [{ title: 'Category:Test' }],
+              images: [{ 
+                title: 'Test.jpg',
+                url: 'https://example.com/test.jpg'
+              }],
+              thumbnail: {
+                source: 'https://example.com/thumb.jpg',
+                width: 100,
+                height: 100
+              },
+              extract_html: 'Test summary'
+            }
+          }
+        }
+      })
+    });
+
+    global.fetch = mockFetch;
 
     // Mock individual methods on the wiki object
     vi.spyOn(wiki, 'setLang').mockReturnValue('en');
@@ -76,6 +126,11 @@ describe('WikipediaTool', () => {
         },
       },
     });
+  });
+
+  // Clean up after tests
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   // Other tests remain unchanged
