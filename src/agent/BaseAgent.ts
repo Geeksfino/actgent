@@ -129,8 +129,11 @@ export abstract class BaseAgent<
 
   private defaultToolResultHandler(result: any, session: Session): void {
     logger.debug("Tool result received:", result);
-    const serializedResult = JSON.stringify(result);
-    session.chat(serializedResult).catch(error => {
+    
+    // Send the result back with tool name and result marker
+    const formattedResponse = `[${result.toolName || 'Tool'} Result]: ${result.getContent()}`;
+
+    session.chat(formattedResponse).catch(error => {
       logger.error("Error sending tool result back to LLM:", error);
     });
   }
