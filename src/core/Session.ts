@@ -17,7 +17,7 @@ export class Session {
     private eventHandlers: Array<(obj: any) => void> = [];
 
     // Add new property for tool result handlers
-    private toolResultHandlers: Array<(result: any) => void> = [];
+    private toolResultHandlers: Array<(result: any, session: Session) => void> = [];
 
     constructor(core: AgentCore, owner: string, sessionId: string, description: string, parentSessionId?: string) {
         this.core = core;
@@ -49,7 +49,7 @@ export class Session {
 
     // Add method to register tool result handlers
     public onToolResult<TOutput extends ToolOutput>(
-        handler: (result: TOutput) => void
+        handler: (result: TOutput, session: Session) => void
     ): void {
         this.toolResultHandlers.push(handler);
     }
@@ -108,7 +108,7 @@ export class Session {
                 const result = await tool.run(toolInput, {});
                 this.toolResultHandlers.forEach(handler => {
                     if (typeof handler === 'function') { 
-                        handler(result);
+                        handler(result, this);
                     }
                 });
             } catch (error) {
@@ -118,7 +118,7 @@ export class Session {
                     // You might want to notify handlers with the error information
                     this.toolResultHandlers.forEach(handler => {
                         if (typeof handler === 'function') {
-                            handler({ error: error.message, details: error.errors });
+                            handler({ error: error.message, details: error.errors }, this);
                         }
                     });
                 } else {
@@ -126,7 +126,7 @@ export class Session {
                     logger.error(`Error executing tool ${toolName}:`, error);
                     this.toolResultHandlers.forEach(handler => {
                         if (typeof handler === 'function') {
-                            handler({ error: 'Tool execution failed', details: error instanceof Error ? error.message : String(error) });
+                            handler({ error: 'Tool execution failed', details: error instanceof Error ? error.message : String(error) }, this);
                         }
                     });
                 }

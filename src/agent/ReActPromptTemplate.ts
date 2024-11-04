@@ -19,7 +19,7 @@ export class DefaultPromptTemplate<
       Your objective is to align every action with this overarching mission while processing specific tasks efficiently and effectively.
       Keep this goal in mind for every task you undertake. 
 
-      You need to assist in analyzing and understanding input messages with flexibility and nuance. Follow these guidelines:
+  You need to assist in analyzing and understanding input messages with flexibility and nuance. Follow these guidelines:
 	1.	Context Awareness: Always consider the broader context and goal of the conversation. Users may provide examples or use analogies that seem unrelated on the surface 
       but are intended to illustrate a larger idea or requirement. Focus on interpreting the core concept or intent behind the user’s input.
 	2.	Clarify Before Judging: If the task or example provided by the user appears unclear or seems unrelated, do not dismiss it outright. Instead, 
@@ -37,21 +37,28 @@ export class DefaultPromptTemplate<
   8. If you need further information support in order to fulfill the user's request, you should first check available tools under your disposal and try to execute them 
 
       Additionally, follow these reasoning and action principles:
-      1. Thought Process: Before taking any action, explicitly reason about:
+      (1). Thought Process: Before taking any action, explicitly reason about:
          - What you understand about the task
          - What information you need
          - What approach you'll take
          - What potential challenges might arise
 
-      2. Action Planning: Break down complex tasks into specific actions:
+      (2). Action Planning: Break down complex tasks into specific actions:
          - Identify required steps
          - Consider dependencies between steps
          - Plan validation checks
 
-      3. Observation & Reflection: After each action:
+      (3). Observation & Reflection: After each action:
          - Analyze the results
          - Consider if adjustments are needed
          - Plan next steps based on observations
+
+  You can respond in two ways:
+  1. DIRECT_RESPONSE: you have enough information to just respond to user directly without the need to 
+    collect supplementary information from or interact with outside world
+  2. TOOL_INVOCATION: you need to fetch additional some data or take some actions before before being
+    able to generate answers. In this case you need to invoke the right tool by passing to it the required
+    input in its strictly required format so the tool can produce data of your needs.
 
     `;
   }
@@ -69,24 +76,6 @@ export class DefaultPromptTemplate<
       .join("\n\n");
 
     const prompt = `
-When handling user requests, you have two ways to invoke tools:
-
-    1. Through instruction formats:
-    - Use when the response matches a predefined classification type
-    - Each classification type maps to a specific schema with corresponding tool
-    - Follow the exact format specified for that classification type
-    
-    2. Through tools calling:
-    - Use when you need to call a tool directly
-    - Each tool has a specific name, description, and parameters
-    - The tool call must match the corresponding input data schema exactly. If information to 
-      fill in as input data for the tool call is missing, you should ask the user for further clarification.
-
-    Choose the appropriate method based on:
-    - Whether the response matches a predefined classification type
-    - Whether you need to call a specific tool function directly
-    
-
 Now analyze user request using a structured reasoning and action approach:
 
 1. First, express your thought process about:
@@ -105,10 +94,10 @@ Now analyze user request using a structured reasoning and action approach:
    - Potential challenges
    - Next steps based on different outcomes
 
-Based on this analysis, categorize your response into one of these message types if the response shall be directly relayed to the user:
+Based on this analysis, 
+- if you determine you have enough information for a DIRECT_RESPONSE, categorize your response into one of these message types 
 ${typesDescription}
-
-Or, if you need to call a tool, you should categorize your response as "BUILTIN_TOOL". 
+- if you need a TOOL_INVOCATION before providing answer, you should categorize your response as "BUILTIN_TOOL". 
 
 
 Provide your response in the following JSON format:
@@ -120,7 +109,7 @@ Provide your response in the following JSON format:
     "considerations": ["<Important point 1>", "<Important point 2>"]
   },
   "action": {
-    "response_type": "<BUILTIN_TOOL if using a built-in tool, or CUSTOM for anything else>",
+    "response_type": "<TOOL_INVOCATION if indicating tool calls, or DIRECT_RESPONSE for anything else>",
     "response_content": ${jsonFormats}
   },
   "observation": {
@@ -157,7 +146,7 @@ Ensure your response includes explicit reasoning, planned actions, and observati
     You shall first try to understand the user's intent to be sure that the user is asking something relevant to your role, goal and capabilities.
     If the user's intent is not clear or not relevant to your role, goal and capabilities, you shall ask for clarification.
     
-    Based on the message type, provide a in one of the following JSON formats:
+    Based on the message type, provide a response in one of the following JSON formats:
     ${jsonFormats}
       
     Ensure that your response strictly adheres to these formats based on the identified message type. Provide concise yet comprehensive information within the constraints of each format.

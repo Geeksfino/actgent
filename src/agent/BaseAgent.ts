@@ -9,6 +9,7 @@ import { InferClassificationUnion } from '../core/TypeInference';
 import { Session } from '../core/Session';
 import { LoggingConfig } from '../core/configs';
 import { Tool, ToolOutput } from '../core/Tool';
+import { logger } from '../helpers/Logger';
 
 const defaultCommunicationConfig: CommunicationConfig = {};
 
@@ -116,7 +117,22 @@ export abstract class BaseAgent<
     if (enhancePrompt) {
       prompt = await this.enhancePrompt(description);
     }
-    return await this.core.createSession(owner, prompt);
+    
+    const session = await this.core.createSession(owner, prompt);
+
+    session.onToolResult((result: any, session: Session) => {
+      this.defaultToolResultHandler(result, session);
+    });
+
+    return session;
+  }
+
+  private defaultToolResultHandler(result: any, session: Session): void {
+    logger.debug("Tool result received:", result);
+    const serializedResult = JSON.stringify(result);
+    session.chat(serializedResult).catch(error => {
+      logger.error("Error sending tool result back to LLM:", error);
+    });
   }
 
   protected handleLLMResponse(response: string | InferClassificationUnion<T>, session: Session) {
