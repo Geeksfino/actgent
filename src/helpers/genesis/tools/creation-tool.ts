@@ -10,6 +10,7 @@ export interface AgentGeneratorInput {
   goal: string;
   capabilities: string;
   instructions: Instruction[];
+  tools?: string[];
 };
 
 // Remove the custom interface and use JSONOutput directly
@@ -41,7 +42,8 @@ export class AgentGenerator extends Tool<
         name: z.string(),
         description: z.string().optional(),
         schemaTemplate: z.any().optional() // Changed from z.string() to z.any() to allow complex objects
-      }))
+      })),
+      tools: z.array(z.string()).optional()
     });
   }
 
@@ -49,7 +51,10 @@ export class AgentGenerator extends Tool<
     console.log("CreationTool executed:\n");
     const output = context.environment.outputDirectory;
     console.log(`Tool output directory: ${output}`);
-    console.log(`Tool agent name: ${context.toolPreferences?.get("AgentGenerator")?.customOptions?.agentName}`);
+    
+    // Get the tool preferences from context
+    const agentPrefs = context.toolPreferences?.get("AgentGenerator")?.customOptions;
+    console.log(`Tool preferences:`, agentPrefs);
 
     const options: AgentScaffoldOptions = {
       name: input.name,
@@ -57,12 +62,13 @@ export class AgentGenerator extends Tool<
       goal: input.goal,
       capabilities: input.capabilities,
       instructions: input.instructions,
+      tools: agentPrefs?.tools || [],  // Get tools from preferences
       outputDir: output
     };
+    
     const agentDir = await generateAgentScaffold(options);
     console.log(`Agent scaffold generated in: ${agentDir}`);
 
-    // Return a JSONOutput instance instead of a custom object
     return new JSONOutput({
       agentDir: agentDir,
       agentName: input.name,

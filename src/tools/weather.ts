@@ -2,6 +2,7 @@ import { Tool, JSONOutput, RunOptions } from "../core/Tool";
 import { ExecutionContext } from "../core/ExecutionContext";
 import { z } from "zod";
 import { program } from 'commander';
+import { logger } from "../helpers/Logger";
 
 // API Response Types
 interface GeocodingResult {
@@ -178,7 +179,7 @@ class WeatherTool extends Tool<WeatherToolInput, JSONOutput<WeatherData>> {
     context: ExecutionContext,
     options: RunOptions
   ): Promise<JSONOutput<WeatherData>> {
-    console.log(`WeatherTool: Executing with input:`, input);
+    logger.debug(`WeatherTool: Executing with input:`, input);
     // Convert string location to object format
     const locationInput = typeof input.location === 'string' 
       ? { name: input.location }
@@ -188,7 +189,7 @@ class WeatherTool extends Tool<WeatherToolInput, JSONOutput<WeatherData>> {
     let coordinates: { latitude: number; longitude: number };
     if (locationInput.name) {
       coordinates = await this.geocode(locationInput.name, locationInput.country);
-      console.log('Resolved coordinates:', coordinates);
+      // logger.info('Resolved coordinates:', coordinates);
     } else if (locationInput.latitude && locationInput.longitude) {
       coordinates = {
         latitude: locationInput.latitude,
@@ -222,7 +223,7 @@ class WeatherTool extends Tool<WeatherToolInput, JSONOutput<WeatherData>> {
 
     // Debug: Log the full URL
     const url = `https://api.open-meteo.com/v1/forecast?${params}`;
-    console.log('Making request to:', url);
+    logger.debug('Making request to:', url);
 
     // Make API request
     const response = await fetch(url, {
@@ -231,9 +232,9 @@ class WeatherTool extends Tool<WeatherToolInput, JSONOutput<WeatherData>> {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Response status:', response.status);
-      console.error('Response status text:', response.statusText);
-      console.error('Response body:', errorText);
+      logger.error('Response status:', response.status);
+      logger.error('Response status text:', response.statusText);
+      logger.error('Response body:', errorText);
       throw new Error(`Weather API request failed: ${response.statusText} - ${errorText}`);
     }
 

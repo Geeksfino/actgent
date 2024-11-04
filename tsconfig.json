@@ -15,7 +15,9 @@
     ],        // For compatibility with commonjs modules
     "lib": ["ESNext"],
     "skipLibCheck": true,
-    "preserveSymlinks": true
+    "preserveSymlinks": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
   },
   "include": ["src/**/*", "src/tools/calculator.ts"],
   "exclude": ["test/**/*", "node_modules", "dist"]

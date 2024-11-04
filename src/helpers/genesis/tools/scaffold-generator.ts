@@ -9,6 +9,7 @@ export interface AgentScaffoldOptions {
     goal: string;
     capabilities: string;
     instructions: Instruction[];
+    tools?: string[];
     outputDir: string;
 }
 
@@ -43,7 +44,7 @@ async function copyDirectory(src: string, dest: string) {
     }
 }
 
-async function generateAgentScaffold({ name, role, goal, capabilities, instructions, outputDir }: AgentScaffoldOptions) {
+async function generateAgentScaffold({ name, role, goal, capabilities, instructions, tools = [], outputDir }: AgentScaffoldOptions) {
     // Handle tilde expansion
     outputDir = outputDir.replace(/^~/, os.homedir());
     console.log(`Scaffold output directory: ${outputDir}`);
@@ -71,8 +72,25 @@ async function generateAgentScaffold({ name, role, goal, capabilities, instructi
         throw new Error(`Instructions template directory not found at: ${instructionsDir}`);
     }
 
+    // Generate tool imports and registrations
+    const toolImports = tools.map(toolName => 
+        `import { ${toolName} } from "@finogeeks/actgent/tools";`
+    ).join('\n');
+
+    const toolRegistrations = tools.map(toolName =>
+        `${name}.registerTool(new ${toolName}());`
+    ).join('\n');
+
+    const replacements = { 
+        name, 
+        role, 
+        goal, 
+        capabilities,
+        toolImports,
+        toolRegistrations 
+    };
+
     // Load and process templates
-    const replacements = { name, role, goal, capabilities };
     const [agentCode, indexCode, configMd, envContent] = await Promise.all([
         loadTemplate(agentCodeTemplate, replacements),
         loadTemplate(runnerTemplate, replacements),
@@ -155,7 +173,7 @@ async function main() {
 
     const [name, role, goal, capabilities, outputDir] = args;
     try {
-        const createdDir = await generateAgentScaffold({ name, role, goal, capabilities, instructions: [], outputDir });
+        const createdDir = await generateAgentScaffold({ name, role, goal, capabilities, instructions: [], tools: [], outputDir });
         console.log(`Agent scaffold created successfully at: ${createdDir}`);
     } catch (error) {
         console.error('Error creating agent scaffold:', error);

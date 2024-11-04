@@ -15,9 +15,9 @@ export class ReActClassifier<T extends readonly ClassificationTypeConfig[]> exte
       const parsed = JSON.parse(response);
       
       // Special handling for tool/function calling responses
-      if (parsed?.action?.response_type === 'BUILTIN_TOOL') {
+      if (parsed?.action?.response_type === 'TOOL_INVOCATION') {
         const toolResponse = {
-          messageType: 'BUILTIN_TOOL',
+          messageType: 'TOOL_INVOCATION',
           toolName: parsed.action.response_content.name,
           arguments: parsed.action.response_content.parameters || {},
         };

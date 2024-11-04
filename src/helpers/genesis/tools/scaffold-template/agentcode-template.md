@@ -1,8 +1,10 @@
-
 import { AgentBuilder } from "@finogeeks/actgent/agent";
 import { AgentServiceConfigurator } from "@finogeeks/actgent/helpers";
 import { AgentCoreConfigurator } from "@finogeeks/actgent/helpers";
 import path from 'path';
+
+// Import tools
+${toolImports}
 
 // Load the agent configuration from a markdown file
 const configPath = path.join(__dirname, 'brain.md');
@@ -11,5 +13,8 @@ const agentConfig = await AgentCoreConfigurator.loadMarkdownConfig(configPath);
 // Load the agent runtime environment from the project root
 const svcConfig = AgentServiceConfigurator.getAgentConfiguration("./");
 const ${name} = new AgentBuilder(agentConfig, svcConfig).create();
+
+// Register tools
+${toolRegistrations}
 
 export { ${name} };

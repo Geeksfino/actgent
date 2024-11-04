@@ -34,6 +34,7 @@
     "nats": "^2.28.2",
     "openai": "^4.63.0",
     "proxy-agent": "^6.4.0",
+    "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "sequelize": "^6.37.5",
     "string-similarity": "^4.0.4",
