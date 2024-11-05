@@ -4,6 +4,10 @@ import { ReActMode, TaskContext, ReActModeStrategy, ReActModeSelector } from "./
 import { KeywordBasedStrategy } from "./ReActModeStrategy";
 import { logger } from "../helpers/Logger";
 import { IPromptMode, IPromptStrategy } from "../core/IPromptContext";
+import { InferContextBuilder } from "../core/InferContextBuilder";
+import { IPromptContext } from "./../core/IPromptContext";
+import { Memory } from "../core/Memory";
+import { SessionContext } from "../core";
 
 interface SchemaFormatting {
   types: string;    // Types description
@@ -16,6 +20,7 @@ export class ReActPromptTemplate<
 {
   protected classificationTypes: T;
   protected strategy: IPromptStrategy;
+  private context: IPromptContext | null = null;
 
   constructor(
     classificationTypes: T, 
@@ -35,11 +40,20 @@ export class ReActPromptTemplate<
     return mode;
   }
 
-  getAssistantPrompt(context?: TaskContext): string {
+  setContext(context: IPromptContext): void {
+    this.context = context;
+  }
+
+  getAssistantPrompt(sessionContext: SessionContext, memory: Memory): string {
     let mode: IPromptMode;
     
-    if (context) {
-      mode = this.strategy.evaluatePromptMode(context);
+    const infer_context = new InferContextBuilder(memory, sessionContext)
+      .withRecentMessages()
+      .build();
+    logger.debug(`Infer context: ${JSON.stringify(infer_context)}`);
+    
+    if (infer_context) {
+      mode = this.strategy.evaluatePromptMode(infer_context);
     } else {
       mode = this.strategy.getCurrentMode();
     }

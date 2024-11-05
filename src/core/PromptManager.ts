@@ -1,4 +1,6 @@
+import { IPromptContext } from './IPromptContext';
 import { IAgentPromptTemplate } from './IPromptTemplate';
+import { Memory } from './Memory';
 import { SessionContext } from './SessionContext'; 
 import { Instruction } from './configs';
 export class PromptManager {
@@ -33,8 +35,8 @@ export class PromptManager {
     return this.renderPrompt(null, this.promptTemplate.getSystemPrompt(), { goal: this.goal, capabilities: this.capabilities, role: this.role });
   }
 
-  public getAssistantPrompt(): string {
-    return this.renderPrompt(null, this.promptTemplate.getAssistantPrompt(), {});
+  public getAssistantPrompt(sessionContext: SessionContext, memory: Memory): string {
+    return this.renderPrompt(sessionContext, this.promptTemplate.getAssistantPrompt(sessionContext, memory), {});
   }
 
   public getUserPrompt(sessionContext: SessionContext | null, message: string, variables: { [key: string]: string }): string {
@@ -62,18 +64,18 @@ export class PromptManager {
       prompt = prompt.replace(new RegExp(placeholder, 'g'), variables[key]);
     });
 
-    if (sessionContext) {
-      const messages = sessionContext.getMessages().map(msg => msg.payload.input).join('\n');
-      //console.log(`PromptManager Messages===> [ ${messages} ]`);
-      prompt = messages + prompt;
-    } 
+    // if (sessionContext) {
+    //   const messages = sessionContext.getMessages().map(msg => msg.payload.input).join('\n');
+    //   //console.log(`PromptManager Messages===> [ ${messages} ]`);
+    //   prompt = messages + prompt;
+    // } 
 
     return prompt || "";
   }
 
-  public resolvePrompt(sessionContext: SessionContext | null, message: string, variables: { [key: string]: string }): Object {
+  public debugPrompt(sessionContext: SessionContext, memory: Memory, message: string, variables: { [key: string]: string }): Object {
     const systemPrompt = this.getSystemPrompt();
-    const assistantPrompt = this.getAssistantPrompt();
+    const assistantPrompt = this.getAssistantPrompt(sessionContext, memory);
 
     let resolvedPrompt = {
       "system": systemPrompt,

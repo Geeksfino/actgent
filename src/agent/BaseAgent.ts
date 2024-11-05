@@ -165,8 +165,8 @@ export abstract class BaseAgent<
     }
   }
 
-  public resolvePrompt(sessionContext: any, input: string, context: any): Object {
-    return this.core.resolvePrompt(sessionContext, input, context);
+  public debugPrompt(sessionContext: any, input: string, context: any): Object {
+    return this.core.debugPrompt(sessionContext, input, context);
   }
 
   public async enhancePrompt(message: string): Promise<string> {

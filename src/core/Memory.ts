@@ -15,6 +15,9 @@ export interface Memory {
   processMessage(message: Message, sessionContext: SessionContext): Promise<void>;
   generateContext(sessionContext: SessionContext): Promise<any>;
   optimizeMemory(): Promise<void>;
+  getRecentMessages(): Promise<Message[]>;
+  getSystemContext(): Promise<Record<string, any>>;
+  getConversationHistory(): Promise<Message[]>;
 }
 
 // Default implementation of AgentMemory
@@ -45,6 +48,30 @@ export class DefaultAgentMemory implements Memory {
 
   async optimizeMemory(): Promise<void> {
     await this.memoryManager.optimizeMemory();
+  }
+
+  async getRecentMessages(): Promise<Message[]> {
+    // Get recent messages from short-term memory
+    const shortTermMemory = this.memoryManager.getShortTermMemory();
+    return shortTermMemory.getRecent(10); // Get last 10 messages, adjust number as needed
+  }
+
+  async getSystemContext(): Promise<Record<string, any>> {
+    // Get system context from working memory
+    const workingMemory = this.memoryManager.getWorkingMemory();
+    const systemContext = await workingMemory.getAll();
+    return systemContext.reduce((acc, item) => {
+      if (item.type === 'system_context') {
+        return { ...acc, ...item.data };
+      }
+      return acc;
+    }, {});
+  }
+
+  async getConversationHistory(): Promise<Message[]> {
+    // Get conversation history from long-term memory
+    const longTermMemory = this.memoryManager.getLongTermMemory();
+    return longTermMemory.search('conversation_history');
   }
 }
 

@@ -52,6 +52,8 @@ export class AgentBuilder {
   ): BaseAgent<Readonly<T>, ReActClassifier<Readonly<T>>, ReActPromptTemplate<Readonly<T>>> {
     type SchemaTypes = Readonly<T>;
 
+    const builderStrategy = this.promptStrategy;
+
     class DynamicAgent extends BaseAgent<SchemaTypes, ReActClassifier<SchemaTypes>, ReActPromptTemplate<SchemaTypes>> {
       private readonly promptStrategy: IPromptStrategy;
 
@@ -75,7 +77,7 @@ export class AgentBuilder {
       }
 
       protected usePromptTemplateClass(): new (classificationTypes: SchemaTypes) => ReActPromptTemplate<SchemaTypes> {
-        const strategy = this.promptStrategy;
+        const strategy = builderStrategy;
         return class extends ReActPromptTemplate<SchemaTypes> {
           constructor(classificationTypes: SchemaTypes) {
             super(classificationTypes, strategy);

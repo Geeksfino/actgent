@@ -1,5 +1,12 @@
 import { Session } from "./Session";
 import { Message } from "./Message";
+
+interface MessageRecord {
+  role: "system" | "user" | "assistant";
+  content: string;
+  timestamp?: string;
+}
+
 export class SessionContext {
     private session: Session;
     private conversationHistory: string[] = [];
@@ -11,10 +18,6 @@ export class SessionContext {
       this.session = session;
       this.conversationHistory = [];
       this.state = {};
-    }
-  
-    public addToHistory(response: string): void {
-      this.conversationHistory.push(response);
     }
   
     public addMessage(message: Message): void {  // Add message to history
@@ -63,5 +66,24 @@ export class SessionContext {
   
       public getParentSessionId(): string | undefined {
         return this.session.parentSessionId;
+      }
+
+      public getMessageRecords(limit: number = 10): MessageRecord[] {
+        return this.messages.slice(-limit).map(message => ({
+          role: this.determineMessageRole(message),
+          content: message.payload.input,
+          timestamp: message.metadata?.timestamp
+        }));
+      }
+
+      private determineMessageRole(message: Message): "system" | "user" | "assistant" {
+        // Assuming messages from the agent/AI will have "agent" or "assistant" in the sender field
+        const sender = message.metadata?.sender.toLowerCase() || '';
+        if (sender.includes('agent') || sender.includes('assistant')) {
+          return "assistant";
+        } else if (sender === 'system') {
+          return "system";
+        }
+        return "user";
       }
   }

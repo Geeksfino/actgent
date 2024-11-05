@@ -16,6 +16,7 @@ import path from "path";
 import { Subject } from "rxjs";
 import { IClassifier } from "./IClassifier";
 import { logger } from '../helpers/Logger';
+import { InferContextBuilder } from "./InferContextBuilder";
 
 interface StorageConfig {
   shortTerm?: MemoryStorage<any>;
@@ -45,7 +46,7 @@ export class AgentCore {
   private memory: Memory;
   private inbox: PriorityInbox;
   private promptManager: PromptManager;
-  private contextManager: { [sessionId: string]: SessionContext } = {};
+  private sessionContextManager: { [sessionId: string]: SessionContext } = {};
   private classifier: IClassifier<any>;
 
   private shutdownSubject: Subject<void> = new Subject<void>();
@@ -167,12 +168,12 @@ export class AgentCore {
     this.promptManager = new PromptManager(promptTemplate);
   }
 
-  public resolvePrompt(
-    sessionContext: SessionContext | null,
+  public debugPrompt(
+    sessionContext: SessionContext,
     message: string,
     context: any
   ): Object {
-    return this.promptManager.resolvePrompt(sessionContext, message, context);
+    return this.promptManager.debugPrompt(sessionContext, this.memory, message, context);
   }
 
   private cleanLLMResponse(response: string): string {
@@ -224,56 +225,54 @@ export class AgentCore {
   }
 
   private async processMessage(message: Message): Promise<void> {
-    const sessionContext = this.contextManager[message.sessionId];
+    const sessionContext = this.sessionContextManager[message.sessionId];
 
     // Log the input message
-    logger.info(`Input: ${message.payload.input}`);
+    logger.debug(`Input: ${message.payload.input}`);
 
     sessionContext.addMessage(message);
+    await this.memory.processMessage(message, sessionContext);  // doesn't return anything. will figure out later
 
-    // Process message in memory
-    await this.memory.processMessage(message, sessionContext);
-
-    const context = await this.memory.generateContext(sessionContext);
-
-    const response = await this.promptLLM(message, context);
+    const response = await this.promptLLM(message);
 
     // Handle the response based on message type
     const cleanedResponse = this.cleanLLMResponse(response);
     const session = sessionContext.getSession();
-    const responseMessage = session.createMessage(cleanedResponse);
+    const responseMessage = session.createMessage(cleanedResponse, "assistant");
     sessionContext.addMessage(responseMessage);
 
     // Log the output message
-    logger.info(`Output: ${cleanedResponse}`);
+    logger.debug(`Output: ${cleanedResponse}`);
     this.handleLLMResponse(cleanedResponse, session);
   }
 
   public async getOrCreateSessionContext(message: Message): Promise<Session> {
-    if (!this.contextManager[message.sessionId]) {
+    if (!this.sessionContextManager[message.sessionId]) {
       const session = await this.createSession(
         message.metadata?.sender || "",
         message.payload.input
       );
-      //this.contextManager[message.sessionId].addMessage(message);  // Add initial message
       return session;
     }
-    return this.contextManager[message.sessionId].getSession();
+    return this.sessionContextManager[message.sessionId].getSession();
   }
 
-  private async promptLLM(message: Message, context: any): Promise<string> {
+  private async promptLLM(message: Message): Promise<string> {
     //this.log(`System prompt: ${this.promptManager.getSystemPrompt()}`);
-    const sessionContext = this.contextManager[message.sessionId];
+    const sessionContext = this.sessionContextManager[message.sessionId];
+    // context of user prompt
+    const context = await this.memory.generateContext(sessionContext);
 
     logger.debug(message.sessionId, "<------ Resolved prompt ------->");
     logger.debug(
       message.sessionId,
       AgentCore.formatMulltiLine(
         JSON.stringify(
-          this.promptManager.resolvePrompt(
+          this.promptManager.debugPrompt(
             sessionContext,
-          message.payload.input,
-          context
+            this.memory,
+            message.payload.input,
+            context
         ),
         null,
           2
@@ -293,7 +292,8 @@ export class AgentCore {
 
       const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
         { role: "system", content: this.promptManager.getSystemPrompt() },
-        { role: "assistant", content: this.promptManager.getAssistantPrompt() },
+        { role: "assistant", content: this.promptManager.getAssistantPrompt(sessionContext, this.memory) },
+        ...sessionContext.getMessageRecords().map(({ role, content }) => ({ role, content })),
         {
           role: "user",
           content: this.promptManager.getUserPrompt(
@@ -311,6 +311,7 @@ export class AgentCore {
         tools: unmappedTools.length > 0 ? unmappedTools : undefined,
       };
 
+      // Stream mode
       if (this.llmConfig?.streamMode && this.streamCallback) {
         const streamConfig: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming =
           {
@@ -334,6 +335,7 @@ export class AgentCore {
         const toolCalls = lastChunk.choices[0];
         logger.debug(`toolCalls: ${JSON.stringify(toolCalls, null, 2)}`);
       } else {
+        // Non-stream mode
         const nonStreamConfig: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming =
           {
             ...baseConfig,
@@ -392,7 +394,7 @@ export class AgentCore {
     s.sessionId = sessionId; // Set the generated session ID to the Session object
 
     // Create a Message object with session ID and description
-    const message = new Message(s.sessionId, s.description);
+    const message = s.createMessage(s.description);
     this.inbox.enqueue(message); // Enqueue the message
     logger.info(`createSession called with description: ${description}`);
 
@@ -400,13 +402,13 @@ export class AgentCore {
   }
 
   public getSessionContext(sessionId: string): SessionContext {
-    return this.contextManager[sessionId];
+    return this.sessionContextManager[sessionId];
   }
 
   private initSessionContext(session: Session): string {
     const sessionId = crypto.randomUUID(); // Generate a unique session ID
     const sessionContext = new SessionContext(session); // Create a SessionContext
-    this.contextManager[sessionId] = sessionContext; // Store it in the context manager
+    this.sessionContextManager[sessionId] = sessionContext; // Store it in the context manager
     return sessionId; // Return the generated session ID
   }
 

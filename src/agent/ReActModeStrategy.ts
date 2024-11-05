@@ -11,6 +11,10 @@ export interface TaskContext extends IPromptContext {
   userPreference?: ReActMode;
   accumulatedContext?: string[];
   complexity?: number;
+  conversationHistory?: Array<{
+    role: string;
+    content: string;
+  }>;
 }
 
 export interface ComplexityScore {
@@ -38,19 +42,24 @@ export abstract class ReActModeStrategy implements IPromptStrategy {
     const taskContext: TaskContext = {
       ...context,
       input: context.metadata?.input as string || '',
+      accumulatedContext: context.metadata?.accumulatedContext as string[] || [],
+      conversationHistory: context.metadata?.conversationHistory || [],
     };
 
     const mode = this.evaluateMode(taskContext);
-    
+    logger.debug(`Mode evaluated: ${mode}`);
+
     this.currentMode = {
       value: mode,
       metadata: {
         contextSize: context.recentMessages?.length,
         hasSubstantialContext: context.recentMessages && 
-                              context.recentMessages.length >= 3
+                              context.recentMessages.length >= 3,
+        accumulatedContextSize: taskContext.accumulatedContext?.length || 0
       }
     };
-
+    logger.debug(`Current mode: ${this.currentMode.value}`);
+    
     return this.currentMode;
   }
 
@@ -122,8 +131,20 @@ export class KeywordBasedStrategy extends ReActModeStrategy {
 }
 
 export class UserPreferenceStrategy extends ReActModeStrategy {
+  private preference: ReActMode;
+  
+  constructor(preference: ReActMode) {
+    super();
+    this.preference = preference;
+    // Set the currentMode based on preference immediately
+    this.currentMode = {
+      value: preference,
+      metadata: {}
+    };
+  }
+
   evaluateMode(context: TaskContext): ReActMode {
-    return context.userPreference || 'direct';
+    return this.preference;
   }
 }
 

@@ -1,6 +1,6 @@
 import { AgentCore } from "./AgentCore";
 import { ClassificationTypeConfig } from "./IClassifier";
-import { Message } from "./Message";
+import { Message, PayloadType } from "./Message";
 import { InferClassificationUnion } from "./TypeInference";
 import { JSONOutput, Tool, ValidationError, ToolOutput } from "./Tool";
 import { logger } from '../helpers/Logger';
@@ -24,12 +24,13 @@ export class Session {
         this.owner = owner;
         this.sessionId = sessionId;
         this.description = description;
-        this.parentSessionId = parentSessionId
+        this.parentSessionId = parentSessionId;
+        
         logger.debug('Session created:', this.sessionId);
     }
 
-    public createMessage(message: string): Message {
-        const msg = new Message(this.sessionId, message);
+    public createMessage(message: string, sender: string = this.owner): Message {
+        const msg = new Message(this.sessionId, message, PayloadType.TEXT, {}, {}, sender);
         //this.core.getSessionContext(this.sessionId).addMessage(msg);  
         return msg;
     }

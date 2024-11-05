@@ -23,6 +23,18 @@ export class MemoryManager {
     this.maxMemorySize = maxMemorySize;
   }
 
+  getShortTermMemory(): ShortTermMemory {
+    return this.shortTermMemory;
+  }
+
+  getLongTermMemory(): LongTermMemory {
+    return this.longTermMemory;
+  }
+
+  getWorkingMemory(): WorkingMemory {
+    return this.workingMemory;
+  }
+
   async processMessage(message: Message, session: Session): Promise<void> {
     // Add message to short-term memory
     await this.shortTermMemory.add(message);
