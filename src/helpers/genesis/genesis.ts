@@ -168,6 +168,8 @@ async function processToolSelections(): Promise<ToolSelection> {
 async function chatLoop(): Promise<void> {
   try {
     console.log("This is AgentSmith. I am a smith to help you create agents.");
+    console.log(`Current logging level is ${Logger.parseLogLevel(options.logLevel)}`);
+    console.log('To change logging level, use --log-level <level> (DEBUG, INFO, WARNING, ERROR)');
     console.log("Type '/exit' to end the conversation.");
 
     let description = '';

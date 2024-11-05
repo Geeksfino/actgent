@@ -3,4 +3,5 @@ export { AgentRegistry } from './AgentRegistry';
 export { AgentBuilder } from './AgentBuilder';
 export { Communication } from './Communication';
 export { ReActClassifier } from './ReActClassifier';
-export { DefaultPromptTemplate } from './ReActPromptTemplate';
+export { ReActPromptTemplate as DefaultPromptTemplate } from './ReActPromptTemplate';
+export { ReActModeStrategy } from './ReActModeStrategy';

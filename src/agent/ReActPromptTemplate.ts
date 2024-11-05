@@ -1,15 +1,129 @@
 import { IAgentPromptTemplate } from "../core/IPromptTemplate";
 import { ClassificationTypeConfig } from "../core/IClassifier";
+import { ReActMode, TaskContext, ReActModeStrategy, ReActModeSelector } from "./ReActModeStrategy";
+import { KeywordBasedStrategy } from "./ReActModeStrategy";
+import { logger } from "../helpers/Logger";
 
-export class DefaultPromptTemplate<
+interface SchemaFormatting {
+  types: string;    // Types description
+  schemas: string;  // JSON formats
+}
+
+export class ReActPromptTemplate<
   T extends ReadonlyArray<ClassificationTypeConfig>,
 > implements IAgentPromptTemplate
 {
   private classificationTypes: T;
+  private modeSelector: ReActModeSelector;
 
-  constructor(classificationTypes: T) {
-    //console.log('DefaultPromptTemplate constructor');
+  constructor(
+    classificationTypes: T, 
+    strategy: ReActModeStrategy = new KeywordBasedStrategy()
+  ) {
     this.classificationTypes = classificationTypes;
+    this.modeSelector = new ReActModeSelector(strategy);
+  }
+
+  setStrategy(strategy: ReActModeStrategy): void {
+    this.modeSelector.setStrategy(strategy);
+  }
+
+  evaluateMode(context: TaskContext): ReActMode {
+    const mode = this.modeSelector.evaluateMode(context);
+    logger.info(`Mode evaluated: ${mode}`);
+    return mode;
+  }
+
+  getAssistantPrompt(context?: TaskContext): string {
+    const mode = context ? 
+      this.modeSelector.evaluateMode(context) : 
+      this.modeSelector.getCurrentMode();
+
+    logger.info(`Mode used for prompt: ${mode}`);
+
+    const { types, schemas } = this.getFormattedSchemas();
+    const instruction = mode === 'direct' ? 
+      this.getDirectInstructions(types) : 
+      this.getReActInstructions(types);
+
+    return `
+${instruction}
+------------------------------------------------------------------------------------------------
+Provide your response in the following JSON format:
+
+{
+  "thought_process": {
+    "understanding": "${mode === 'direct' ? '' : '<Brief description of how you understand the user\'s request>'}",
+    "approach": "${mode === 'direct' ? '' : '<How you plan to handle this request>'}",
+    "considerations": ${mode === 'direct' ? '[]' : '["<Important point 1>", "<Important point 2>"]'}
+  },
+  "action": {
+    "response_type": "<TOOL_INVOCATION if indicating tool calls, or DIRECT_RESPONSE for anything else>",
+    "response_content": ${schemas}
+  },
+  "observation": {
+    "results": "${mode === 'direct' ? '' : '<Expected outcome of this response>'}",
+    "analysis": "${mode === 'direct' ? '' : '<Why this response type was chosen>'}",
+    "next_steps": ${mode === 'direct' ? '[]' : '["<Possible next step 1>", "<Possible next step 2>"]'}
+  }
+}
+
+Ensure your response strictly adheres to this format. ${mode === 'direct' ? 'Leave thought_process and observation fields empty while focusing on the action content.' : 'Include detailed reasoning, planned actions, and observations.'} 
+    `.trim();
+  }
+
+  private getDirectInstructions(types: string): string { 
+    return `
+    Analyze the user request comprehensively. Categorize the request into one of these types:
+    ${types}
+    
+    You shall first try to understand the user's intent to be sure that the user is asking something relevant to your role, goal and capabilities.
+    If the user's intent is not clear or not relevant to your role, goal and capabilities, you shall ask for clarification.
+        
+    Ensure that your response strictly adheres to these formats based on the identified message type. Provide concise yet comprehensive information within the constraints of each format.
+    `.trim();
+  }
+
+  private getReActInstructions(types: string): string {
+    return `
+Now analyze user request using a structured reasoning and action approach:
+
+1. First, express your thought process about:
+   - Your understanding of the request
+   - The approach you'll take
+   - Any important considerations
+
+2. Then, determine appropriate actions:
+   - Break down the task into specific steps
+   - Explain reasoning for each step
+   - Plan how to execute each step
+   - If you need to call a tool, you should first check available tools under your disposal and try to execute them
+
+3. After planning actions, provide observations about:
+   - Expected results
+   - Potential challenges
+   - Next steps based on different outcomes
+
+Based on this analysis, 
+- if you determine you have enough information for a DIRECT_RESPONSE, categorize your response into one of these message types 
+${types}
+- if you need a TOOL_INVOCATION before providing answer, you should categorize your response as "BUILTIN_TOOL". 
+    `.trim();
+  }
+
+  private getFormattedSchemas(): SchemaFormatting {
+    const types = this.classificationTypes
+      .map((type) => `- ${type.name}: ${type.description}`)
+      .join("\n");
+
+    const schemas = this.classificationTypes
+      .map(
+        (type) =>
+          `${type.name}:\n\`\`\`json\n${JSON.stringify({ messageType: type.name, ...type.schema }, null, 2)}\n\`\`\``
+      )
+      .join("\n\n");
+
+    return { types, schemas };
   }
 
   getSystemPrompt(): string {
@@ -21,15 +135,15 @@ export class DefaultPromptTemplate<
 
   You need to assist in analyzing and understanding input messages with flexibility and nuance. Follow these guidelines:
 	1.	Context Awareness: Always consider the broader context and goal of the conversation. Users may provide examples or use analogies that seem unrelated on the surface 
-      but are intended to illustrate a larger idea or requirement. Focus on interpreting the core concept or intent behind the user’s input.
+      but are intended to illustrate a larger idea or requirement. Focus on interpreting the core concept or intent behind the user's input.
 	2.	Clarify Before Judging: If the task or example provided by the user appears unclear or seems unrelated, do not dismiss it outright. Instead, 
       ask for clarification or additional information to better understand how it might relate to the overarching goal or requirement.
-	3.	Seek Underlying Meaning: Focus on the user’s intent and try to extract the underlying purpose or idea. Even if the input appears off-topic, 
+	3.	Seek Underlying Meaning: Focus on the user's intent and try to extract the underlying purpose or idea. Even if the input appears off-topic, 
       it may still contain valuable insights that contribute to the task at hand.
-	4.	Prioritize Relevance to the Goal: Evaluate the relevance of examples, analogies, or scenarios based on how they contribute to the user’s broader objective. 
+	4.	Prioritize Relevance to the Goal: Evaluate the relevance of examples, analogies, or scenarios based on how they contribute to the user's broader objective. 
       Your role is to bridge the gap between user input and the main task, ensuring that even abstract or creative inputs are considered in context.
 	5.	Promote Collaborative Refinement: Rather than strictly classifying tasks or examples as right or wrong, aim to collaborate with the user in refining their ideas. 
-      This involves engaging with the user’s examples in a constructive manner, helping them to express their requirements more clearly and aligning those with the task’s goal.
+      This involves engaging with the user's examples in a constructive manner, helping them to express their requirements more clearly and aligning those with the task's goal.
 	6.	Adaptability: Be flexible in your interpretation and approach. Users may express ideas in unconventional ways—adapt your analysis to extract relevant details, 
       always prioritizing understanding over rigid classification.
 	7.	After trying these principles and you still cannot understand the intent of an input message or you carefully review that it is not aligned with your goal or capabilities, 
@@ -55,108 +169,34 @@ export class DefaultPromptTemplate<
 
   You can respond in two ways:
   1. DIRECT_RESPONSE: you have enough information to just respond to user directly without the need to 
-    collect supplementary information from or interact with outside world
+    collect supplementary information from or interact with outside world. This response is direct and immediate answer to user.
   2. TOOL_INVOCATION: you need to fetch additional some data or take some actions before before being
     able to generate answers. In this case you need to invoke the right tool by passing to it the required
     input in its strictly required format so the tool can produce data of your needs.
-
-    `;
-  }
-
-  getAssistantPrompt(): string {
-    const typesDescription = this.classificationTypes
-      .map((type) => `- ${type.name}: ${type.description}`)
-      .join("\n");
-
-    const jsonFormats = this.classificationTypes
-      .map(
-        (type) =>
-          `${type.name}:\n\`\`\`json\n${JSON.stringify({ messageType: type.name, ...type.schema }, null, 2)}\n\`\`\``
-      )
-      .join("\n\n");
-
-    const prompt = `
-Now analyze user request using a structured reasoning and action approach:
-
-1. First, express your thought process about:
-   - Your understanding of the request
-   - The approach you'll take
-   - Any important considerations
-
-2. Then, determine appropriate actions:
-   - Break down the task into specific steps
-   - Explain reasoning for each step
-   - Plan how to execute each step
-   - If you need to call a tool, you should first check available tools under your disposal and try to execute them
-
-3. After planning actions, provide observations about:
-   - Expected results
-   - Potential challenges
-   - Next steps based on different outcomes
-
-Based on this analysis, 
-- if you determine you have enough information for a DIRECT_RESPONSE, categorize your response into one of these message types 
-${typesDescription}
-- if you need a TOOL_INVOCATION before providing answer, you should categorize your response as "BUILTIN_TOOL". 
-
-
-Provide your response in the following JSON format:
-
-{
-  "thought_process": {
-    "understanding": "<Brief description of how you understand the user's request>",
-    "approach": "<How you plan to handle this request>",
-    "considerations": ["<Important point 1>", "<Important point 2>"]
-  },
-  "action": {
-    "response_type": "<TOOL_INVOCATION if indicating tool calls, or DIRECT_RESPONSE for anything else>",
-    "response_content": ${jsonFormats}
-  },
-  "observation": {
-    "results": "<Expected outcome of this response>",
-    "analysis": "<Why this response type was chosen>",
-    "next_steps": ["<Possible next step 1>", "<Possible next step 2>"]
-    }
-}
-
-Ensure your response includes explicit reasoning, planned actions, and observation components while adhering to the specified format.
-  `;
-
-    return prompt.trim();
+    `.trim();
   }
 
   getMessageClassificationPrompt(message: string): string {
-    const typesDescription = this.classificationTypes
-      .map((type) => `- ${type.name}: ${type.description}`)
-      .join("\n");
+    const { types, schemas } = this.getFormattedSchemas();
 
-    const jsonFormats = this.classificationTypes
-      .map(
-        (type) =>
-          `${type.name}:\n\`\`\`json\n${JSON.stringify({ messageType: type.name, ...type.schema }, null, 2)}\n\`\`\``
-      )
-      .join("\n\n");
-
-    const prompt = `
+    return `
     # Message Analysis Prompt
     
     Analyze the following message comprehensively. Categorize the message into one of these types:
-    ${typesDescription}
+    ${types}
     
     You shall first try to understand the user's intent to be sure that the user is asking something relevant to your role, goal and capabilities.
     If the user's intent is not clear or not relevant to your role, goal and capabilities, you shall ask for clarification.
     
     Based on the message type, provide a response in one of the following JSON formats:
-    ${jsonFormats}
+    ${schemas}
       
     Ensure that your response strictly adheres to these formats based on the identified message type. Provide concise yet comprehensive information within the constraints of each format.
    
     Now, analyze the following message and respond:
     
     ${message}
-    `;
-
-    return prompt.trim();
+    `.trim();
   }
 
   getMetaPrompt(): string {
@@ -212,8 +252,7 @@ The final prompt you output should adhere to the following structure below. Do n
 # Notes [optional]
 
 [optional: edge cases, details, and an area to call or repeat out specific important considerations]
-
-`;
+    `.trim();
     return meta_prompt;
   }
 

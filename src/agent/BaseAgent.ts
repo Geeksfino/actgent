@@ -133,7 +133,8 @@ export abstract class BaseAgent<
     // Send the result back with tool name and result marker
     const formattedResponse = `[${result.toolName || 'Tool'} Result]: ${result.getContent()}`;
 
-    session.chat(formattedResponse).catch(error => {
+    const msg = `[Agent ${this.core.name}] executed ${formattedResponse}`;
+    session.chat(msg).catch(error => {
       logger.error("Error sending tool result back to LLM:", error);
     });
   }

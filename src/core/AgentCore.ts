@@ -265,22 +265,22 @@ export class AgentCore {
     //this.log(`System prompt: ${this.promptManager.getSystemPrompt()}`);
     const sessionContext = this.contextManager[message.sessionId];
 
-    // this.log(message.sessionId, "<------ Resolved prompt ------->");
-    // this.log(
-    //   message.sessionId,
-    //   AgentCore.formatMulltiLine(
-    //     JSON.stringify(
-    //       this.promptManager.resolvePrompt(
-    //         sessionContext,
-    //       message.payload.input,
-    //       context
-    //     ),
-    //     null,
-    //       2
-    //     )
-    //   )
-    // );
-    // this.log(message.sessionId, "<------ Resolved prompt ------->");
+    logger.debug(message.sessionId, "<------ Resolved prompt ------->");
+    logger.debug(
+      message.sessionId,
+      AgentCore.formatMulltiLine(
+        JSON.stringify(
+          this.promptManager.resolvePrompt(
+            sessionContext,
+          message.payload.input,
+          context
+        ),
+        null,
+          2
+        )
+      )
+    );
+    logger.debug(message.sessionId, "<------ Resolved prompt ------->");
 
     try {
       let responseContent = "";

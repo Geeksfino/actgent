@@ -25,11 +25,21 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
     response: string,
     session: Session
   ): void {
-    const { isToolCall, parsedLLMResponse } = this.parseLLMResponse(response);
-    if (isToolCall) {
-      session.triggerToolCallsHandlers(parsedLLMResponse);
-    } else {
-      session.triggerEventHandlers(parsedLLMResponse);
+    try {
+      const { isToolCall, parsedLLMResponse } = this.parseLLMResponse(response);
+      if (isToolCall) {
+        session.triggerToolCallsHandlers(parsedLLMResponse);
+      } else {
+        session.triggerEventHandlers(parsedLLMResponse);
+      }
+    } catch (error) {
+      // Let the error propagate to Session.triggerEventHandlers
+      session.triggerEventHandlers({
+        messageType: 'LLM_RESPONSE_PARSE_ERROR',
+        error: error instanceof Error ? error.message : String(error),
+        originalResponse: response,
+        originalError: error // Pass the original error object
+      } as InferClassificationUnion<T>);
     }
   }
 
