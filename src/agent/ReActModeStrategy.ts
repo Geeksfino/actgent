@@ -5,7 +5,7 @@ import { logger } from "../helpers/Logger";
 
 export type ReActMode = 'react' | 'direct';
 
-export interface TaskContext {
+export interface TaskContext extends IPromptContext {
   input: string;
   previousInteractions?: number;
   userPreference?: ReActMode;
@@ -20,6 +20,10 @@ export interface ComplexityScore {
 
 export abstract class ReActModeStrategy implements IPromptStrategy {
   protected complexityThreshold: number = 5;
+  protected currentMode: IPromptMode = {
+    value: 'direct',
+    metadata: {}
+  };
   
   abstract evaluateMode(context: TaskContext): ReActMode;
   
@@ -31,16 +35,27 @@ export abstract class ReActModeStrategy implements IPromptStrategy {
   }
 
   evaluatePromptMode(context: IPromptContext): IPromptMode {
-    const hasContext = context.recentMessages && 
-                      context.recentMessages.length >= 3;
+    const taskContext: TaskContext = {
+      ...context,
+      input: context.metadata?.input as string || '',
+    };
+
+    const mode = this.evaluateMode(taskContext);
     
-    return {
-      mode: hasContext ? 'direct' : 'react',
+    this.currentMode = {
+      value: mode,
       metadata: {
         contextSize: context.recentMessages?.length,
-        hasSubstantialContext: hasContext
+        hasSubstantialContext: context.recentMessages && 
+                              context.recentMessages.length >= 3
       }
     };
+
+    return this.currentMode;
+  }
+
+  getCurrentMode(): IPromptMode {
+    return this.currentMode;
   }
 }
 

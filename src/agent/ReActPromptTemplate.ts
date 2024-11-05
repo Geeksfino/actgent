@@ -3,6 +3,7 @@ import { ClassificationTypeConfig } from "../core/IClassifier";
 import { ReActMode, TaskContext, ReActModeStrategy, ReActModeSelector } from "./ReActModeStrategy";
 import { KeywordBasedStrategy } from "./ReActModeStrategy";
 import { logger } from "../helpers/Logger";
+import { IPromptMode, IPromptStrategy } from "../core/IPromptContext";
 
 interface SchemaFormatting {
   types: string;    // Types description
@@ -13,36 +14,40 @@ export class ReActPromptTemplate<
   T extends ReadonlyArray<ClassificationTypeConfig>,
 > implements IAgentPromptTemplate
 {
-  private classificationTypes: T;
-  private modeSelector: ReActModeSelector;
+  protected classificationTypes: T;
+  protected strategy: IPromptStrategy;
 
   constructor(
     classificationTypes: T, 
-    strategy: ReActModeStrategy = new KeywordBasedStrategy()
+    strategy: IPromptStrategy = new KeywordBasedStrategy()
   ) {
     this.classificationTypes = classificationTypes;
-    this.modeSelector = new ReActModeSelector(strategy);
+    this.strategy = strategy;
   }
 
-  setStrategy(strategy: ReActModeStrategy): void {
-    this.modeSelector.setStrategy(strategy);
+  setStrategy(strategy: IPromptStrategy): void {
+    this.strategy = strategy;
   }
 
-  evaluateMode(context: TaskContext): ReActMode {
-    const mode = this.modeSelector.evaluateMode(context);
+  evaluateMode(context: TaskContext): IPromptMode {
+    const mode = this.strategy.evaluatePromptMode(context);
     logger.info(`Mode evaluated: ${mode}`);
     return mode;
   }
 
   getAssistantPrompt(context?: TaskContext): string {
-    const mode = context ? 
-      this.modeSelector.evaluateMode(context) : 
-      this.modeSelector.getCurrentMode();
+    let mode: IPromptMode;
+    
+    if (context) {
+      mode = this.strategy.evaluatePromptMode(context);
+    } else {
+      mode = this.strategy.getCurrentMode();
+    }
 
-    logger.info(`Mode used for prompt: ${mode}`);
+    logger.info(`Mode used for prompt: ${mode.value}`);
 
     const { types, schemas } = this.getFormattedSchemas();
-    const instruction = mode === 'direct' ? 
+    const instruction = mode.value === 'direct' ? 
       this.getDirectInstructions(types) : 
       this.getReActInstructions(types);
 
@@ -53,22 +58,22 @@ Provide your response in the following JSON format:
 
 {
   "thought_process": {
-    "understanding": "${mode === 'direct' ? '' : '<Brief description of how you understand the user\'s request>'}",
-    "approach": "${mode === 'direct' ? '' : '<How you plan to handle this request>'}",
-    "considerations": ${mode === 'direct' ? '[]' : '["<Important point 1>", "<Important point 2>"]'}
+    "understanding": "${mode.value === 'direct' ? '' : '<Brief description of how you understand the user\'s request>'}",
+    "approach": "${mode.value === 'direct' ? '' : '<How you plan to handle this request>'}",
+    "considerations": ${mode.value === 'direct' ? '[]' : '["<Important point 1>", "<Important point 2>"]'}
   },
   "action": {
     "response_type": "<TOOL_INVOCATION if indicating tool calls, or DIRECT_RESPONSE for anything else>",
     "response_content": ${schemas}
   },
   "observation": {
-    "results": "${mode === 'direct' ? '' : '<Expected outcome of this response>'}",
-    "analysis": "${mode === 'direct' ? '' : '<Why this response type was chosen>'}",
-    "next_steps": ${mode === 'direct' ? '[]' : '["<Possible next step 1>", "<Possible next step 2>"]'}
+    "results": "${mode.value === 'direct' ? '' : '<Expected outcome of this response>'}",
+    "analysis": "${mode.value === 'direct' ? '' : '<Why this response type was chosen>'}",
+    "next_steps": ${mode.value === 'direct' ? '[]' : '["<Possible next step 1>", "<Possible next step 2>"]'}
   }
 }
 
-Ensure your response strictly adheres to this format. ${mode === 'direct' ? 'Leave thought_process and observation fields empty while focusing on the action content.' : 'Include detailed reasoning, planned actions, and observations.'} 
+Ensure your response strictly adheres to this format. ${mode.value === 'direct' ? 'Leave thought_process and observation fields empty while focusing on the action content.' : 'Include detailed reasoning, planned actions, and observations.'} 
     `.trim();
   }
 

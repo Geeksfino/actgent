@@ -5,23 +5,24 @@ import { ReActClassifier } from './ReActClassifier';
 import { ClassificationTypeConfig } from '../core/IClassifier';
 import { SchemaBuilder } from './SchemaBuilder';
 import { ExecutionContext } from '../core/ExecutionContext';
-import { ReActModeStrategy, KeywordBasedStrategy } from './ReActModeStrategy';
+import { KeywordBasedStrategy } from './ReActModeStrategy';
+import { IPromptStrategy } from '../core/IPromptContext';
 
 export class AgentBuilder {
   private coreConfig: AgentCoreConfig;
   private serviceConfig: AgentServiceConfig;
   private context: ExecutionContext;
-  private promptStrategy: ReActModeStrategy;
+  private promptStrategy: IPromptStrategy;
 
   constructor(
     coreConfig: AgentCoreConfig, 
     serviceConfig: AgentServiceConfig,
-    promptStrategy: ReActModeStrategy = new KeywordBasedStrategy()
+    promptStrategy?: IPromptStrategy
   ) {
     this.coreConfig = coreConfig;
     this.serviceConfig = serviceConfig;
-    this.context = ExecutionContext.getInstance(); // Default context
-    this.promptStrategy = promptStrategy;
+    this.context = ExecutionContext.getInstance();
+    this.promptStrategy = promptStrategy ?? new KeywordBasedStrategy();
   }
 
   public withContext(context: ExecutionContext): AgentBuilder {
@@ -29,8 +30,13 @@ export class AgentBuilder {
     return this;
   }
 
-  public withPromptStrategy(strategy: ReActModeStrategy): AgentBuilder {
+  public withPromptStrategy(strategy: IPromptStrategy): AgentBuilder {
     this.promptStrategy = strategy;
+    return this;
+  }
+
+  public withDefaultReActStrategy(): AgentBuilder {
+    this.promptStrategy = new KeywordBasedStrategy();
     return this;
   }
 
@@ -46,43 +52,40 @@ export class AgentBuilder {
   ): BaseAgent<Readonly<T>, ReActClassifier<Readonly<T>>, ReActPromptTemplate<Readonly<T>>> {
     type SchemaTypes = Readonly<T>;
 
-    // Create a dynamic subclass of BaseAgent
-    class DynamicAgent extends BaseAgent<Readonly<T>, ReActClassifier<Readonly<T>>, ReActPromptTemplate<Readonly<T>>> {
-      private readonly promptStrategy: ReActModeStrategy;
+    class DynamicAgent extends BaseAgent<SchemaTypes, ReActClassifier<SchemaTypes>, ReActPromptTemplate<SchemaTypes>> {
+      private readonly promptStrategy: IPromptStrategy;
 
       constructor(
         coreConfig: AgentCoreConfig, 
         serviceConfig: AgentServiceConfig,
         context: ExecutionContext,
-        promptStrategy: ReActModeStrategy
+        promptStrategy: IPromptStrategy
       ) {
         super(coreConfig, serviceConfig, schemaTypes);
         this.setExecutionContext(context);
         this.promptStrategy = promptStrategy;
       }
 
-      protected useClassifierClass(): new () => ReActClassifier<Readonly<T>> {
-        return class extends ReActClassifier<Readonly<T>> {
+      protected useClassifierClass(): new () => ReActClassifier<SchemaTypes> {
+        return class extends ReActClassifier<SchemaTypes> {
           constructor() {
             super(schemaTypes);
           }
         };
       }
 
-      protected usePromptTemplateClass(): new (classificationTypes: Readonly<T>) => ReActPromptTemplate<Readonly<T>> {
-        const strategy = this.promptStrategy; // Capture the strategy in a closure
-        return class extends ReActPromptTemplate<Readonly<T>> {
-          constructor(classificationTypes: Readonly<T>) {
+      protected usePromptTemplateClass(): new (classificationTypes: SchemaTypes) => ReActPromptTemplate<SchemaTypes> {
+        const strategy = this.promptStrategy;
+        return class extends ReActPromptTemplate<SchemaTypes> {
+          constructor(classificationTypes: SchemaTypes) {
             super(classificationTypes, strategy);
           }
         };
       }
     }
 
-    // Set the name of the class
     Object.defineProperty(DynamicAgent, 'name', { value: className });
 
-    // Instantiate the dynamic subclass with context and strategy
     return new DynamicAgent(
       this.coreConfig, 
       this.serviceConfig, 
