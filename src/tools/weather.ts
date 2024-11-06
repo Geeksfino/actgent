@@ -2,7 +2,7 @@ import { Tool, JSONOutput, RunOptions } from "../core/Tool";
 import { ExecutionContext } from "../core/ExecutionContext";
 import { z } from "zod";
 import { program } from 'commander';
-import { logger } from "../helpers/Logger";
+import { logger } from "../core/Logger";
 
 // API Response Types
 interface GeocodingResult {

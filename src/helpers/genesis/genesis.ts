@@ -1,6 +1,6 @@
 import { LoggingConfig } from "../../core/configs";
 import { AgentSmith, AvailableTools } from './AgentSmith';
-import { Logger, logger, LogLevel} from '../Logger';
+import { Logger, logger, LogLevel} from '../../core/Logger';
 import readline from 'readline';
 import path from "path";
 import os from "os";

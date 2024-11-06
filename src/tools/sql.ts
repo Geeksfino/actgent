@@ -1,5 +1,6 @@
 import { Tool, JSONOutput, RunOptions, ToolError } from "../core/Tool";
 import { ExecutionContext } from "../core/ExecutionContext";
+import { DatabaseProvider } from "../helpers";
 import { z } from "zod";
 import { Sequelize, Options, QueryTypes } from "sequelize";
 import { program } from "commander";
@@ -27,14 +28,6 @@ interface SQLToolInput {
   query: string;
   params?: Record<string, any>;
 }
-
-export type DatabaseProvider = 
-  | "mysql" 
-  | "postgres" 
-  | "sqlite" 
-  | "mssql" 
-  | "oracle" 
-  | "db2";
 
 interface SQLToolOptions {
   provider: DatabaseProvider;

@@ -3,7 +3,7 @@ import { ClassificationTypeConfig } from "./IClassifier";
 import { Message, PayloadType } from "./Message";
 import { InferClassificationUnion } from "./TypeInference";
 import { JSONOutput, Tool, ValidationError, ToolOutput } from "./Tool";
-import { logger } from '../helpers/Logger';
+import { logger } from './Logger';
 
 
 export class Session {

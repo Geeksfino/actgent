@@ -9,7 +9,7 @@ import { InferClassificationUnion } from '../core/TypeInference';
 import { Session } from '../core/Session';
 import { LoggingConfig } from '../core/configs';
 import { JSONOutput, Tool, ToolOutput } from '../core/Tool';
-import { logger } from '../helpers/Logger';
+import { logger } from '../core/Logger';
 
 const defaultCommunicationConfig: CommunicationConfig = {};
 

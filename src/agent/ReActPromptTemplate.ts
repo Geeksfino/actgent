@@ -2,7 +2,7 @@ import { IAgentPromptTemplate } from "../core/IPromptTemplate";
 import { ClassificationTypeConfig } from "../core/IClassifier";
 import { ReActMode, TaskContext, ReActModeStrategy, ReActModeSelector } from "./ReActModeStrategy";
 import { KeywordBasedStrategy } from "./ReActModeStrategy";
-import { logger } from "../helpers/Logger";
+import { logger, trace } from "../core/Logger";
 import { IPromptMode, IPromptStrategy } from "../core/IPromptContext";
 import { InferContextBuilder } from "../core/InferContextBuilder";
 import { IPromptContext } from "./../core/IPromptContext";
@@ -34,6 +34,7 @@ export class ReActPromptTemplate<
     this.strategy = strategy;
   }
 
+  @trace()
   evaluateMode(memory: Memory, sessionContext: SessionContext): IPromptMode {
     let mode: IPromptMode;
     
@@ -43,7 +44,7 @@ export class ReActPromptTemplate<
     logger.debug(`Infer context: ${JSON.stringify(infer_context)}`);
     
     if (infer_context) {
-      mode = this.strategy.evaluatePromptMode(infer_context);
+      mode = this.strategy.evaluateStrategyMode(infer_context);
     } else {
       mode = this.strategy.getCurrentMode();
     }

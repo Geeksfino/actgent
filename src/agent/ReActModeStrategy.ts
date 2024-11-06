@@ -1,7 +1,7 @@
 import { IPromptMode } from "../core/IPromptContext";
 import { IPromptContext } from "../core/IPromptContext";
 import { IPromptStrategy } from "../core/IPromptContext";
-import { logger } from "../helpers/Logger";
+import { logger } from "../core/Logger";
 
 export type ReActMode = 'react' | 'direct';
 
@@ -38,7 +38,7 @@ export abstract class ReActModeStrategy implements IPromptStrategy {
     };
   }
 
-  evaluatePromptMode(context: IPromptContext): IPromptMode {
+  evaluateStrategyMode(context: IPromptContext): IPromptMode {
     const taskContext: TaskContext = {
       ...context,
       input: context.metadata?.input as string || '',
@@ -47,7 +47,6 @@ export abstract class ReActModeStrategy implements IPromptStrategy {
     };
 
     const mode = this.evaluateMode(taskContext);
-    logger.debug(`Mode evaluated: ${mode}`);
 
     this.currentMode = {
       value: mode,
@@ -58,7 +57,6 @@ export abstract class ReActModeStrategy implements IPromptStrategy {
         accumulatedContextSize: taskContext.accumulatedContext?.length || 0
       }
     };
-    logger.debug(`Current mode: ${this.currentMode.value}`);
     
     return this.currentMode;
   }

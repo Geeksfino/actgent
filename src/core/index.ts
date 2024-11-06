@@ -37,6 +37,7 @@ export { ToolOptions } from './Tool';
 
 // Type utilities
 export { InferClassificationType, InferClassificationUnion } from './TypeInference';
+export { Logger, trace, logger, LogLevel } from './Logger';
 
 
 

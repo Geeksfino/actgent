@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import matter from 'gray-matter';
 import { AgentCoreConfig, Instruction } from '../core/configs';
-import { logger } from './Logger';
+import { logger } from '../core/Logger';
 
 export class AgentCoreConfigurator {
   private static  DEFAULT_CONFIG = "config.md";

@@ -10,6 +10,6 @@ export interface IPromptContext {
 }
 
 export interface IPromptStrategy {
-  evaluatePromptMode(context: IPromptContext): IPromptMode;
+  evaluateStrategyMode(context: IPromptContext): IPromptMode;
   getCurrentMode(): IPromptMode;
 }

@@ -15,7 +15,7 @@ import fs from "fs";
 import path from "path";
 import { Subject } from "rxjs";
 import { IClassifier } from "./IClassifier";
-import { logger } from '../helpers/Logger';
+import { logger } from './Logger';
 import { InferContextBuilder } from "./InferContextBuilder";
 
 interface StorageConfig {

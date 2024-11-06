@@ -8,6 +8,26 @@ export enum LogLevel {
     ERROR = 3
 }
 
+export function trace() {
+    return function (
+        target: any,
+        propertyKey: string,
+        descriptor: PropertyDescriptor
+    ) {
+        const originalMethod = descriptor.value;
+        const className = target.constructor.name;
+
+        descriptor.value = function (...args: any[]) {
+            const logger = Logger.getInstance();
+            logger.debug(`${className}.${propertyKey} called from:`, new Error().stack?.split('\n')[2]);
+            const result = originalMethod.apply(this, args);
+            return result;
+        };
+
+        return descriptor;
+    };
+}
+
 export class Logger {
     private static instance: Logger;
     private logDestination?: string;
