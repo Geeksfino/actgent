@@ -14,10 +14,17 @@ export class Session {
     parentSessionId?: string;  // Optional reference to the parent session
     subtasks?: Session[];  
 
-    private eventHandlers: Array<(obj: any) => void> = [];
+    // this is to handle responses as structured results of LLM inference with instructions and matching handlers
+    private eventHandlers: Array<(obj: any) => void> = []; 
 
-    // Add new property for tool result handlers
-    private toolResultHandlers: Array<(result: any, session: Session) => void> = [];
+    // this is to handle responses as results of tool calls
+    private toolResultHandlers: Array<(result: any, session: Session) => void> = []; 
+
+    // this is to handle responses as non-structured results of LLM inference with instructions but without registered handlers
+    private conversationHandlers: Array<(obj: any) => void> = []; 
+
+    // this is to handle responses as results of anything exceptional
+    private exceptionHandlers: Array<(obj: any) => void> = []; 
 
     constructor(core: AgentCore, owner: string, sessionId: string, description: string, parentSessionId?: string) {
         this.core = core;
@@ -35,8 +42,8 @@ export class Session {
         return msg;
     }
 
-    public async chat(message: string): Promise<void> {
-        const msg = this.createMessage(message);
+    public async chat(message: string, sender: string = this.owner): Promise<void> {
+        const msg = this.createMessage(message, sender);
         this.core.receive(msg);
     }
 
@@ -53,6 +60,14 @@ export class Session {
         handler: (result: TOutput, session: Session) => void
     ): void {
         this.toolResultHandlers.push(handler);
+    }
+
+    public onConversation(handler: (obj: any) => void): void {
+        this.conversationHandlers.push(handler);
+    }
+
+    public onException(handler: (obj: any) => void): void {
+        this.exceptionHandlers.push(handler);
     }
 
     // Updated triggerEventHandlers method with proper generic typing
@@ -133,5 +148,23 @@ export class Session {
                 }
             }
         }
+    }
+
+    public async triggerConversationHandlers(obj: any): Promise<void> {
+        logger.debug(`Session: Triggering conversation handlers for object:`, obj);
+        this.conversationHandlers.forEach(handler => {
+            if (typeof handler === 'function') {
+                handler(obj);
+            }
+        });
+    }
+
+    public async triggerExceptionHandlers(obj: any): Promise<void> {
+        logger.debug(`Session: Triggering exception handlers for object:`, obj);
+        this.exceptionHandlers.forEach(handler => {
+            if (typeof handler === 'function') {
+                handler(obj);
+            }
+        });
     }
 }

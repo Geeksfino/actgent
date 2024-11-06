@@ -8,7 +8,7 @@ import { ExecutionContext } from '../core/ExecutionContext';
 import { InferClassificationUnion } from '../core/TypeInference';  
 import { Session } from '../core/Session';
 import { LoggingConfig } from '../core/configs';
-import { Tool, ToolOutput } from '../core/Tool';
+import { JSONOutput, Tool, ToolOutput } from '../core/Tool';
 import { logger } from '../helpers/Logger';
 
 const defaultCommunicationConfig: CommunicationConfig = {};
@@ -130,12 +130,22 @@ export abstract class BaseAgent<
   private defaultToolResultHandler(result: any, session: Session): void {
     logger.debug("Tool result received:", result);
     
-    // Send the result back with tool name and result marker
-    const formattedResponse = `[${result.toolName || 'Tool'} Result]: ${result.getContent()}`;
+    // Handle different result formats
+    let content = '';
+    if (result instanceof JSONOutput) {
+        content = result.getContent();
+    } else if (typeof result === 'object' && result !== null) {
+        content = JSON.stringify(result);
+    } else {
+        content = String(result);
+    }
 
-    const msg = `[Agent ${this.core.name}] executed ${formattedResponse}`;
-    session.chat(msg).catch(error => {
-      logger.error("Error sending tool result back to LLM:", error);
+    // Send the result back with tool name and result marker
+    const formattedResponse = `[${result.toolName || 'Tool'} Result]: ${content}`;
+
+    const msg = `[Agent ${this.core.name}] got back ${formattedResponse}. Please continue to infer the response.`;
+    session.chat(msg, "assistant").catch(error => {
+        logger.error("Error sending tool result back to LLM:", error);
     });
   }
 

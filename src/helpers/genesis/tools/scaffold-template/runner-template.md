@@ -90,6 +90,14 @@ function setupResponseHandler(session: any) {
             }
         }
     });
+
+    session.onException((response: any) => {
+        console.log(`${${name}.getName()} Error:`, JSON.stringify(response, null, 2));
+    });
+
+    session.onConversation((response: any) => {
+        console.log(`${${name}.getName()}:`, JSON.stringify(response, null, 2));
+    });
 }
 
 // Handle ongoing chat

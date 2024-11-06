@@ -29,10 +29,10 @@ export class PromptManager {
     this.instructions = instructions;
   }
 
-  public getSystemPrompt(): string {
+  public getSystemPrompt(sessionContext: SessionContext, memory: Memory): string {
     //const instructions = this.instructions ? Array.from(this.instructions.values()).join('\n') : '';
     // return this.renderPrompt(null, this.promptTemplate.getSystemPrompt(), { goal: this.goal, capabilities: this.capabilities, role: this.role, instructions: instructions });
-    return this.renderPrompt(null, this.promptTemplate.getSystemPrompt(), { goal: this.goal, capabilities: this.capabilities, role: this.role });
+    return this.renderPrompt(sessionContext, this.promptTemplate.getSystemPrompt(sessionContext, memory), { goal: this.goal, capabilities: this.capabilities, role: this.role });
   }
 
   public getAssistantPrompt(sessionContext: SessionContext, memory: Memory): string {
@@ -74,7 +74,7 @@ export class PromptManager {
   }
 
   public debugPrompt(sessionContext: SessionContext, memory: Memory, message: string, variables: { [key: string]: string }): Object {
-    const systemPrompt = this.getSystemPrompt();
+    const systemPrompt = this.getSystemPrompt(sessionContext, memory);
     const assistantPrompt = this.getAssistantPrompt(sessionContext, memory);
 
     let resolvedPrompt = {

@@ -291,7 +291,7 @@ export class AgentCore {
         .map((tool) => tool.getFunctionDescription());
 
       const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-        { role: "system", content: this.promptManager.getSystemPrompt() },
+        { role: "system", content: this.promptManager.getSystemPrompt(sessionContext, this.memory) },
         { role: "assistant", content: this.promptManager.getAssistantPrompt(sessionContext, this.memory) },
         ...sessionContext.getMessageRecords().map(({ role, content }) => ({ role, content })),
         {
@@ -506,5 +506,10 @@ export class AgentCore {
       logger.error('Error during agent execution:', error);
       throw error;
     }
+  }
+
+  public hasToolForCurrentInstruction(messageType?: string): boolean {
+    if (!messageType) return false;
+    return !!this.instructionToolMap[messageType];
   }
 }

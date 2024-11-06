@@ -34,17 +34,7 @@ export class ReActPromptTemplate<
     this.strategy = strategy;
   }
 
-  evaluateMode(context: TaskContext): IPromptMode {
-    const mode = this.strategy.evaluatePromptMode(context);
-    logger.info(`Mode evaluated: ${mode}`);
-    return mode;
-  }
-
-  setContext(context: IPromptContext): void {
-    this.context = context;
-  }
-
-  getAssistantPrompt(sessionContext: SessionContext, memory: Memory): string {
+  evaluateMode(memory: Memory, sessionContext: SessionContext): IPromptMode {
     let mode: IPromptMode;
     
     const infer_context = new InferContextBuilder(memory, sessionContext)
@@ -59,51 +49,60 @@ export class ReActPromptTemplate<
     }
 
     logger.info(`Mode used for prompt: ${mode.value}`);
+    return mode;
+  }
+
+  setContext(context: IPromptContext): void {
+    this.context = context;
+  }
+
+  getAssistantPrompt(sessionContext: SessionContext, memory: Memory): string {
+    const mode = this.evaluateMode(memory, sessionContext);
 
     const { types, schemas } = this.getFormattedSchemas();
+
     const instruction = mode.value === 'direct' ? 
-      this.getDirectInstructions(types) : 
-      this.getReActInstructions(types);
+      this.getDirectInstructions(types, schemas) : 
+      this.getReActInstructions(types, schemas);
 
     return `
 ${instruction}
-------------------------------------------------------------------------------------------------
-Provide your response in the following JSON format:
+   `.trim();
+  }
 
+  private getDirectInstructions(types: string, schemas: string): string { 
+    return `
+    Analyze the user request comprehensively. First try to understand the user's intent to be sure that the user is asking something relevant 
+    to your role, goal and capabilities. If the user's intent is not clear or not relevant to your role, goal and capabilities, you shall ask for clarification.
+    
+    Based on this analysis, 
+- if you determine you have enough information for a DIRECT_RESPONSE, categorize your response into one of these message types 
+${types}
+- if you need a TOOL_INVOCATION before providing answer, you should categorize your response as "BUILTIN_TOOL". 
+    Ensure that your response strictly adheres to these formats based on the identified message type. Provide concise yet comprehensive information 
+    within the constraints of each format.
+
+Provide your response in the following JSON format:
 {
   "thought_process": {
-    "understanding": "${mode.value === 'direct' ? '' : '<Brief description of how you understand the user\'s request>'}",
-    "approach": "${mode.value === 'direct' ? '' : '<How you plan to handle this request>'}",
-    "considerations": ${mode.value === 'direct' ? '[]' : '["<Important point 1>", "<Important point 2>"]'}
+    "understanding": "<IGNORE>",
+    "approach": "<IGNORE>",
+    "considerations": "<IGNORE>"
   },
   "action": {
     "response_type": "<TOOL_INVOCATION if indicating tool calls, or DIRECT_RESPONSE for anything else>",
     "response_content": ${schemas}
   },
   "observation": {
-    "results": "${mode.value === 'direct' ? '' : '<Expected outcome of this response>'}",
-    "analysis": "${mode.value === 'direct' ? '' : '<Why this response type was chosen>'}",
-    "next_steps": ${mode.value === 'direct' ? '[]' : '["<Possible next step 1>", "<Possible next step 2>"]'}
+    "results": "<IGNORE>",
+    "analysis": "<IGNORE>",
+    "next_steps": "<IGNORE>"
   }
 }
-
-Ensure your response strictly adheres to this format. ${mode.value === 'direct' ? 'Leave thought_process and observation fields empty while focusing on the action content.' : 'Include detailed reasoning, planned actions, and observations.'} 
     `.trim();
   }
 
-  private getDirectInstructions(types: string): string { 
-    return `
-    Analyze the user request comprehensively. Categorize the request into one of these types:
-    ${types}
-    
-    You shall first try to understand the user's intent to be sure that the user is asking something relevant to your role, goal and capabilities.
-    If the user's intent is not clear or not relevant to your role, goal and capabilities, you shall ask for clarification.
-        
-    Ensure that your response strictly adheres to these formats based on the identified message type. Provide concise yet comprehensive information within the constraints of each format.
-    `.trim();
-  }
-
-  private getReActInstructions(types: string): string {
+  private getReActInstructions(types: string, schemas: string): string {
     return `
 Now analyze user request using a structured reasoning and action approach:
 
@@ -127,6 +126,24 @@ Based on this analysis,
 - if you determine you have enough information for a DIRECT_RESPONSE, categorize your response into one of these message types 
 ${types}
 - if you need a TOOL_INVOCATION before providing answer, you should categorize your response as "BUILTIN_TOOL". 
+
+Provide your response in the following JSON format, 
+{
+  "thought_process": {
+    "understanding": "<Brief description of how you understand the user\'s request>",
+    "approach": "<How you plan to handle this request>",
+    "considerations": ["<Important point 1>", "<Important point 2>"]
+  },
+  "action": {
+    "response_type": "<TOOL_INVOCATION if indicating tool calls, or DIRECT_RESPONSE for anything else>",
+    "response_content": ${schemas}
+  },
+  "observation": {
+    "results": "<Expected outcome of this response>",
+    "analysis": "<Why this response type was chosen>",
+    "next_steps": ["<Possible next step 1>", "<Possible next step 2>"]
+  }
+}
     `.trim();
   }
 
@@ -145,8 +162,10 @@ ${types}
     return { types, schemas };
   }
 
-  getSystemPrompt(): string {
-    return `
+  getSystemPrompt(sessionContext: SessionContext, memory: Memory): string {
+    const mode = this.evaluateMode(memory, sessionContext);
+    
+    const base_prompt = `
       You are designated as: {role} with the goal of: {goal}. 
       Your capabilities are: {capabilities}.
       Your objective is to align every action with this overarching mission while processing specific tasks efficiently and effectively.
@@ -169,23 +188,6 @@ ${types}
       you should ask the user for clarification.
   8. If you need further information support in order to fulfill the user's request, you should first check available tools under your disposal and try to execute them 
 
-      Additionally, follow these reasoning and action principles:
-      (1). Thought Process: Before taking any action, explicitly reason about:
-         - What you understand about the task
-         - What information you need
-         - What approach you'll take
-         - What potential challenges might arise
-
-      (2). Action Planning: Break down complex tasks into specific actions:
-         - Identify required steps
-         - Consider dependencies between steps
-         - Plan validation checks
-
-      (3). Observation & Reflection: After each action:
-         - Analyze the results
-         - Consider if adjustments are needed
-         - Plan next steps based on observations
-
   You can respond in two ways:
   1. DIRECT_RESPONSE: you have enough information to just respond to user directly without the need to 
     collect supplementary information from or interact with outside world. This response is direct and immediate answer to user.
@@ -193,6 +195,31 @@ ${types}
     able to generate answers. In this case you need to invoke the right tool by passing to it the required
     input in its strictly required format so the tool can produce data of your needs.
     `.trim();
+
+    const react_prompt = `
+  Additionally, follow these reasoning and action principles, but only if ${mode.value} is "react":
+  (1). Thought Process: Before taking any action, explicitly reason about:
+     - What you understand about the task
+     - What information you need
+     - What approach you'll take
+     - What potential challenges might arise
+
+  (2). Action Planning: Break down complex tasks into specific actions:
+     - Identify required steps
+     - Consider dependencies between steps
+     - Plan validation checks
+
+  (3). Observation & Reflection: After each action:
+     - Analyze the results
+     - Consider if adjustments are needed
+     - Plan next steps based on observations
+    `.trim();
+
+    if (mode.value === 'react') {
+      return `${base_prompt}\n${react_prompt}`;
+    }
+
+    return base_prompt;
   }
 
   getMessageClassificationPrompt(message: string): string {

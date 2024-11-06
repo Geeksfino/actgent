@@ -5,6 +5,8 @@ import {
 } from "./IClassifier";
 import { Session } from "./Session";
 import { InferClassificationUnion } from "./TypeInference";
+import { ValidationResult, ValidationOptions } from './types/ValidationResult';
+import { logger } from '../helpers/Logger';
 
 export abstract class AbstractClassifier<T extends readonly ClassificationTypeConfig[]>
   implements IClassifier<T>
@@ -19,32 +21,63 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
     return this.schemaTypes as Readonly<T>;
   }
 
-  // public abstract getClassificationTypeHandlers(): ClassifiedTypeHandlers<T>;
-
   public handleLLMResponse(
     response: string,
     session: Session
   ): void {
     try {
-      const { isToolCall, parsedLLMResponse } = this.parseLLMResponse(response);
+      const { isToolCall, instruction, parsedLLMResponse, validationResult } = 
+        this.parseLLMResponse(response, {
+          level: 'lenient',  // Initial parsing with lenient validation
+          allowPartialMatch: true,
+          requireMessageType: true
+      });
+            
       if (isToolCall) {
         session.triggerToolCallsHandlers(parsedLLMResponse);
-      } else {
+      } else if (session.core.hasToolForCurrentInstruction(instruction)) { // if the instruction is a tool call, trigger the tool call handlers
         session.triggerEventHandlers(parsedLLMResponse);
+      } else {
+        session.triggerConversationHandlers(parsedLLMResponse);
       }
     } catch (error) {
-      // Let the error propagate to Session.triggerEventHandlers
-      session.triggerEventHandlers({
-        messageType: 'LLM_RESPONSE_PARSE_ERROR',
+      const extractedInstruction = this.tryExtractMessageType(response);
+      session.triggerExceptionHandlers({
+        messageType: extractedInstruction || 'LLM_RESPONSE_PARSE_ERROR',
         error: error instanceof Error ? error.message : String(error),
         originalResponse: response,
         originalError: error // Pass the original error object
-      } as InferClassificationUnion<T>);
+      } as InferClassificationUnion<T>)
     }
   }
 
-  protected abstract parseLLMResponse(response: string): {
+  protected tryExtractMessageType(response: string): string | undefined {
+    const messageTypeRegex = /"messageType"\s*:\s*"([^"]+)"/;
+    const match = response.match(messageTypeRegex);
+    return match ? match[1] : undefined;
+  }
+
+  protected abstract parseLLMResponse(
+    response: string,
+    validationOptions: ValidationOptions
+  ): {
     isToolCall: boolean;
+    instruction: string | undefined;
     parsedLLMResponse: InferClassificationUnion<T>;
+    validationResult: ValidationResult<InferClassificationUnion<T>>;
   };
+
+  protected handleParsingError(
+    error: unknown,
+    originalResponse: string,
+    session: Session,
+    instruction?: string
+  ): void {
+    session.triggerEventHandlers({
+      messageType: instruction || 'LLM_RESPONSE_PARSE_ERROR',
+      error: error instanceof Error ? error.message : String(error),
+      originalResponse: originalResponse,
+      originalError: error
+    } as InferClassificationUnion<T>);
+  }
 }

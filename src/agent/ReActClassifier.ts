@@ -2,14 +2,21 @@ import { ClassificationTypeConfig } from "../core/IClassifier";
 import { AbstractClassifier } from "../core/AbstractClassifier";
 import { InferClassificationUnion } from "../core/TypeInference";
 import { logger } from "../helpers/Logger";
+import { ValidationResult } from "../core/types/ValidationResult";
+import { ValidationOptions } from "../core/types/ValidationResult";
 export class ReActClassifier<T extends readonly ClassificationTypeConfig[]> extends AbstractClassifier<T> {
   constructor(schemaTypes: T) {
     super(schemaTypes);
   }
 
-  protected parseLLMResponse(response: string): {
+  protected parseLLMResponse(
+    response: string,
+    validationOptions: ValidationOptions
+  ): {
     isToolCall: boolean;
+    instruction: string | undefined;
     parsedLLMResponse: InferClassificationUnion<T>;
+    validationResult: ValidationResult<InferClassificationUnion<T>>;
   } {
     try {
       const parsed = JSON.parse(response);
@@ -24,7 +31,9 @@ export class ReActClassifier<T extends readonly ClassificationTypeConfig[]> exte
         
         return {
           isToolCall: true,
-          parsedLLMResponse: toolResponse as InferClassificationUnion<T>
+          instruction: this.tryExtractMessageType(JSON.stringify(toolResponse)),
+          parsedLLMResponse: toolResponse as InferClassificationUnion<T>,
+          validationResult: { isValid: true, data: toolResponse as InferClassificationUnion<T> } 
         };
       }
 
@@ -49,22 +58,36 @@ export class ReActClassifier<T extends readonly ClassificationTypeConfig[]> exte
       });
 
       if (!matchingSchema) {
-        throw new Error(
-          `Response content does not match any defined schema types. ` +
-          `Expected one of: ${this.schemaTypes.map(t => t.name).join(', ')}\n` +
-          `Received content: ${JSON.stringify(content, null, 2)}`
-        );
+        return {
+          isToolCall: false,
+          instruction: this.tryExtractMessageType(JSON.stringify(content)),
+          parsedLLMResponse: content as InferClassificationUnion<T>,
+          validationResult: {
+            isValid: false,
+            error: `Response content does not match any defined schema types. Expected one of: ${this.schemaTypes.map(t => t.name).join(', ')}`,
+            originalContent: content,
+            data: content as InferClassificationUnion<T>
+          }
+        };
       }
+
+      const finalResponse = {
+        ...content,
+        messageType: matchingSchema.name
+      } as InferClassificationUnion<T>;
 
       return {
         isToolCall: false,
-        parsedLLMResponse: {
-          ...content,
-          messageType: matchingSchema.name
-        } as InferClassificationUnion<T>
+        instruction: this.tryExtractMessageType(JSON.stringify(finalResponse)),
+        parsedLLMResponse: finalResponse,
+        validationResult: { 
+          isValid: true,
+          data: finalResponse 
+        }
       };
+
     } catch (error) {
-      console.error("Error parsing LLM response:", error);
+      logger.error("Error parsing LLM response:", error);
       throw error;
     }
   }
