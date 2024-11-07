@@ -7,7 +7,7 @@ import { IPromptMode, IPromptStrategy } from "../core/IPromptContext";
 import { InferContextBuilder } from "../core/InferContextBuilder";
 import { IPromptContext } from "./../core/IPromptContext";
 import { Memory } from "../core/Memory";
-import { SessionContext } from "../core";
+import { InferClassificationUnion, SessionContext } from "../core";
 
 interface SchemaFormatting {
   types: string;    // Types description
@@ -41,7 +41,7 @@ export class ReActPromptTemplate<
     const infer_context = new InferContextBuilder(memory, sessionContext)
       .withRecentMessages()
       .build();
-    logger.debug(`Infer context: ${JSON.stringify(infer_context)}`);
+    //logger.debug(`Infer context: ${JSON.stringify(infer_context, null, 2)}`);
     
     if (infer_context) {
       mode = this.strategy.evaluateStrategyMode(infer_context);
@@ -83,21 +83,11 @@ ${types}
     Ensure that your response strictly adheres to these formats based on the identified message type. Provide concise yet comprehensive information 
     within the constraints of each format.
 
-Provide your response in the following JSON format:
+Provide your response in the following JSON format with all fields being required:
 {
-  "thought_process": {
-    "understanding": "<IGNORE>",
-    "approach": "<IGNORE>",
-    "considerations": "<IGNORE>"
-  },
   "action": {
     "response_type": "<TOOL_INVOCATION if indicating tool calls, or DIRECT_RESPONSE for anything else>",
     "response_content": ${schemas}
-  },
-  "observation": {
-    "results": "<IGNORE>",
-    "analysis": "<IGNORE>",
-    "next_steps": "<IGNORE>"
   }
 }
     `.trim();
@@ -302,6 +292,24 @@ The final prompt you output should adhere to the following structure below. Do n
     `.trim();
     return meta_prompt;
   }
+
+  extractFromLLMResponse(response: string): string {
+    try {
+      const parsed = JSON.parse(response);
+
+      if (!parsed?.action?.response_content) {
+        logger.error(`Invalid response format: ${JSON.stringify(parsed, null, 2)}`);
+        throw new Error("Invalid response format: action.response_content is missing");
+      }
+      return JSON.stringify(parsed.action.response_content);
+    } catch (error) {
+      const err = error as Error; // Type assertion
+      logger.error(`Failed to parse LLM response: ${response}`);
+      
+      // Return a default value or an error message
+      return JSON.stringify({ error: "Failed to parse LLM response", details: err.message });
+    }
+  } 
 
   getClassificationTypes(): T {
     return this.classificationTypes;

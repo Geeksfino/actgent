@@ -1,4 +1,4 @@
-import { AgentCoreConfig, LLMConfig, Instruction } from "./configs";
+import { AgentCoreConfig, LLMConfig, Instruction, LoggingConfig } from "./configs";
 import { DefaultAgentMemory, Memory, MemoryStorage } from "./Memory";
 import { InMemoryStorage } from "./InMemoryStorage";
 import { PromptManager } from "./PromptManager";
@@ -24,10 +24,6 @@ interface StorageConfig {
   working?: MemoryStorage<any>;
 }
 
-interface LoggingConfig {
-  destination?: string;
-}
-
 export class AgentCore {
   public id: string;
   public name: string;
@@ -37,6 +33,7 @@ export class AgentCore {
   public instructions: Instruction[] = [];
   public llmConfig: LLMConfig | null;
   public executionContext: ExecutionContext = ExecutionContext.getInstance();
+  promptTemplate: IAgentPromptTemplate;
   streamCallback?: (delta: string) => void;
   streamBuffer: string = "";
   llmClient: OpenAI;
@@ -68,6 +65,7 @@ export class AgentCore {
     this.inbox = new PriorityInbox();
     this.llmConfig = llmConfig || null;
     this.classifier = classifier;
+    this.promptTemplate = promptTemplate;
 
     // Initialize memory with storage backends
     const shortTermStorage =
@@ -108,8 +106,8 @@ export class AgentCore {
     }
 
     // Update logging initialization
-    if (loggingConfig?.destination) {
-      logger.setDestination(loggingConfig.destination);
+    if (loggingConfig) {
+      logger.setDestination(loggingConfig);
     }
 
     logger.debug('Initializing AgentCore');
@@ -237,8 +235,10 @@ export class AgentCore {
 
     // Handle the response based on message type
     const cleanedResponse = this.cleanLLMResponse(response);
+    logger.debug(`Cleaned response: ${cleanedResponse}`);
+    const extractedResponse = this.promptTemplate.extractFromLLMResponse(cleanedResponse);
     const session = sessionContext.getSession();
-    const responseMessage = session.createMessage(cleanedResponse, "assistant");
+    const responseMessage = session.createMessage(extractedResponse, "assistant");
     sessionContext.addMessage(responseMessage);
 
     // Log the output message
@@ -290,18 +290,26 @@ export class AgentCore {
         )
         .map((tool) => tool.getFunctionDescription());
 
+      const history: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+        ...sessionContext.getMessageRecords().map(({ role, content }) => ({ role, content })),
+      ];
+  
+      // Pretty print the history
+      const formattedHistory = AgentCore.formatHistory(history);
+      logger.warning(`History:\n${formattedHistory}`);
+
       const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
         { role: "system", content: this.promptManager.getSystemPrompt(sessionContext, this.memory) },
         { role: "assistant", content: this.promptManager.getAssistantPrompt(sessionContext, this.memory) },
-        ...sessionContext.getMessageRecords().map(({ role, content }) => ({ role, content })),
-        {
-          role: "user",
-          content: this.promptManager.getUserPrompt(
-            sessionContext,
-            message.payload.input,
-            context
-          ),
-        },
+        ...history,
+        // {
+        //   role: "user",
+        //   content: this.promptManager.getUserPrompt(
+        //     sessionContext,
+        //     message.payload.input,
+        //     context
+        //   ),
+        // },
       ];
 
       // Split into separate configs for streaming and non-streaming
@@ -459,9 +467,7 @@ export class AgentCore {
   }
 
   public setLoggingConfig(loggingConfig: LoggingConfig): void {
-    if (loggingConfig?.destination) {
-      logger.setDestination(loggingConfig.destination);
-    }
+    logger.setDestination(loggingConfig);
   }
 
   private static formatMulltiLine(multiline: string): string {
@@ -511,5 +517,35 @@ export class AgentCore {
   public hasToolForCurrentInstruction(messageType?: string): boolean {
     if (!messageType) return false;
     return !!this.instructionToolMap[messageType];
+  }
+
+  private static formatHistory(history: any[]): string {
+    return 'History:\n' + history.map(entry => {
+      const parsedEntry = this.parseNestedJson(entry);
+      return JSON.stringify(parsedEntry, null, 4);
+    })
+    .join('\n')
+    .split('\n')
+    .map(line => '  ' + line)
+    .join('\n');
+  }
+
+  // Helper method to try formatting JSON strings
+  private static   parseNestedJson<T>(data: T): T {
+    if (typeof data === 'string') {
+      try {
+        return JSON.parse(data) as T;
+      } catch (error) {
+        return data as T;
+      }
+    } else if (Array.isArray(data)) {
+      return data.map(this.parseNestedJson) as T;
+    } else if (typeof data === 'object' && data !== null) {
+      return Object.fromEntries(
+        Object.entries(data).map(([key, value]) => [key, this.parseNestedJson(value)])
+      ) as T;
+    } else {
+      return data;
+    }
   }
 }

@@ -47,7 +47,7 @@ export class ReActClassifier<T extends readonly ClassificationTypeConfig[]> exte
       
       // Validate against schema types
       const matchingSchema = this.schemaTypes.find(type => {
-        logger.debug(`Checking schema type: ${type.name}`);
+        //logger.debug(`Checking schema type: ${type.name}`);
         const matches = Object.entries(type.schema).every(([key, schemaValue]) => {
           const contentValue = content[key];
           const isValid = this.validateSchemaValue(contentValue, schemaValue);

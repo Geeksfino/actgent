@@ -55,5 +55,7 @@ export interface PromptTemplate {
 }
 
 export interface LoggingConfig {
-  destination?: string;
+  type?: 'console' | 'file' | 'both';  // Default to 'console' if not specified
+  destination?: string;                 // File path when type is 'file' or 'both'
+  level?: 'debug' | 'info' | 'warn' | 'error';  // Optional log level
 }
