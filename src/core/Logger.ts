@@ -124,6 +124,32 @@ export class Logger {
         });
     }
 
+    private formatErrorMessage(message: string, args: any[]): object {
+        const stack = new Error().stack?.split('\n');
+        let callerInfo = 'unknown';
+
+        if (stack) {
+            // Skip the first few lines that belong to the logger itself
+            for (let i = 2; i < stack.length; i++) {
+                if (!stack[i].includes('Logger.')) {
+                    callerInfo = stack[i].trim();
+                    break;
+                }
+            }
+        }
+
+        // Attempt to extract class and function names
+        const match = callerInfo.match(/at (\S+) \(([^)]+)\)/) || callerInfo.match(/at (\S+)/);
+        const [className, functionName] = match ? match.slice(1) : ['unknown', 'unknown'];
+
+        const formattedMessage = `[${className}.${functionName}] ${message}`;
+
+        return args.length > 0 
+            ? { msg: formattedMessage, data: this.formatArgs(args) }
+            : { msg: formattedMessage };
+    }
+
+    // Define a simple formatMessage method
     private formatMessage(message: string, args: any[]): object {
         return args.length > 0 
             ? { msg: message, data: this.formatArgs(args) }
@@ -143,7 +169,7 @@ export class Logger {
     }
 
     public error(message: string, ...args: any[]) {
-        this.logger.error(this.formatMessage(message, args));
+        this.logger.error(this.formatErrorMessage(message, args));
     }
 
     public static parseLogLevel(level: string): LogLevel {
