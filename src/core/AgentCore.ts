@@ -234,6 +234,7 @@ export class AgentCore {
     const response = await this.promptLLM(message);
 
     // Handle the response based on message type
+    // logger.debug(`Response: ${response}`);
     const cleanedResponse = this.cleanLLMResponse(response);
     logger.debug(`Cleaned response: ${cleanedResponse}`);
     const extractedResponse = this.promptTemplate.extractFromLLMResponse(cleanedResponse);
@@ -241,8 +242,6 @@ export class AgentCore {
     const responseMessage = session.createMessage(extractedResponse, "assistant");
     sessionContext.addMessage(responseMessage);
 
-    // Log the output message
-    logger.debug(`Output: ${cleanedResponse}`);
     this.handleLLMResponse(cleanedResponse, session);
   }
 

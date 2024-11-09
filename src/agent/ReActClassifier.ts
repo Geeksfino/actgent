@@ -22,11 +22,11 @@ export class ReActClassifier<T extends readonly ClassificationTypeConfig[]> exte
       const parsed = JSON.parse(response);
       
       // Special handling for tool/function calling responses
-      if (parsed?.action?.response_type === 'TOOL_INVOCATION') {
+      if (parsed?.primary_action?.response_purpose === 'TOOL_INVOCATION') {
         const toolResponse = {
           messageType: 'TOOL_INVOCATION',
-          toolName: parsed.action.response_content.name,
-          arguments: parsed.action.response_content.parameters || {},
+          toolName: parsed.primary_action.response_content.name,
+          arguments: parsed.primary_action.response_content.parameters || {},
         };
         
         return {
@@ -38,11 +38,11 @@ export class ReActClassifier<T extends readonly ClassificationTypeConfig[]> exte
       }
 
       // Regular response handling
-      if (!parsed?.action?.response_content) {
-        throw new Error("Invalid response format: action.response_content is missing");
+      if (!parsed?.primary_action?.response_content) {
+        throw new Error("Invalid response format: primary_action.response_content is missing");
       }
 
-      const content = parsed.action.response_content;
+      const content = parsed.primary_action.response_content;
       logger.debug('Validating content:', JSON.stringify(content, null, 2));
       
       // Validate against schema types

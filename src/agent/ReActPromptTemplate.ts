@@ -79,16 +79,20 @@ ${instruction}
     Based on this analysis, 
 - if you determine you have enough information for a DIRECT_RESPONSE, categorize your response into one of these message types 
 ${types}
-- if you need a TOOL_INVOCATION before providing answer, you should categorize your response as "BUILTIN_TOOL". 
+- if you need a TOOL_INVOCATION before providing an answer, categorize your response as a TOOL_INVOCATION.
+
     Ensure that your response strictly adheres to these formats based on the identified message type. Provide concise yet comprehensive information 
     within the constraints of each format.
 
-Provide your response in the following JSON format with all fields being required:
+Provide your response in the following JSON format with all fields being required, do not omit <context> and <additional_info> fields:
 {
-  "action": {
-    "response_type": "<TOOL_INVOCATION if indicating tool calls, or DIRECT_RESPONSE for anything else>",
-    "response_content": ${schemas}
-  }
+    "question_nature": "<SIMPLE or COMPLEX>",
+    "context": "",
+    "primary_action": {
+        "response_purpose": "<TOOL_INVOCATION if indicating tool calls, or DIRECT_RESPONSE for anything else>",
+        "response_content": ${schemas} or JSON output of the tool call
+    },
+    "additional_info": ""
 }
     `.trim();
   }
@@ -116,20 +120,22 @@ Now analyze user request using a structured reasoning and action approach:
 Based on this analysis, 
 - if you determine you have enough information for a DIRECT_RESPONSE, categorize your response into one of these message types 
 ${types}
-- if you need a TOOL_INVOCATION before providing answer, you should categorize your response as "BUILTIN_TOOL". 
+- if you need a TOOL_INVOCATION before providing answer, determine to what category among ${types} this answer will belong after you get back the 
+necessary information from the tool call, and use it as the message type.
 
 Provide your response in the following JSON format, 
 {
-  "thought_process": {
+  "question_nature": "<SIMPLE or COMPLEX>",
+  "context": {
     "understanding": "<Brief description of how you understand the user\'s request>",
     "approach": "<How you plan to handle this request>",
     "considerations": ["<Important point 1>", "<Important point 2>"]
   },
-  "action": {
-    "response_type": "<TOOL_INVOCATION if indicating tool calls, or DIRECT_RESPONSE for anything else>",
+  "primary_action": {
+    "response_purpose": "<TOOL_INVOCATION if indicating tool calls, or DIRECT_RESPONSE for anything else>",
     "response_content": ${schemas}
   },
-  "observation": {
+  "additional_info": {
     "results": "<Expected outcome of this response>",
     "analysis": "<Why this response type was chosen>",
     "next_steps": ["<Possible next step 1>", "<Possible next step 2>"]
@@ -179,7 +185,16 @@ Provide your response in the following JSON format,
       you should ask the user for clarification.
   8. If you need further information support in order to fulfill the user's request, you should first check available tools under your disposal and try to execute them 
 
-  You can respond in two ways:
+  A response always has the following important properties:
+  - <question_nature>: "SIMPLE" or "COMPLEX"
+  - <response_purpose>: "DIRECT_RESPONSE" or "TOOL_INVOCATION"
+
+  Please choose your response style based on the nature of the question:
+- If the question is straightforward, answer directly, concisely, and complete only the <primary_action> field. <question_nature> is "SIMPLE"
+- If the question requires analysis, multiple steps, or further context, proceed with a reasoned approach to fill in <context>, <primary_action>, and <additional_info> fields as necessary. 
+  <question_nature> is "COMPLEX"
+
+  Your response can be for one of the two purposes:
   1. DIRECT_RESPONSE: you have enough information to just respond to user directly without the need to 
     collect supplementary information from or interact with outside world. This response is direct and immediate answer to user.
   2. TOOL_INVOCATION: you need to fetch additional some data or take some actions before before being
@@ -297,11 +312,11 @@ The final prompt you output should adhere to the following structure below. Do n
     try {
       const parsed = JSON.parse(response);
 
-      if (!parsed?.action?.response_content) {
+      if (!parsed?.primary_action?.response_content) {
         logger.error(`Invalid response format: ${JSON.stringify(parsed, null, 2)}`);
-        throw new Error("Invalid response format: action.response_content is missing");
+        throw new Error("Invalid response format: primary_action.response_content is missing");
       }
-      return JSON.stringify(parsed.action.response_content);
+      return JSON.stringify(parsed.primary_action.response_content);
     } catch (error) {
       const err = error as Error; // Type assertion
       logger.error(`Failed to parse LLM response: ${response}`);
