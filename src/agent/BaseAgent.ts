@@ -130,23 +130,30 @@ export abstract class BaseAgent<
   private defaultToolResultHandler(result: any, session: Session): void {
     logger.debug("Tool result received:", result);
     
-    // Handle different result formats
-    let content = '';
-    if (result instanceof JSONOutput) {
-        content = result.getContent();
-    } else if (typeof result === 'object' && result !== null) {
-        content = JSON.stringify(result);
-    } else {
-        content = String(result);
-    }
+    if (result.status === 'success') {
+      let content = '';
+      if (result.data instanceof JSONOutput) {
+        content = result.data.getContent();
+      } else if (typeof result.data === 'object' && result.data !== null) {
+        content = JSON.stringify(result.data);
+      } else {
+        content = String(result.data);
+      }
+      
+      // Send the result back with tool name and result marker
+      const formattedResponse = `[${result.toolName || 'Tool'} Result]: ${content}`;
 
-    // Send the result back with tool name and result marker
-    const formattedResponse = `[${result.toolName || 'Tool'} Result]: ${content}`;
-
-    const msg = `[Agent ${this.core.name}] got back ${formattedResponse}. Please continue to infer the response.`;
-    session.chat(msg, "assistant").catch(error => {
+      const msg = `[Agent ${this.core.name}] got back ${formattedResponse}. Use this result to infer response to the user.`;
+      session.chat(msg, "assistant").catch(error => {
         logger.error("Error sending tool result back to LLM:", error);
-    });
+      });
+    }
+    else {
+      const message = `Tool execution failed: ${result.error}. Please determine the next action to take or respond to the user with explanation.`;
+      session.chat(message, "assistant").catch(error => {
+        logger.error("Error sending tool result back to LLM:", error);
+      });
+    }
   }
 
   protected handleLLMResponse(response: string | InferClassificationUnion<T>, session: Session) {

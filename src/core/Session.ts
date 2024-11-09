@@ -122,30 +122,29 @@ export class Session {
             try {
                 const toolInput = (obj as any).arguments;
                 const result = await tool.run(toolInput, {});
+                const successResult = { status: 'success', data: result };
                 this.toolResultHandlers.forEach(handler => {
                     if (typeof handler === 'function') { 
-                        handler(result, this);
+                        handler(successResult, this);
                     }
                 });
             } catch (error) {
-                // Handle validation errors specifically
+                const failureResult = {
+                    status: 'failure',
+                    data: null,
+                    error: error instanceof Error ? error.message : String(error)
+                };
                 if (error instanceof ValidationError) {
                     logger.warning(`Validation error in tool ${toolName}:`, error.message, error.errors);
-                    // You might want to notify handlers with the error information
-                    this.toolResultHandlers.forEach(handler => {
-                        if (typeof handler === 'function') {
-                            handler({ error: error.message, details: error.errors }, this);
-                        }
-                    });
+                    failureResult.error = `Validation error: ${error.message}`;
                 } else {
-                    // Handle other types of errors
                     logger.error(`Error executing tool ${toolName}:`, error);
-                    this.toolResultHandlers.forEach(handler => {
-                        if (typeof handler === 'function') {
-                            handler({ error: 'Tool execution failed', details: error instanceof Error ? error.message : String(error) }, this);
-                        }
-                    });
                 }
+                this.toolResultHandlers.forEach(handler => {
+                    if (typeof handler === 'function') {
+                        handler(failureResult, this);
+                    }
+                });
             }
         }
     }

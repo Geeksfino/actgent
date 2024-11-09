@@ -70,39 +70,65 @@ export class ReActPromptTemplate<
 
   private getDirectInstructions(types: string, schemas: string): string {
     return `
-Request Analysis Protocol:
-
-1. Intent Assessment
-   - Extract core request objective
-   - Validate alignment with role and capabilities
-   - Identify required information gaps
-   - Request clarification if intent is unclear
-
-2. Response Classification
-   Choose the appropriate path:
+When responding, choose the appropriate path:
    A. DIRECT_RESPONSE - Select from available types:
       ${types}
    B. TOOL_INVOCATION - If external data/actions needed
 
-3. Response Structure
-Provide complete JSON response:
+**MANDATORY RESPONSE FORMAT**
+
+*CRITICAL*: All responses MUST adhere to the following format:
 {
     "question_nature": "<SIMPLE for straightforward requests, COMPLEX for multi-step analysis>",
     "context": "<Understanding and approach summary>",
     "primary_action": {
-        "response_purpose": "<TOOL_INVOCATION or DIRECT_RESPONSE>",
+        "response_purpose": "<Either TOOL_INVOCATION or DIRECT_RESPONSE>",
         "response_content": ${schemas}
     },
     "additional_info": "<Supporting details or next steps>"
 }
 
-CRITICAL RESPONSE FORMAT REQUIREMENTS:
-1. You MUST structure your response as a valid JSON object
-2. The JSON MUST contain ALL required fields shown in the template below
-3. NEVER output bare content - ALL responses MUST be wrapped in the proper JSON structure
-4. The "primary_action" field is MANDATORY and MUST contain both "response_purpose" and "response_content"
-5. DO NOT use placeholder text like "<...>" in your actual response
-6. If you need to return content, it MUST go inside "response_content", NEVER directly in the response
+*RULES*: All responses MUST adhere to the following rules:
+1. **Structure your response as a valid JSON object**.
+2. **All content MUST be inside the "primary_action.response_content" field**. DO NOT output any content outside of "primary_action.response_content".
+3. The JSON structure must always contain the following fields:
+   - question_nature: Either "SIMPLE" or "COMPLEX"
+   - context: A summary of the user's request and the approach you will take to respond.
+   - primary_action: MUST contain both "response_purpose" and "response_content"
+      - response_purpose: Either "TOOL_INVOCATION" or "DIRECT_RESPONSE"
+      - response_content: The content of your response, formatted according to the requirements of the selected response_purpose.
+
+**EXAMPLE REQUIRED FORMAT**:
+\`\`\`json
+{
+  "question_nature": "SIMPLE",
+  "context": "Identified as a straightforward request for travel information.",
+  "primary_action": {
+    "response_purpose": "DIRECT_RESPONSE",
+    "response_content": {
+      "messageType": "provide_travel_info",
+      "destination_info": {
+        "name": "Paris",
+        "attractions": [
+          {
+            "name": "Eiffel Tower",
+            "description": "Iconic landmark with views of the city."
+          }
+        ],
+        "accommodations": [
+          {
+            "name": "Hotel Paris",
+            "description": "Comfortable and centrally located.",
+            "price": "$150 per night"
+          }
+        ],
+        "local_customs": "Greet people with 'Bonjour'."
+      }
+    }
+  },
+  "additional_info": "Suggestions on travel dates and budget."
+}
+\`\`\`
     `.trim();
   }
 
@@ -165,7 +191,6 @@ CRITICAL RESPONSE FORMAT REQUIREMENTS:
     const mode = this.evaluateMode(memory, sessionContext);
     
     const base_prompt = `
-Role Definition:
 You are designated as: {role}
 Goal: {goal}
 Capabilities: {capabilities}
