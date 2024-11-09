@@ -78,9 +78,9 @@ export class PromptManager {
     const assistantPrompt = this.getAssistantPrompt(sessionContext, memory);
 
     let resolvedPrompt = {
-      "system": systemPrompt,
-      "assistant": assistantPrompt,
-      "user": this.getUserPrompt(sessionContext, message, variables)
+      system: systemPrompt,
+      assistant: assistantPrompt,
+      user: this.getUserPrompt(sessionContext, message, variables)
     }
     
 

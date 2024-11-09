@@ -15,7 +15,7 @@ import fs from "fs";
 import path from "path";
 import { Subject } from "rxjs";
 import { IClassifier } from "./IClassifier";
-import { logger } from './Logger';
+import { logger, LogLevel } from './Logger';
 import { InferContextBuilder } from "./InferContextBuilder";
 
 interface StorageConfig {
@@ -262,23 +262,23 @@ export class AgentCore {
     // context of user prompt
     const context = await this.memory.generateContext(sessionContext);
 
-    logger.debug(message.sessionId, "<------ Resolved prompt ------->");
-    logger.debug(
-      message.sessionId,
-      AgentCore.formatMulltiLine(
-        JSON.stringify(
-          this.promptManager.debugPrompt(
-            sessionContext,
-            this.memory,
-            message.payload.input,
-            context
-        ),
-        null,
-          2
-        )
-      )
-    );
-    logger.debug(message.sessionId, "<------ Resolved prompt ------->");
+    if (logger.getLevel() === LogLevel.TRACE) {
+      logger.trace(message.sessionId, "<------ Resolved prompt ------->");
+      // logger.trace(
+      //   message.sessionId,
+      //   AgentCore.formatMultiLine(
+      //     this.promptManager.debugPrompt(
+      //       sessionContext,
+      //       this.memory,
+      //       message.payload.input,
+      //       context
+      //     )
+      //   )
+      // );
+      logger.trace(this.promptTemplate.debugPrompt(this.promptManager, "system", sessionContext, this.memory));
+      logger.trace(this.promptTemplate.debugPrompt(this.promptManager, "assistant", sessionContext, this.memory));
+      logger.trace(message.sessionId, "<------ Resolved prompt ------->");
+    }
 
     try {
       let responseContent = "";
@@ -469,11 +469,36 @@ export class AgentCore {
     logger.setDestination(loggingConfig);
   }
 
-  private static formatMulltiLine(multiline: string): string {
-    // Replace \n with actual newlines and print the formatted content
-    let formattedContent = multiline.replace(/\\n/g, "\n");
-    formattedContent = formattedContent.replace(/\\"/g, '"');
-    return formattedContent;
+  private static formatMultiLine(resolvedPrompt: Object): string {
+    let formattedPrompt = '';
+    for (const [key, value] of Object.entries(resolvedPrompt)) {
+      const parsedValue = AgentCore.parsePrompt(value);
+      console.log(`parsedValue: ${parsedValue}`);
+      formattedPrompt += `${key}: ${parsedValue}\n\n`;
+    }
+    return formattedPrompt;
+  }
+
+  private static parsePrompt(input: string): string {
+    // Replace escaped newline and tab characters with actual newline and tabs
+    let output = input.replace(/\\n|\n/g, '\n').replace(/\\"/g, '"');
+
+    // Regular expression to detect and extract JSON blocks inside ```json ... ```
+    const jsonRegex = /```json\n([\s\S]*?)\n```/g;
+
+    // Callback function to process each JSON block
+    output = output.replace(jsonRegex, (match, jsonContent) => {
+        try {
+            // Parse and stringify JSON content for clean formatting
+            const parsedJson = JSON.parse(jsonContent);
+            return JSON.stringify(parsedJson, null, 2); // Indent JSON by 2 spaces
+        } catch (e) {
+            console.warn("Invalid JSON format detected. Returning unmodified.");
+            return match; // Return original match if JSON parsing fails
+        }
+    });
+
+    return output;
   }
 
   public async shutdown(): Promise<void> {

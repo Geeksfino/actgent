@@ -5,10 +5,12 @@ import { LoggingConfig } from './configs';
 
 // Use Pino's levels directly
 export enum LogLevel {
+    TRACE = 'trace',
     DEBUG = 'debug',
     INFO = 'info',
     WARNING = 'warn',
-    ERROR = 'error'
+    ERROR = 'error',
+    FATAL = 'fatal'
 }
 
 // Custom pretty print options
@@ -17,7 +19,7 @@ const prettyPrintOptions: pinoPretty.PrettyOptions = {
     levelFirst: true,
     translateTime: "SYS:standard",
     ignore: "hostname,pid,env",
-    customColors: 'debug:gray,info:green,warn:blue,error:red'
+    customColors: 'trace:gray,debug:yellow,info:green,warn:blue,error:red,fatal:magenta'
 };
 
 export class Logger {
@@ -106,6 +108,10 @@ export class Logger {
         this.logger = this.createLogger(level);
     }
 
+    public getLevel(): LogLevel {
+        return this.currentLevel;
+    }
+
     private formatArgs(...args: any[]): any[] {
         return args.map(arg => {
             if (arg instanceof Error) {
@@ -172,13 +178,23 @@ export class Logger {
         this.logger.error(this.formatErrorMessage(message, args));
     }
 
+    public trace(message: string, ...args: any[]) {
+        this.logger.trace(this.formatMessage(message, args));
+    }
+
+    public fatal(message: string, ...args: any[]) {
+        this.logger.fatal(this.formatErrorMessage(message, args));
+    }
+
     public static parseLogLevel(level: string): LogLevel {
         const upperLevel = level.toUpperCase();
         switch (upperLevel) {
+            case 'TRACE': return LogLevel.TRACE;
             case 'DEBUG': return LogLevel.DEBUG;
             case 'INFO': return LogLevel.INFO;
             case 'WARNING': return LogLevel.WARNING;
             case 'ERROR': return LogLevel.ERROR;
+            case 'FATAL': return LogLevel.FATAL;
             default: return LogLevel.INFO;
         }
     }

@@ -7,7 +7,7 @@ import { IPromptMode, IPromptStrategy } from "../core/IPromptContext";
 import { InferContextBuilder } from "../core/InferContextBuilder";
 import { IPromptContext } from "./../core/IPromptContext";
 import { Memory } from "../core/Memory";
-import { InferClassificationUnion, SessionContext } from "../core";
+import { InferClassificationUnion, PromptManager, SessionContext } from "../core";
 
 interface SchemaFormatting {
   types: string;    // Types description
@@ -59,174 +59,176 @@ export class ReActPromptTemplate<
 
   getAssistantPrompt(sessionContext: SessionContext, memory: Memory): string {
     const mode = this.evaluateMode(memory, sessionContext);
-
     const { types, schemas } = this.getFormattedSchemas();
 
     const instruction = mode.value === 'direct' ? 
       this.getDirectInstructions(types, schemas) : 
       this.getReActInstructions(types, schemas);
 
-    return `
-${instruction}
-   `.trim();
+    return instruction.trim();
   }
 
-  private getDirectInstructions(types: string, schemas: string): string { 
+  private getDirectInstructions(types: string, schemas: string): string {
     return `
-    Analyze the user request comprehensively. First try to understand the user's intent to be sure that the user is asking something relevant 
-    to your role, goal and capabilities. If the user's intent is not clear or not relevant to your role, goal and capabilities, you shall ask for clarification.
-    
-    Based on this analysis, 
-- if you determine you have enough information for a DIRECT_RESPONSE, categorize your response into one of these message types 
-${types}
-- if you need a TOOL_INVOCATION before providing an answer, categorize your response as a TOOL_INVOCATION.
+Request Analysis Protocol:
 
-    Ensure that your response strictly adheres to these formats based on the identified message type. Provide concise yet comprehensive information 
-    within the constraints of each format.
+1. Intent Assessment
+   - Extract core request objective
+   - Validate alignment with role and capabilities
+   - Identify required information gaps
+   - Request clarification if intent is unclear
 
-Provide your response in the following JSON format with all fields being required, do not omit <context> and <additional_info> fields:
+2. Response Classification
+   Choose the appropriate path:
+   A. DIRECT_RESPONSE - Select from available types:
+      ${types}
+   B. TOOL_INVOCATION - If external data/actions needed
+
+3. Response Structure
+Provide complete JSON response:
 {
-    "question_nature": "<SIMPLE or COMPLEX>",
-    "context": "",
+    "question_nature": "<SIMPLE for straightforward requests, COMPLEX for multi-step analysis>",
+    "context": "<Understanding and approach summary>",
     "primary_action": {
-        "response_purpose": "<TOOL_INVOCATION if indicating tool calls, or DIRECT_RESPONSE for anything else>",
-        "response_content": ${schemas} or JSON output of the tool call
+        "response_purpose": "<TOOL_INVOCATION or DIRECT_RESPONSE>",
+        "response_content": ${schemas}
     },
-    "additional_info": ""
+    "additional_info": "<Supporting details or next steps>"
 }
+
+CRITICAL RESPONSE FORMAT REQUIREMENTS:
+1. You MUST structure your response as a valid JSON object
+2. The JSON MUST contain ALL required fields shown in the template below
+3. NEVER output bare content - ALL responses MUST be wrapped in the proper JSON structure
+4. The "primary_action" field is MANDATORY and MUST contain both "response_purpose" and "response_content"
+5. DO NOT use placeholder text like "<...>" in your actual response
+6. If you need to return content, it MUST go inside "response_content", NEVER directly in the response
     `.trim();
   }
 
   private getReActInstructions(types: string, schemas: string): string {
     return `
-Now analyze user request using a structured reasoning and action approach:
+Reasoning and Action (ReAct) Analysis Protocol:
 
-1. First, express your thought process about:
-   - Your understanding of the request
-   - The approach you'll take
-   - Any important considerations
+1. Thought Process Documentation
+   - Document request comprehension
+   - Outline proposed approach
+   - List key considerations
+   - Identify potential challenges
 
-2. Then, determine appropriate actions:
-   - Break down the task into specific steps
-   - Explain reasoning for each step
-   - Plan how to execute each step
-   - If you need to call a tool, you should first check available tools under your disposal and try to execute them
+2. Action Strategy
+   - Break down into specific steps
+   - Document reasoning per step
+   - Identify required tools/resources
+   - Plan validation checkpoints
 
-3. After planning actions, provide observations about:
-   - Expected results
-   - Potential challenges
-   - Next steps based on different outcomes
+3. Response Planning
+   Final response will be categorized as:
+   ${types}
 
-Based on this analysis, 
-- if you determine you have enough information for a DIRECT_RESPONSE, categorize your response into one of these message types 
-${types}
-- if you need a TOOL_INVOCATION before providing answer, determine to what category among ${types} this answer will belong after you get back the 
-necessary information from the tool call, and use it as the message type.
-
-Provide your response in the following JSON format, 
+4. Response Format
 {
   "question_nature": "<SIMPLE or COMPLEX>",
   "context": {
-    "understanding": "<Brief description of how you understand the user\'s request>",
-    "approach": "<How you plan to handle this request>",
-    "considerations": ["<Important point 1>", "<Important point 2>"]
+    "understanding": "<Request interpretation and key points>",
+    "approach": "<Strategy and methodology>",
+    "considerations": ["<Critical factor 1>", "<Critical factor 2>"]
   },
   "primary_action": {
-    "response_purpose": "<TOOL_INVOCATION if indicating tool calls, or DIRECT_RESPONSE for anything else>",
+    "response_purpose": "<TOOL_INVOCATION or DIRECT_RESPONSE>",
     "response_content": ${schemas}
   },
   "additional_info": {
-    "results": "<Expected outcome of this response>",
-    "analysis": "<Why this response type was chosen>",
-    "next_steps": ["<Possible next step 1>", "<Possible next step 2>"]
+    "results": "<Expected outcomes and deliverables>",
+    "analysis": "<Classification rationale>",
+    "next_steps": ["<Follow-up action 1>", "<Follow-up action 2>"]
   }
 }
+
+Execution Guidelines:
+- Document each reasoning step
+- Validate tool availability before use
+- Ensure complete context documentation
+- Plan for potential contingencies
+
+CRITICAL RESPONSE FORMAT REQUIREMENTS:
+1. You MUST structure your response as a valid JSON object
+2. The JSON MUST contain ALL required fields shown in the template below
+3. NEVER output bare content - ALL responses MUST be wrapped in the proper JSON structure
+4. The "primary_action" field is MANDATORY and MUST contain both "response_purpose" and "response_content"
+5. DO NOT use placeholder text like "<...>" in your actual response
+6. If you need to return content, it MUST go inside "response_content", NEVER directly in the response
     `.trim();
-  }
-
-  private getFormattedSchemas(): SchemaFormatting {
-    const types = this.classificationTypes
-      .map((type) => `- ${type.name}: ${type.description}`)
-      .join("\n");
-
-    const schemas = this.classificationTypes
-      .map(
-        (type) =>
-          `${type.name}:\n\`\`\`json\n${JSON.stringify({ messageType: type.name, ...type.schema }, null, 2)}\n\`\`\``
-      )
-      .join("\n\n");
-
-    return { types, schemas };
   }
 
   getSystemPrompt(sessionContext: SessionContext, memory: Memory): string {
     const mode = this.evaluateMode(memory, sessionContext);
     
     const base_prompt = `
-      You are designated as: {role} with the goal of: {goal}. 
-      Your capabilities are: {capabilities}.
-      Your objective is to align every action with this overarching mission while processing specific tasks efficiently and effectively.
-      Keep this goal in mind for every task you undertake. 
+Role Definition:
+You are designated as: {role}
+Goal: {goal}
+Capabilities: {capabilities}
 
-  You need to assist in analyzing and understanding input messages with flexibility and nuance. Follow these guidelines:
-	1.	Context Awareness: Always consider the broader context and goal of the conversation. Users may provide examples or use analogies that seem unrelated on the surface 
-      but are intended to illustrate a larger idea or requirement. Focus on interpreting the core concept or intent behind the user's input.
-	2.	Clarify Before Judging: If the task or example provided by the user appears unclear or seems unrelated, do not dismiss it outright. Instead, 
-      ask for clarification or additional information to better understand how it might relate to the overarching goal or requirement.
-	3.	Seek Underlying Meaning: Focus on the user's intent and try to extract the underlying purpose or idea. Even if the input appears off-topic, 
-      it may still contain valuable insights that contribute to the task at hand.
-	4.	Prioritize Relevance to the Goal: Evaluate the relevance of examples, analogies, or scenarios based on how they contribute to the user's broader objective. 
-      Your role is to bridge the gap between user input and the main task, ensuring that even abstract or creative inputs are considered in context.
-	5.	Promote Collaborative Refinement: Rather than strictly classifying tasks or examples as right or wrong, aim to collaborate with the user in refining their ideas. 
-      This involves engaging with the user's examples in a constructive manner, helping them to express their requirements more clearly and aligning those with the task's goal.
-	6.	Adaptability: Be flexible in your interpretation and approach. Users may express ideas in unconventional ways—adapt your analysis to extract relevant details, 
-      always prioritizing understanding over rigid classification.
-	7.	After trying these principles and you still cannot understand the intent of an input message or you carefully review that it is not aligned with your goal or capabilities, 
-      you should ask the user for clarification.
-  8. If you need further information support in order to fulfill the user's request, you should first check available tools under your disposal and try to execute them 
+Core Responsibilities:
+1. Goal Alignment
+   - Every action must support the defined goal
+   - Stay within designated capabilities
+   - Maintain role focus
 
-  A response always has the following important properties:
-  - <question_nature>: "SIMPLE" or "COMPLEX"
-  - <response_purpose>: "DIRECT_RESPONSE" or "TOOL_INVOCATION"
+2. Request Processing Framework
+   A. Context Analysis
+      - Extract core concepts and requirements
+      - Consider conversation history
+      - Validate goal alignment
 
-  Please choose your response style based on the nature of the question:
-- If the question is straightforward, answer directly, concisely, and complete only the <primary_action> field. <question_nature> is "SIMPLE"
-- If the question requires analysis, multiple steps, or further context, proceed with a reasoned approach to fill in <context>, <primary_action>, and <additional_info> fields as necessary. 
-  <question_nature> is "COMPLEX"
+   B. Clarity Protocol
+      - Request clarification for ambiguous inputs
+      - Explain capability limitations when relevant
+      - Verify understanding for complex requests
 
-  Your response can be for one of the two purposes:
-  1. DIRECT_RESPONSE: you have enough information to just respond to user directly without the need to 
-    collect supplementary information from or interact with outside world. This response is direct and immediate answer to user.
-  2. TOOL_INVOCATION: you need to fetch additional some data or take some actions before before being
-    able to generate answers. In this case you need to invoke the right tool by passing to it the required
-    input in its strictly required format so the tool can produce data of your needs.
+   C. Response Structure
+      Question Classification:
+      - SIMPLE: Direct, straightforward requests
+      - COMPLEX: Multi-step analysis requirements
+
+      Response Types:
+      - DIRECT_RESPONSE: Immediate answer using available information
+      - TOOL_INVOCATION: Requires external data/actions
+
+3. Tool Integration
+   - Verify tool availability before requesting information
+   - Ensure proper input formatting
+   - Validate tool outputs before integration
     `.trim();
 
     const react_prompt = `
-  Additionally, follow these reasoning and action principles, but only if ${mode.value} is "react":
-  (1). Thought Process: Before taking any action, explicitly reason about:
-     - What you understand about the task
-     - What information you need
-     - What approach you'll take
-     - What potential challenges might arise
+Extended Analysis Protocol:
+1. Reasoning Documentation
+   - Capture request understanding
+   - Document information requirements
+   - Detail approach strategy
+   - List potential challenges
 
-  (2). Action Planning: Break down complex tasks into specific actions:
-     - Identify required steps
-     - Consider dependencies between steps
-     - Plan validation checks
+2. Execution Planning
+   - Define specific action steps
+   - Map step dependencies
+   - Include validation points
+   - Document contingencies
 
-  (3). Observation & Reflection: After each action:
-     - Analyze the results
-     - Consider if adjustments are needed
-     - Plan next steps based on observations
+3. Results Management
+   - Record action outcomes
+   - Evaluate need for adjustments
+   - Plan subsequent steps
+   - Validate goal alignment
     `.trim();
 
-    if (mode.value === 'react') {
-      return `${base_prompt}\n${react_prompt}`;
-    }
-
-    return base_prompt;
+    return mode.value === 'react' ? 
+      `${base_prompt}\n\n${react_prompt}` : 
+      base_prompt;
   }
+
+
 
   getMessageClassificationPrompt(message: string): string {
     const { types, schemas } = this.getFormattedSchemas();
@@ -308,6 +310,20 @@ The final prompt you output should adhere to the following structure below. Do n
     return meta_prompt;
   }
 
+  private getFormattedSchemas(): SchemaFormatting {
+    const types = this.classificationTypes
+      .map((type) => `- ${type.name}: ${type.description}`)
+      .join("\n");
+
+    const schemas = this.classificationTypes
+      .map(
+        (type) =>
+          `${type.name}:\n\`\`\`json\n${JSON.stringify({ messageType: type.name, ...type.schema }, null, 2)}\n\`\`\`` + (type !== this.classificationTypes[this.classificationTypes.length - 1] ? " or " : "")
+      )
+      .join("\n\n");
+
+    return { types, schemas };
+  }
   extractFromLLMResponse(response: string): string {
     try {
       const parsed = JSON.parse(response);
@@ -328,5 +344,39 @@ The final prompt you output should adhere to the following structure below. Do n
 
   getClassificationTypes(): T {
     return this.classificationTypes;
+  }
+
+  public debugPrompt(promptManager: PromptManager, type: "system" | "assistant", sessionContext: SessionContext, memory: Memory): string {
+    const prompt = type === "system" ? promptManager.getSystemPrompt(sessionContext, memory) : promptManager.getAssistantPrompt(sessionContext, memory);
+    return this.parsePrompt(prompt);
+  }
+
+  /**
+   * Parse the prompt to replace escaped newline and tab characters with actual newline and tabs
+   * and to parse JSON blocks inside ```json ... ```. This is specific to this prompt template.
+   * Useful for debugging and testing.
+   * @param input 
+   * @returns 
+   */
+  private parsePrompt(input: string): string {
+    // Replace escaped newline and tab characters with actual newline and tabs
+    let output = input.replace(/\\n|\n/g, '\n').replace(/\\"/g, '"');
+
+    // Regular expression to detect and extract JSON blocks inside ```json ... ```
+    const jsonRegex = /```json\n([\s\S]*?)\n```/g;
+
+    // Callback function to process each JSON block
+    output = output.replace(jsonRegex, (match, jsonContent) => {
+        try {
+            // Parse and stringify JSON content for clean formatting
+            const parsedJson = JSON.parse(jsonContent);
+            return JSON.stringify(parsedJson, null, 2); // Indent JSON by 2 spaces
+        } catch (e) {
+            console.warn("Invalid JSON format detected. Returning unmodified.");
+            return match; // Return original match if JSON parsing fails
+        }
+    });
+
+    return output;
   }
 }
