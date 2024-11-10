@@ -6,18 +6,18 @@ import { ClassificationTypeConfig } from '../core/IClassifier';
 import { SchemaBuilder } from './SchemaBuilder';
 import { ExecutionContext } from '../core/ExecutionContext';
 import { KeywordBasedStrategy } from './ReActModeStrategy';
-import { IPromptStrategy } from '../core/IPromptContext';
+import { InferStrategy } from '../core/InferContext';
 
 export class AgentBuilder {
   private coreConfig: AgentCoreConfig;
   private serviceConfig: AgentServiceConfig;
   private context: ExecutionContext;
-  private promptStrategy: IPromptStrategy;
+  private promptStrategy: InferStrategy;
 
   constructor(
     coreConfig: AgentCoreConfig, 
     serviceConfig: AgentServiceConfig,
-    promptStrategy?: IPromptStrategy
+    promptStrategy?: InferStrategy
   ) {
     this.coreConfig = coreConfig;
     this.serviceConfig = serviceConfig;
@@ -30,7 +30,7 @@ export class AgentBuilder {
     return this;
   }
 
-  public withPromptStrategy(strategy: IPromptStrategy): AgentBuilder {
+  public withPromptStrategy(strategy: InferStrategy): AgentBuilder {
     this.promptStrategy = strategy;
     return this;
   }
@@ -55,13 +55,13 @@ export class AgentBuilder {
     const builderStrategy = this.promptStrategy;
 
     class DynamicAgent extends BaseAgent<SchemaTypes, ReActClassifier<SchemaTypes>, ReActPromptTemplate<SchemaTypes>> {
-      private readonly promptStrategy: IPromptStrategy;
+      private readonly promptStrategy: InferStrategy;
 
       constructor(
         coreConfig: AgentCoreConfig, 
         serviceConfig: AgentServiceConfig,
         context: ExecutionContext,
-        promptStrategy: IPromptStrategy
+        promptStrategy: InferStrategy
       ) {
         super(coreConfig, serviceConfig, schemaTypes);
         this.setExecutionContext(context);

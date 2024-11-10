@@ -1,9 +1,9 @@
-import { IPromptContext } from './IPromptContext';
+import { InferContext } from './InferContext';
 import { Memory } from './Memory';
 import { SessionContext } from './SessionContext';
 
 export class InferContextBuilder {
-  private context: Partial<IPromptContext> = {};
+  private context: Partial<InferContext> = {};
   private memory: Memory;
   private sessionContext: SessionContext;
 
@@ -14,6 +14,7 @@ export class InferContextBuilder {
 
   withRecentMessages(): InferContextBuilder {
     this.context.recentMessages = this.sessionContext.getMessages();
+    this.context.input = this.sessionContext.getLatestMessage().payload.input;
     return this;
   }
 
@@ -47,7 +48,7 @@ export class InferContextBuilder {
     return this;
   }
 
-  build(): IPromptContext {
-    return this.context as IPromptContext;
+  build(): InferContext {
+    return this.context as InferContext;
   }
 } 

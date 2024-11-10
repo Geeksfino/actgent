@@ -1,11 +1,10 @@
 import { IAgentPromptTemplate } from "../core/IPromptTemplate";
 import { ClassificationTypeConfig } from "../core/IClassifier";
-import { ReActMode, TaskContext, ReActModeStrategy, ReActModeSelector } from "./ReActModeStrategy";
+import { ReActMode, ReActModeStrategy, ReActModeSelector } from "./ReActModeStrategy";
 import { KeywordBasedStrategy } from "./ReActModeStrategy";
 import { logger, trace } from "../core/Logger";
-import { IPromptMode, IPromptStrategy } from "../core/IPromptContext";
+import { InferContext, InferMode, InferStrategy } from "../core/InferContext";
 import { InferContextBuilder } from "../core/InferContextBuilder";
-import { IPromptContext } from "./../core/IPromptContext";
 import { Memory } from "../core/Memory";
 import { InferClassificationUnion, PromptManager, SessionContext } from "../core";
 
@@ -19,24 +18,24 @@ export class ReActPromptTemplate<
 > implements IAgentPromptTemplate
 {
   protected classificationTypes: T;
-  protected strategy: IPromptStrategy;
-  private context: IPromptContext | null = null;
+  protected strategy: InferStrategy;
+  private context: InferContext | null = null;
 
   constructor(
     classificationTypes: T, 
-    strategy: IPromptStrategy = new KeywordBasedStrategy()
+    strategy: InferStrategy = new KeywordBasedStrategy()
   ) {
     this.classificationTypes = classificationTypes;
     this.strategy = strategy;
   }
 
-  setStrategy(strategy: IPromptStrategy): void {
+  setStrategy(strategy: InferStrategy): void {
     this.strategy = strategy;
   }
 
   @trace()
-  evaluateMode(memory: Memory, sessionContext: SessionContext): IPromptMode {
-    let mode: IPromptMode;
+  evaluateMode(memory: Memory, sessionContext: SessionContext): InferMode {
+    let mode: InferMode;
     
     const infer_context = new InferContextBuilder(memory, sessionContext)
       .withRecentMessages()
@@ -53,7 +52,7 @@ export class ReActPromptTemplate<
     return mode;
   }
 
-  setContext(context: IPromptContext): void {
+  setContext(context: InferContext): void {
     this.context = context;
   }
 
@@ -98,6 +97,74 @@ When responding, choose the appropriate path:
       - response_purpose: Either "TOOL_INVOCATION" or "DIRECT_RESPONSE"
       - response_content: The content of your response, formatted according to the requirements of the selected response_purpose.
 
+${this.useExample()}
+    `.trim();
+  }
+
+  private getReActInstructions(types: string, schemas: string): string {
+    return `
+Adopt the Reasoning and Action (ReAct) Analysis Protocol:
+
+1. Thought Process Documentation
+   - Document request comprehension
+   - Outline proposed approach
+   - List key considerations
+   - Identify potential challenges
+
+2. Action Strategy
+   - Break down into specific steps
+   - Document reasoning per step
+   - Identify required tools/resources
+   - Plan validation checkpoints
+
+3. Response Planning
+   Final response will be categorized as:
+   ${types}
+
+4. Response Format
+**MANDATORY RESPONSE FORMAT**
+
+*CRITICAL*: All responses MUST adhere to the following format:
+{
+  "question_nature": "<SIMPLE or COMPLEX>",
+  "context": {
+    "understanding": "<Request interpretation and key points>",
+    "approach": "<Strategy and methodology>",
+    "considerations": ["<Critical factor 1>", "<Critical factor 2>"]
+  },
+  "primary_action": {
+    "response_purpose": "<TOOL_INVOCATION or DIRECT_RESPONSE>",
+    "response_content": ${schemas}
+  },
+  "additional_info": {
+    "results": "<Expected outcomes and deliverables>",
+    "analysis": "<Classification rationale>",
+    "next_steps": ["<Follow-up action 1>", "<Follow-up action 2>"]
+  }
+}
+
+Execution Guidelines:
+- Document each reasoning step
+- Validate tool availability before use
+- Ensure complete context documentation
+- Plan for potential contingencies
+
+*RULES*: All responses MUST adhere to the following rules:
+1. **Structure your response as a valid JSON object**.
+2. **All content MUST be inside the "primary_action.response_content" field**. DO NOT output any content outside of "primary_action.response_content".
+3. The JSON structure must always contain the following fields:
+   - question_nature: Either "SIMPLE" or "COMPLEX"
+   - context: A summary of the user's request and the approach you will take to respond.
+   - primary_action: MUST contain both "response_purpose" and "response_content"
+      - response_purpose: Either "TOOL_INVOCATION" or "DIRECT_RESPONSE"
+      - response_content: The content of your response, formatted according to the requirements of the selected response_purpose.
+
+${this.useExample()}
+    `.trim();
+  }
+
+  private useExample(): string {
+    return `
 **EXAMPLE REQUIRED FORMAT**:
 \`\`\`json
 {
@@ -129,61 +196,6 @@ When responding, choose the appropriate path:
   "additional_info": "Suggestions on travel dates and budget."
 }
 \`\`\`
-    `.trim();
-  }
-
-  private getReActInstructions(types: string, schemas: string): string {
-    return `
-Reasoning and Action (ReAct) Analysis Protocol:
-
-1. Thought Process Documentation
-   - Document request comprehension
-   - Outline proposed approach
-   - List key considerations
-   - Identify potential challenges
-
-2. Action Strategy
-   - Break down into specific steps
-   - Document reasoning per step
-   - Identify required tools/resources
-   - Plan validation checkpoints
-
-3. Response Planning
-   Final response will be categorized as:
-   ${types}
-
-4. Response Format
-{
-  "question_nature": "<SIMPLE or COMPLEX>",
-  "context": {
-    "understanding": "<Request interpretation and key points>",
-    "approach": "<Strategy and methodology>",
-    "considerations": ["<Critical factor 1>", "<Critical factor 2>"]
-  },
-  "primary_action": {
-    "response_purpose": "<TOOL_INVOCATION or DIRECT_RESPONSE>",
-    "response_content": ${schemas}
-  },
-  "additional_info": {
-    "results": "<Expected outcomes and deliverables>",
-    "analysis": "<Classification rationale>",
-    "next_steps": ["<Follow-up action 1>", "<Follow-up action 2>"]
-  }
-}
-
-Execution Guidelines:
-- Document each reasoning step
-- Validate tool availability before use
-- Ensure complete context documentation
-- Plan for potential contingencies
-
-CRITICAL RESPONSE FORMAT REQUIREMENTS:
-1. You MUST structure your response as a valid JSON object
-2. The JSON MUST contain ALL required fields shown in the template below
-3. NEVER output bare content - ALL responses MUST be wrapped in the proper JSON structure
-4. The "primary_action" field is MANDATORY and MUST contain both "response_purpose" and "response_content"
-5. DO NOT use placeholder text like "<...>" in your actual response
-6. If you need to return content, it MUST go inside "response_content", NEVER directly in the response
     `.trim();
   }
 

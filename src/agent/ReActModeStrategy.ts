@@ -1,35 +1,23 @@
-import { IPromptMode } from "../core/IPromptContext";
-import { IPromptContext } from "../core/IPromptContext";
-import { IPromptStrategy } from "../core/IPromptContext";
+import { InferMode } from "../core/InferContext";
+import { InferContext } from "../core/InferContext";
+import { InferStrategy } from "../core/InferContext";
 import { logger } from "../core/Logger";
 
 export type ReActMode = 'react' | 'direct';
-
-export interface TaskContext extends IPromptContext {
-  input: string;
-  previousInteractions?: number;
-  userPreference?: ReActMode;
-  accumulatedContext?: string[];
-  complexity?: number;
-  conversationHistory?: Array<{
-    role: string;
-    content: string;
-  }>;
-}
 
 export interface ComplexityScore {
   score: number;
   reason: string;
 }
 
-export abstract class ReActModeStrategy implements IPromptStrategy {
+export abstract class ReActModeStrategy implements InferStrategy {
   protected complexityThreshold: number = 5;
-  protected currentMode: IPromptMode = {
+  protected currentMode: InferMode = {
     value: 'direct',
     metadata: {}
   };
   
-  abstract evaluateMode(context: TaskContext): ReActMode;
+  abstract evaluateMode(context: InferContext): ReActMode;
   
   protected calculateComplexity(input: string): ComplexityScore {
     return {
@@ -38,14 +26,14 @@ export abstract class ReActModeStrategy implements IPromptStrategy {
     };
   }
 
-  evaluateStrategyMode(context: IPromptContext): IPromptMode {
-    const taskContext: TaskContext = {
+  evaluateStrategyMode(context: InferContext): InferMode {
+    const taskContext: InferContext = {
       ...context,
-      input: context.metadata?.input as string || '',
+      input: context.input as string || '',
       accumulatedContext: context.metadata?.accumulatedContext as string[] || [],
       conversationHistory: context.metadata?.conversationHistory || [],
     };
-
+    logger.debug(`Evaluating mode for context: ${JSON.stringify(taskContext, null, 2)}`);
     const mode = this.evaluateMode(taskContext);
 
     this.currentMode = {
@@ -61,7 +49,7 @@ export abstract class ReActModeStrategy implements IPromptStrategy {
     return this.currentMode;
   }
 
-  getCurrentMode(): IPromptMode {
+  getCurrentMode(): InferMode {
     return this.currentMode;
   }
 }
@@ -78,11 +66,12 @@ export class KeywordBasedStrategy extends ReActModeStrategy {
 
   constructor(config?: PatternConfig) {
     super();
-    this.complexityThreshold = config?.complexityThreshold ?? 5;
+    logger.info(`Use KeywordBasedStrategy`);
+    this.complexityThreshold = config?.complexityThreshold ?? 2;
     
     // Default react patterns
     this.reactPatterns = config?.reactPatterns ?? new Map([
-      [/\b(consider|analyze|determine if|depends on|find the best|calculate)\b/i, 3],
+      [/\b(plan|consider|analyze|determine if|depends on|find the best|calculate)\b/i, 3],
       [/\b(if|might|should|could|depending on)\b/i, 2],
       [/\b(compare|better|best|more efficient|most suitable)\b/i, 2],
       [/\b(balance|trade-off|optimize|constraints)\b/i, 3],
@@ -105,6 +94,8 @@ export class KeywordBasedStrategy extends ReActModeStrategy {
       if (pattern.test(input)) {
         score += value;
         reasons.push(`ReAct pattern "${pattern.source}": +${value}`);
+      } else {
+        logger.debug(`Pattern "${pattern.source}" did not match input: "${input}"`);
       }
     });
 
@@ -112,17 +103,20 @@ export class KeywordBasedStrategy extends ReActModeStrategy {
       if (pattern.test(input)) {
         score -= value;
         reasons.push(`Direct pattern "${pattern.source}": -${value}`);
+      } else {
+        logger.debug(`Pattern "${pattern.source}" did not match input: "${input}"`);
       }
     });
 
+    logger.debug(`Final complexity score: ${score} (${reasons.join(', ')})`);
     return {
       score,
       reason: reasons.join(', ')
     };
   }
 
-  evaluateMode(context: TaskContext): ReActMode {
-    const complexity = this.calculateComplexity(context.input);
+  evaluateMode(context: InferContext): ReActMode {
+    const complexity = this.calculateComplexity(context.input || '');
     logger.debug(`Complexity score: ${complexity.score} (${complexity.reason})`);
     return complexity.score >= this.complexityThreshold ? 'react' : 'direct';
   }
@@ -133,6 +127,7 @@ export class UserPreferenceStrategy extends ReActModeStrategy {
   
   constructor(preference: ReActMode) {
     super();
+    logger.debug(`Use UserPreferenceStrategy`);
     this.preference = preference;
     // Set the currentMode based on preference immediately
     this.currentMode = {
@@ -141,7 +136,7 @@ export class UserPreferenceStrategy extends ReActModeStrategy {
     };
   }
 
-  evaluateMode(context: TaskContext): ReActMode {
+  evaluateMode(context: InferContext): ReActMode {
     return this.preference;
   }
 }
@@ -149,7 +144,12 @@ export class UserPreferenceStrategy extends ReActModeStrategy {
 export class AutoSwitchingStrategy extends ReActModeStrategy {
   private contextThreshold = 3;
   
-  evaluateMode(context: TaskContext): ReActMode {
+  constructor() {
+    super();
+    logger.debug(`Use AutoSwitchingStrategy`);
+  }
+
+  evaluateMode(context: InferContext): ReActMode {
     const hasSubstantialContext = context.accumulatedContext && 
                                  context.accumulatedContext.length >= this.contextThreshold;
     
@@ -158,7 +158,7 @@ export class AutoSwitchingStrategy extends ReActModeStrategy {
       return 'direct';
     }
 
-    const complexity = this.calculateComplexity(context.input);
+    const complexity = this.calculateComplexity(context.input || '');
     return complexity.score >= this.complexityThreshold ? 'react' : 'direct';
   }
 }
@@ -175,7 +175,7 @@ export class ReActModeSelector {
     this.strategy = strategy;
   }
 
-  evaluateMode(context: TaskContext): ReActMode {
+  evaluateMode(context: InferContext): ReActMode {
     this.mode = this.strategy.evaluateMode(context);
     return this.mode;
   }

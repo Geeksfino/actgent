@@ -1,4 +1,4 @@
-import { IPromptContext } from './IPromptContext';
+import { InferContext } from './InferContext';
 import { IAgentPromptTemplate } from './IPromptTemplate';
 import { Memory } from './Memory';
 import { SessionContext } from './SessionContext'; 

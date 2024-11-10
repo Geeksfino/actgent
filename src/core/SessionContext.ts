@@ -76,6 +76,10 @@ export class SessionContext {
         }));
       }
 
+      public getLatestMessage(): Message {
+        return this.messages[this.messages.length - 1];
+      }
+
       private determineMessageRole(message: Message): "system" | "user" | "assistant" {
         // Assuming messages from the agent/AI will have "agent" or "assistant" in the sender field
         const sender = message.metadata?.sender.toLowerCase() || '';
