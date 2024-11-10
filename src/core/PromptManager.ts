@@ -29,14 +29,14 @@ export class PromptManager {
     this.instructions = instructions;
   }
 
-  public getSystemPrompt(sessionContext: SessionContext, memory: Memory): string {
-    //const instructions = this.instructions ? Array.from(this.instructions.values()).join('\n') : '';
-    // return this.renderPrompt(null, this.promptTemplate.getSystemPrompt(), { goal: this.goal, capabilities: this.capabilities, role: this.role, instructions: instructions });
-    return this.renderPrompt(sessionContext, this.promptTemplate.getSystemPrompt(sessionContext, memory), { goal: this.goal, capabilities: this.capabilities, role: this.role });
+  public async getSystemPrompt(sessionContext: SessionContext, memory: Memory): Promise<string> {
+    const systemPrompt = await this.promptTemplate.getSystemPrompt(sessionContext, memory);
+    return this.renderPrompt(sessionContext, systemPrompt, { goal: this.goal, capabilities: this.capabilities, role: this.role });
   }
 
-  public getAssistantPrompt(sessionContext: SessionContext, memory: Memory): string {
-    return this.renderPrompt(sessionContext, this.promptTemplate.getAssistantPrompt(sessionContext, memory), {});
+  public async getAssistantPrompt(sessionContext: SessionContext, memory: Memory): Promise<string> {
+    const assistantPrompt = await this.promptTemplate.getAssistantPrompt(sessionContext, memory);
+    return this.renderPrompt(sessionContext, assistantPrompt, {});
   }
 
   public getUserPrompt(sessionContext: SessionContext | null, message: string, variables: { [key: string]: string }): string {

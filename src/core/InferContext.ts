@@ -14,6 +14,6 @@ export interface InferContext {
 }
 
 export interface InferStrategy {
-  evaluateStrategyMode(context: InferContext): InferMode;
+  evaluateStrategyMode(context: InferContext): Promise<InferMode>;
   getCurrentMode(): InferMode;
 }

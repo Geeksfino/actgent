@@ -275,8 +275,10 @@ export class AgentCore {
       //     )
       //   )
       // );
-      logger.trace(this.promptTemplate.debugPrompt(this.promptManager, "system", sessionContext, this.memory));
-      logger.trace(this.promptTemplate.debugPrompt(this.promptManager, "assistant", sessionContext, this.memory));
+      const systemDebugPrompt = await this.promptTemplate.debugPrompt(this.promptManager, "system", sessionContext, this.memory);
+      const assistantDebugPrompt = await this.promptTemplate.debugPrompt(this.promptManager, "assistant", sessionContext, this.memory);
+      logger.trace(systemDebugPrompt);
+      logger.trace(assistantDebugPrompt);
       logger.trace(message.sessionId, "<------ Resolved prompt ------->");
     }
 
@@ -297,9 +299,12 @@ export class AgentCore {
       const formattedHistory = AgentCore.formatHistory(history);
       logger.warning(`History:\n${formattedHistory}`);
 
+      const systemPrompt = await this.promptManager.getSystemPrompt(sessionContext, this.memory);
+      const assistantPrompt = await this.promptManager.getAssistantPrompt(sessionContext, this.memory);
+
       const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-        { role: "system", content: this.promptManager.getSystemPrompt(sessionContext, this.memory) },
-        { role: "assistant", content: this.promptManager.getAssistantPrompt(sessionContext, this.memory) },
+        { role: "system", content: systemPrompt },
+        { role: "assistant", content: assistantPrompt },
         ...history,
         // {
         //   role: "user",

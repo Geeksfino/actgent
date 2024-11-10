@@ -24,6 +24,8 @@
     "bottleneck": "^2.19.5",
     "bree": "^9.2.4",
     "cheerio": "^1.0.0",
+    "cld3": "^2.0.6",
+    "cld3-asm": "^4.0.0",
     "commander": "^12.1.0",
     "dotenv": "^16.4.5",
     "gray-matter": "^4.0.3",

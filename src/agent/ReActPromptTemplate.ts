@@ -34,7 +34,7 @@ export class ReActPromptTemplate<
   }
 
   @trace()
-  evaluateMode(memory: Memory, sessionContext: SessionContext): InferMode {
+  async evaluateMode(memory: Memory, sessionContext: SessionContext): Promise<InferMode> {
     let mode: InferMode;
     
     const infer_context = new InferContextBuilder(memory, sessionContext)
@@ -43,7 +43,7 @@ export class ReActPromptTemplate<
     //logger.debug(`Infer context: ${JSON.stringify(infer_context, null, 2)}`);
     
     if (infer_context) {
-      mode = this.strategy.evaluateStrategyMode(infer_context);
+      mode = await this.strategy.evaluateStrategyMode(infer_context);
     } else {
       mode = this.strategy.getCurrentMode();
     }
@@ -56,8 +56,8 @@ export class ReActPromptTemplate<
     this.context = context;
   }
 
-  getAssistantPrompt(sessionContext: SessionContext, memory: Memory): string {
-    const mode = this.evaluateMode(memory, sessionContext);
+  async getAssistantPrompt(sessionContext: SessionContext, memory: Memory): Promise<string> {
+    const mode = await this.evaluateMode(memory, sessionContext);
     const { types, schemas } = this.getFormattedSchemas();
 
     const instruction = mode.value === 'direct' ? 
@@ -199,8 +199,8 @@ ${this.useExample()}
     `.trim();
   }
 
-  getSystemPrompt(sessionContext: SessionContext, memory: Memory): string {
-    const mode = this.evaluateMode(memory, sessionContext);
+  async getSystemPrompt(sessionContext: SessionContext, memory: Memory): Promise<string> {
+    const mode = await this.evaluateMode(memory, sessionContext);
     
     const base_prompt = `
 You are designated as: {role}
@@ -383,8 +383,10 @@ The final prompt you output should adhere to the following structure below. Do n
     return this.classificationTypes;
   }
 
-  public debugPrompt(promptManager: PromptManager, type: "system" | "assistant", sessionContext: SessionContext, memory: Memory): string {
-    const prompt = type === "system" ? promptManager.getSystemPrompt(sessionContext, memory) : promptManager.getAssistantPrompt(sessionContext, memory);
+  public async debugPrompt(promptManager: PromptManager, type: "system" | "assistant", sessionContext: SessionContext, memory: Memory): Promise<string> {
+    const prompt = type === "system" 
+      ? await promptManager.getSystemPrompt(sessionContext, memory) 
+      : await promptManager.getAssistantPrompt(sessionContext, memory);
     return this.parsePrompt(prompt);
   }
 
