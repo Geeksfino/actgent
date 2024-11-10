@@ -34,7 +34,7 @@ export abstract class ReActModeStrategy implements InferStrategy {
       accumulatedContext: context.metadata?.accumulatedContext as string[] || [],
       conversationHistory: context.metadata?.conversationHistory || [],
     };
-    logger.debug(`Evaluating mode for context: ${JSON.stringify(taskContext, null, 2)}`);
+    logger.trace(`Evaluating mode for context: ${JSON.stringify(taskContext, null, 2)}`);
     const mode = await this.evaluateMode(taskContext);
 
     this.currentMode = {
@@ -120,7 +120,7 @@ export class KeywordBasedStrategy extends ReActModeStrategy {
         score += value;
         reasons.push(`ReAct pattern "${pattern.source}": +${value}`);
       } else {
-        logger.debug(`Pattern "${pattern.source}" did not match input: "${input}"`);
+        logger.trace(`Pattern "${pattern.source}" did not match input: "${input}"`);
       }
     });
 
@@ -129,7 +129,7 @@ export class KeywordBasedStrategy extends ReActModeStrategy {
         score -= value;
         reasons.push(`Direct pattern "${pattern.source}": -${value}`);
       } else {
-        logger.debug(`Pattern "${pattern.source}" did not match input: "${input}"`);
+        logger.trace(`Pattern "${pattern.source}" did not match input: "${input}"`);
       }
     });
 

@@ -33,7 +33,7 @@ export class ReActPromptTemplate<
     this.strategy = strategy;
   }
 
-  @trace()
+  //@trace()
   async evaluateMode(memory: Memory, sessionContext: SessionContext): Promise<InferMode> {
     let mode: InferMode;
     
