@@ -1,6 +1,6 @@
 import { AgentBuilder } from "@finogeeks/actgent/agent";
-import { AgentServiceConfigurator } from "@finogeeks/actgent/helpers";
-import { AgentCoreConfigurator } from "@finogeeks/actgent/helpers";
+import { AgentServiceConfigurator, AgentCoreConfigurator, KeywordBasedStrategyBuilder } from "@finogeeks/actgent/helpers";
+import { AutoSwitchingStrategy, KeywordBasedStrategy, UserPreferenceStrategy } from "../../dist/agent/ReActModeStrategy";
 import path from 'path';
 
 // Import tools
@@ -12,7 +12,10 @@ const agentConfig = await AgentCoreConfigurator.loadMarkdownConfig(configPath);
 
 // Load the agent runtime environment from the project root
 const svcConfig = AgentServiceConfigurator.getAgentConfiguration("./");
-const ${name} = new AgentBuilder(agentConfig, svcConfig).create();
+const promptStrategy = await KeywordBasedStrategyBuilder.buildStrategy();
+const ${name} = new AgentBuilder(agentConfig, svcConfig)
+    .withPromptStrategy(promptStrategy)
+    .create();
 
 // Register tools
 ${toolRegistrations}

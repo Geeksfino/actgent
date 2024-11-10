@@ -8,14 +8,15 @@ import { program } from 'commander';
 
 // Configure command line options
 program
-  .option('--log-level <level>', 'set logging level (DEBUG, INFO, WARNING, ERROR)', 'INFO')
+  .option('--log-level <level>', 'set logging level (trace, debug, info, warn, error, fatal)', 'info')
   .parse();
 
 const options = program.opts();
+logger.setLevel(options.logLevel.toLowerCase() as LogLevel);
+
 const loggerConfig: LoggingConfig = {
   destination: path.join(process.cwd(), `${${name}.getName()}.log`)
 };
-logger.setLevel(Logger.parseLogLevel(options.logLevel));
 
 // Create readline interface
 const rl = readline.createInterface({
