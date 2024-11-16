@@ -4,17 +4,42 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
-    ".": "./dist/index.js",
-    "./core": "./dist/core/index.js",
-    "./agent": "./dist/agent/index.js",
-    "./helpers": "./dist/helpers/index.js",
-    "./tools": "./dist/tools/index.js"
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./helpers": {
+      "import": "./dist/helpers/index.js",
+      "require": "./dist/helpers/index.js",
+      "types": "./dist/helpers/index.d.ts"
+    },
+    "./agent": {
+      "import": "./dist/agent/index.js",
+      "require": "./dist/agent/index.js",
+      "types": "./dist/agent/index.d.ts"
+    },
+    "./core": {
+      "import": "./dist/core/index.js",
+      "require": "./dist/core/index.js",
+      "types": "./dist/core/index.d.ts"
+    },
+    "./tools": {
+      "import": "./dist/tools/index.js",
+      "require": "./dist/tools/index.js",
+      "types": "./dist/tools/index.d.ts"
+    }
   },
+  "files": [
+    "dist/**/*"
+  ],
   "scripts": {
-    "build": "tsc",
-    "watch": "tsc --watch"
+    "build": "bun tsc && bun cpx \"src/helpers/genesis/**/*.{md,json,yaml}\" dist/helpers/genesis/",
+    "watch:ts": "bun tsc --watch",
+    "watch:resources": "bun cpx \"src/helpers/genesis/**/*.{md,json,yaml}\" dist/helpers/genesis/ --watch",
+    "watch": "bun run watch:ts & bun run watch:resources"
   },
-  "dependencies": {
+  "dependencies": { 
     "@grpc/grpc-js": "^1.11.3",
     "@types/bun": "^1.1.13",
     "@types/js-yaml": "^4.0.9",
@@ -50,6 +75,7 @@
   },
   "devDependencies": {
     "bun-types": "^1.1.29",
+    "cpx2": "^8.0.0",
     "sqlite3": "^5.1.7",
     "vitest": "^2.1.4"
   },

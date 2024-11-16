@@ -7,15 +7,16 @@ import os from "os";
 import { program } from 'commander';
 
 // Configure command line options
+
 program
-  .option('--log-level <level>', 'set logging level (DEBUG, INFO, WARNING, ERROR)', 'INFO')
+  .option('--log-level <level>', 'set logging level (trace, debug, info, warn, error, fatal)', 'info')
   .parse();
 
 const options = program.opts();
 const loggerConfig: LoggingConfig = {
   destination: path.join(process.cwd(), `${AgentSmith.getName()}.log`)
 };
-logger.setLevel(Logger.parseLogLevel(options.logLevel));
+logger.setLevel(options.logLevel.toLowerCase() as LogLevel);
 
 // Create readline interface
 const rl = readline.createInterface({
