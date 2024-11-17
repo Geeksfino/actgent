@@ -1,17 +1,18 @@
-import fs from 'fs/promises';
-import path from 'path';
 import matter from 'gray-matter';
 import { AgentCoreConfig, Instruction } from '../core/configs';
 import { logger } from '../core/Logger';
+import { createRuntime } from '../runtime';
+import { Runtime } from '../runtime/types';
 
 export class AgentCoreConfigurator {
-  private static  DEFAULT_CONFIG = "config.md";
+  private static DEFAULT_CONFIG = "config.md";
+  private static runtime: Runtime = createRuntime();
 
   public static async loadMarkdownConfig(configPath?: string): Promise<AgentCoreConfig> {
-    const currentDir = process.cwd();
-    const defaultConfigPath = path.join(currentDir, this.DEFAULT_CONFIG);
+    const currentDir = await this.runtime.process.cwd();
+    const defaultConfigPath = this.runtime.path.join(currentDir, this.DEFAULT_CONFIG);
     const filePath = configPath || defaultConfigPath;
-    const fileContent = await fs.readFile(filePath, 'utf-8');
+    const fileContent = await this.runtime.fs.readFile(filePath, 'utf-8');
     
     // Parse the front matter
     const { data, content } = matter(fileContent);
@@ -28,17 +29,17 @@ export class AgentCoreConfigurator {
     // Process instructions if present
     if (data.instructions) {
       for (const [name, instructionPath] of Object.entries(data.instructions)) {
-        const fullPath = path.join(path.dirname(filePath), instructionPath as string);
+        const fullPath = this.runtime.path.join(this.runtime.path.dirname(filePath), instructionPath as string);
 
-        const instructionContent = await fs.readFile(fullPath, 'utf-8');
-        const { data, content } = matter(instructionContent);
+        const instructionContent = await this.runtime.fs.readFile(fullPath, 'utf-8');
+        const { data: instructionData, content } = matter(instructionContent);
 
         let schemaTemplate: string | null = null;
-        const schemaTemplatePath = data.schemaTemplate;
+        const schemaTemplatePath = instructionData.schemaTemplate;
         if (schemaTemplatePath) {
-          const fullSchemaTemplatePath = path.join(path.dirname(fullPath), schemaTemplatePath as string);
+          const fullSchemaTemplatePath = this.runtime.path.join(this.runtime.path.dirname(fullPath), schemaTemplatePath as string);
 
-          schemaTemplate = await fs.readFile(fullSchemaTemplatePath, 'utf-8');
+          schemaTemplate = await this.runtime.fs.readFile(fullSchemaTemplatePath, 'utf-8');
           if (!schemaTemplate) {
             throw new Error(`Schema template file ${schemaTemplatePath} not found`);
           } else {
@@ -60,10 +61,10 @@ export class AgentCoreConfigurator {
         
         config.instructions?.push(instruction);
 
-        if (data.tool) {
-          logger.info(`Instruction "${name}" tool map:`, data.tool);
+        if (instructionData.tool) {
+          logger.info(`Instruction "${name}" tool map:`, instructionData.tool);
           config.instructionToolMap = config.instructionToolMap || {};
-          config.instructionToolMap[name] = data.tool;
+          config.instructionToolMap[name] = instructionData.tool;
         }
       }
     }
@@ -86,4 +87,3 @@ export class AgentCoreConfigurator {
     };
   }
 }
-
