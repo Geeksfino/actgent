@@ -14,11 +14,11 @@ const configPath = path.join(__dirname, 'brain.md');
 const agentConfig = await AgentCoreConfigurator.loadMarkdownConfig(configPath);
 
 const currentDir = process.cwd();
-const svcConfig = AgentServiceConfigurator.getAgentConfiguration("src/helpers/genesis");
+const svcConfig = await AgentServiceConfigurator.getAgentConfiguration("src/helpers/genesis");
 const AgentSmith = new AgentBuilder(agentConfig, svcConfig).create();
 
 // Register the AgentGenerator tool
-AgentSmith.registerTool(new AgentGenerator());
+AgentSmith.registerTool(new AgentGenerator()); 
 
 interface ToolInfo {
     name: string;

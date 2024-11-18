@@ -1,7 +1,8 @@
 import fs from 'fs/promises';
-import path from 'path';
-import os from 'os';
+import { createRuntime } from '../../../runtime';
 import { Instruction } from '../../../core/configs';
+
+const runtime = createRuntime();
 
 export interface AgentScaffoldOptions {
     name: string;
@@ -33,8 +34,8 @@ async function copyDirectory(src: string, dest: string) {
     
     // Copy each entry
     for (const entry of entries) {
-        const srcPath = path.join(src, entry.name);
-        const destPath = path.join(dest, entry.name);
+        const srcPath = runtime.path.join(src, entry.name);
+        const destPath = runtime.path.join(dest, entry.name);
         
         if (entry.isDirectory()) {
             await copyDirectory(srcPath, destPath);
@@ -46,24 +47,27 @@ async function copyDirectory(src: string, dest: string) {
 
 async function generateAgentScaffold({ name, role, goal, capabilities, instructions, tools = [], outputDir }: AgentScaffoldOptions) {
     // Handle tilde expansion
-    outputDir = outputDir.replace(/^~/, os.homedir());
+    const homeDir = await runtime.os.homedir();
+    outputDir = outputDir.replace(/^~/, homeDir);
     console.log(`Scaffold output directory: ${outputDir}`);
     console.log(`Scaffold agent name: ${name}`);
-    const agentDir = path.join(outputDir, name);
+
+    // Create the agent directory
+    const agentDir = runtime.path.join(outputDir, name);
+    await fs.mkdir(agentDir, { recursive: true });
 
     // Create main directory and instructions subdirectory
-    await fs.mkdir(agentDir, { recursive: true });
-    await fs.mkdir(path.join(agentDir, 'instructions'), { recursive: true });
-    await fs.mkdir(path.join(agentDir, 'conf'), { recursive: true });
+    await fs.mkdir(runtime.path.join(agentDir, 'instructions'), { recursive: true });
+    await fs.mkdir(runtime.path.join(agentDir, 'conf'), { recursive: true });
 
     // Template paths
-    const templatesDir = path.join(__dirname, 'scaffold-template');
-    const agentCodeTemplate = path.join(templatesDir, 'agentcode-template.md');
-    const runnerTemplate = path.join(templatesDir, 'runner-template.md');
-    const configTemplate = path.join(templatesDir, 'brain-template.md');
-    const envTemplate = path.join(templatesDir, 'env-template.md');
-    const dbConfig = path.join(templatesDir, 'database.yml');
-    const instructionsDir = path.join(templatesDir, 'instructions');
+    const templatesDir = runtime.path.join(__dirname, 'scaffold-template');
+    const agentCodeTemplate = runtime.path.join(templatesDir, 'agentcode-template.md');
+    const runnerTemplate = runtime.path.join(templatesDir, 'runner-template.md');
+    const configTemplate = runtime.path.join(templatesDir, 'brain-template.md');
+    const envTemplate = runtime.path.join(templatesDir, 'env-template.md');
+    const dbConfig = runtime.path.join(templatesDir, 'database.yml');
+    const instructionsDir = runtime.path.join(templatesDir, 'instructions');
 
     // Verify instructions template directory exists
     try {
@@ -100,15 +104,15 @@ async function generateAgentScaffold({ name, role, goal, capabilities, instructi
 
     // Write files first
     await Promise.all([
-        fs.writeFile(path.join(agentDir, `${name}.ts`), agentCode),
-        fs.writeFile(path.join(agentDir, 'brain.md'), configMd),
-        fs.writeFile(path.join(agentDir, 'index.ts'), indexCode),
-        fs.writeFile(path.join(agentDir, '.agent.env'), envContent),
-        fs.copyFile(dbConfig, path.join(agentDir, 'conf', 'database.yml')),
+        fs.writeFile(runtime.path.join(agentDir, `${name}.ts`), agentCode),
+        fs.writeFile(runtime.path.join(agentDir, 'brain.md'), configMd),
+        fs.writeFile(runtime.path.join(agentDir, 'index.ts'), indexCode),
+        fs.writeFile(runtime.path.join(agentDir, '.agent.env'), envContent),
+        fs.copyFile(dbConfig, runtime.path.join(agentDir, 'conf', 'database.yml')),
     ]);
 
     // Create instructions directory
-    const agentInstructionsDir = path.join(agentDir, 'instructions');
+    const agentInstructionsDir = runtime.path.join(agentDir, 'instructions');
     await fs.mkdir(agentInstructionsDir, { recursive: true });
 
     // Process each instruction
@@ -122,14 +126,14 @@ schemaTemplate: "${name}.json"
 ---
 ${description}`;
         await fs.writeFile(
-            path.join(agentInstructionsDir, `${name}.md`),
+            runtime.path.join(agentInstructionsDir, `${name}.md`),
             mdContent
         );
 
         // Create schema JSON file if template exists
         if (schemaTemplate) {
             await fs.writeFile(
-                path.join(agentInstructionsDir, `${name}.json`),
+                runtime.path.join(agentInstructionsDir, `${name}.json`),
                 JSON.stringify(schemaTemplate, null, 2)
             );
         }
@@ -139,7 +143,7 @@ ${description}`;
     await copyDirectory(instructionsDir, agentInstructionsDir);
 
     // After generating instruction files, update brain.md with instructions
-    const configPath = path.join(agentDir, 'brain.md');
+    const configPath = runtime.path.join(agentDir, 'brain.md');
     let configContent = await fs.readFile(configPath, 'utf-8');
     
     // Format custom instructions in "name": "path" format with consistent 4-space indentation

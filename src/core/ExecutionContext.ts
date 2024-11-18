@@ -1,6 +1,4 @@
-import os from "os";
-import path from "path";
-import fs from "fs";
+import { Runtime, createRuntime } from "../runtime";
 
 export interface LocalEnvironment {
   osType?: string; // OS type (e.g., 'Linux', 'Windows')
@@ -16,13 +14,21 @@ export interface ToolPreference {
 
 // Execution context passed to tools
 export class ExecutionContext {
-  environment: LocalEnvironment; // Environment-specific data
-  toolPreferences: Map<string, ToolPreference>; // Changed from optional to required
+  environment: LocalEnvironment;
+  toolPreferences: Map<string, ToolPreference>;
   private static instance: ExecutionContext;
+  private runtime: Runtime;
 
   constructor() {
-    this.environment = ExecutionContext.initEnvironment();
+    this.runtime = createRuntime();
+    // Initialize with empty paths - will be set properly by initEnvironment
+    this.environment = {
+      outputDirectory: '',
+      tempDirectory: ''
+    };
     this.toolPreferences = new Map<string, ToolPreference>();
+    // Initialize environment synchronously with runtime APIs
+    this.initEnvironmentSync();
   }
 
   public static getInstance(): ExecutionContext {
@@ -32,34 +38,40 @@ export class ExecutionContext {
     return ExecutionContext.instance;
   }
 
-  private static initEnvironment(): LocalEnvironment {
-    // Auto-detect OS
-    const osType =
-      os.platform() === "win32"
-        ? "Windows"
-        : os.platform() === "darwin"
-          ? "MacOS"
-          : "Linux";
+  private initEnvironmentSync() {
+    // Use runtime.process.env for immediate access to environment variables
+    const homeDir = this.runtime.process.env.HOME || this.runtime.process.env.USERPROFILE || '';
+    const tmpDir = this.runtime.process.env.TEMP || this.runtime.process.env.TMP || '/tmp';
+    const platform = this.runtime.process.platform;
 
-    // Set up default directories based on OS
-    const baseDir = os.homedir();
-    const outputDirectory = path.join(baseDir, "tools-output");
-    const tempDirectory = path.join(os.tmpdir(), "tools-temp");
+    const osType = platform === "win32" ? "Windows" 
+                 : platform === "darwin" ? "MacOS" 
+                 : "Linux";
 
-    // Ensure directories exist
-    try {
-      fs.mkdirSync(outputDirectory, { recursive: true });
-      fs.mkdirSync(tempDirectory, { recursive: true });
-    } catch (error) {
-      console.error(`Error creating directories: ${error}`);
-    }
-
-    return {
+    this.environment = {
       osType,
-      outputDirectory,
-      tempDirectory,
-      apiKeys: {}, // Initialize empty API keys object
+      outputDirectory: this.runtime.path.join(homeDir, "tools-output"),
+      tempDirectory: this.runtime.path.join(tmpDir, "tools-temp"),
+      apiKeys: {}
     };
+
+    // Create directories asynchronously but don't block initialization
+    this.ensureDirectories().catch(error => {
+      console.error(`Error creating directories: ${error}`);
+    });
+  }
+
+  private async ensureDirectories() {
+    await this.runtime.fs.mkdir(this.environment.outputDirectory, { recursive: true });
+    await this.runtime.fs.mkdir(this.environment.tempDirectory, { recursive: true });
+  }
+
+  public setEnvironment(env: Partial<LocalEnvironment>) {
+    this.environment = { ...this.environment, ...env };
+    // Ensure directories exist for new paths
+    this.ensureDirectories().catch(error => {
+      console.error(`Error creating directories after environment update: ${error}`);
+    });
   }
 
   public addToolPreference(toolName: string, options?: Record<string, any>) {

@@ -35,11 +35,11 @@
   ],
   "scripts": {
     "build": "bun tsc && bun cpx \"src/helpers/genesis/**/*.{md,json,yaml}\" dist/helpers/genesis/",
-    "watch:ts": "bun tsc --watch",
+    "watch:ts": "bun tsc-watch",
     "watch:resources": "bun cpx \"src/helpers/genesis/**/*.{md,json,yaml}\" dist/helpers/genesis/ --watch",
-    "watch": "bun run watch:ts & bun run watch:resources"
+    "watch": "bun concurrently \"bun run watch:ts\" \"bun run watch:resources\""
   },
-  "dependencies": { 
+  "dependencies": {
     "@grpc/grpc-js": "^1.11.3",
     "@tauri-apps/api": "^2.1.1",
     "@tauri-apps/plugin-fs": "^2.0.2",
@@ -80,8 +80,10 @@
   },
   "devDependencies": {
     "bun-types": "^1.1.29",
+    "concurrently": "^9.1.0",
     "cpx2": "^8.0.0",
     "sqlite3": "^5.1.7",
+    "tsc-watch": "^6.2.1",
     "vitest": "^2.1.4"
   },
   "peerDependencies": {

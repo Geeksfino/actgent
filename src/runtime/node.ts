@@ -60,9 +60,9 @@ export class NodeFileSystem implements FileSystem {
     }
   }
 
-  async mkdir(path: string): Promise<void> {
+  async mkdir(path: string, options?: { recursive?: boolean }): Promise<void> {
     try {
-      await fs.mkdir(path, { recursive: true });
+      await fs.mkdir(path, { recursive: options?.recursive ?? true });
     } catch (e) {
       throw new RuntimeError('Failed to create directory', 'EMKDIR', e);
     }

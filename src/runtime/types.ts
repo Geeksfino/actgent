@@ -44,7 +44,7 @@ export interface FileSystem {
   writeFile(path: string, data: string, encoding?: BufferEncoding): Promise<void>;
   readDir(path: string): Promise<string[]>;
   exists(path: string): Promise<boolean>;
-  mkdir(path: string): Promise<void>;
+  mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
   rm(path: string, options?: { recursive?: boolean }): Promise<void>;
   stat(path: string): Promise<FileStat>;
   watch(path: string, callback: (event: string, filename: string | null) => void): void;

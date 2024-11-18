@@ -2,21 +2,17 @@ import { LoggingConfig } from "../../core/configs";
 import { AgentSmith, AvailableTools } from './AgentSmith';
 import { Logger, logger, LogLevel} from '../../core/Logger';
 import readline from 'readline';
-import path from "path";
-import os from "os";
+import { createRuntime } from "../../runtime";
 import { program } from 'commander';
 
 // Configure command line options
+const runtime = createRuntime();
 
 program
   .option('--log-level <level>', 'set logging level (trace, debug, info, warn, error, fatal)', 'info')
   .parse();
 
 const options = program.opts();
-const loggerConfig: LoggingConfig = {
-  destination: path.join(process.cwd(), `${AgentSmith.getName()}.log`)
-};
-logger.setLevel(options.logLevel.toLowerCase() as LogLevel);
 
 // Create readline interface
 const rl = readline.createInterface({
@@ -28,15 +24,26 @@ AgentSmith.registerStreamCallback((delta: string) => {
   logger.info(delta);
 });
 
-const executionContext = AgentSmith.getExecutionContext();
-executionContext.environment = {
-  outputDirectory: path.join(process.cwd(), "generated-agents"),
-  tempDirectory: path.join(os.tmpdir(), "generated-agents-temp")
-};
-executionContext.addToolPreference("AgentGenerator", {
-  agentName: ''  
-});
-AgentSmith.run(loggerConfig);
+// Initialize asynchronously
+async function initializeAgent() {
+  const cwd = await runtime.process.cwd();
+  const tmpdir = await runtime.os.tmpdir();
+
+  const loggerConfig: LoggingConfig = {
+    destination: runtime.path.join(cwd, `${AgentSmith.getName()}.log`)
+  };
+  logger.setLevel(options.logLevel.toLowerCase() as LogLevel);
+
+  const executionContext = AgentSmith.getExecutionContext();
+  executionContext.environment = {
+    outputDirectory: runtime.path.join(cwd, "generated-agents"),
+    tempDirectory: runtime.path.join(tmpdir, "generated-agents-temp")
+  };
+  executionContext.addToolPreference("AgentGenerator", {
+    agentName: ''  
+  });
+  AgentSmith.run(loggerConfig);
+}
 
 // Add prompt configuration near the top, after other configurations
 const defaultPrompt = "You: ";
@@ -210,6 +217,7 @@ async function chatLoop(): Promise<void> {
         }
       } while (agentName.trim() === '');
       
+      const executionContext = AgentSmith.getExecutionContext();
       executionContext.addToolPreference("AgentGenerator", {
         agentName: agentName
       });
@@ -327,4 +335,9 @@ async function chatLoop(): Promise<void> {
   }
 }
 
-chatLoop();
+initializeAgent().then(() => {
+  chatLoop();
+}).catch(error => {
+  console.error('Failed to initialize agent:', error);
+  process.exit(1);
+});

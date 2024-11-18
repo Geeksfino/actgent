@@ -35,8 +35,8 @@ export class TauriRuntime implements Runtime {
       return await exists(path);
     },
 
-    async mkdir(path: string): Promise<void> {
-      await mkdir(path, { recursive: true });
+    async mkdir(path: string, options?: { recursive?: boolean }): Promise<void> {
+      await mkdir(path, { recursive: options?.recursive ?? true });
     },
 
     async rm(path: string, options?: { recursive?: boolean }): Promise<void> {
