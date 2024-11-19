@@ -2,18 +2,29 @@ import 'reflect-metadata';
 import { AgentBuilder } from "../../agent";
 import { AgentServiceConfigurator } from "../AgentServiceConfigurator";
 import { AgentCoreConfigurator } from "../AgentCoreConfigurator";
-import path from 'path';
 import { Tool, ToolOptions } from "../../core/Tool";
 import { AgentGenerator } from "./tools/creation-tool";
-// Import all available tools
 import * as BuiltInTools from "../../tools";
 import { z } from "zod";
+import { createRuntime } from "../../runtime";
+import { RuntimeType } from "../../runtime/types";
+
+const runtime = createRuntime();
 
 // Load the agent configuration from a markdown file
-const configPath = path.join(__dirname, 'brain.md');
+let configPath: string;
+if (runtime.runtimeType === RuntimeType.NODE) {
+  const moduleDir = runtime.path.dirname(require.resolve('./AgentSmith'));
+  configPath = runtime.path.join(moduleDir, 'brain.md');
+} else {
+  // Tauri/browser environment
+  const moduleDir = runtime.path.dirname(new URL(import.meta.url).pathname);
+  configPath = runtime.path.join(moduleDir, 'brain.md');
+}
+
 const agentConfig = await AgentCoreConfigurator.loadMarkdownConfig(configPath);
 
-const currentDir = process.cwd();
+const currentDir = await runtime.process.cwd();
 const svcConfig = await AgentServiceConfigurator.getAgentConfiguration("src/helpers/genesis");
 const AgentSmith = new AgentBuilder(agentConfig, svcConfig).create();
 
@@ -103,7 +114,7 @@ function printToolInfo(tools: ToolInfo[]) {
   });
 }
 
-// Use it after getting available tools
+// Get available tools
 const AvailableTools = Object.entries(BuiltInTools as Record<string, unknown>)
   .filter(([_, value]) => isToolConstructor(value))
   .map(([name, ToolClass]) => getToolInfo(name, ToolClass as ToolConstructor))
