@@ -100,7 +100,13 @@ export interface SpawnResult {
   exitCode: number;
 }
 
+export enum RuntimeType {
+  NODE = 'node',
+  TAURI = 'tauri'
+}
+
 export interface Runtime {
+  runtimeType: RuntimeType;
   fs: FileSystem;
   path: Path;
   os: OS;

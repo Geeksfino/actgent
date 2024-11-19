@@ -2,6 +2,8 @@ import pino from 'pino';
 import path from 'path';
 import pinoPretty from "pino-pretty";
 import { LoggingConfig } from './configs';
+import { createRuntime } from '../runtime';
+import { RuntimeType } from '../runtime/types';
 
 // Use Pino's levels directly
 export enum LogLevel {
@@ -22,27 +24,75 @@ const prettyPrintOptions: pinoPretty.PrettyOptions = {
     customColors: 'trace:gray,debug:yellow,info:green,warn:blue,error:red,fatal:magenta'
 };
 
+// Custom transport for Tauri logging
+const tauriTransport = {
+    target: 'pino/file',
+    options: {
+        ...prettyPrintOptions,
+        destination: 1, // stdout
+        transform: async (obj: any) => {
+            const runtime = createRuntime();
+            // Only process if we're in Tauri environment
+            if (runtime.runtimeType === RuntimeType.TAURI) {
+                const { trace, debug, info, warn, error } = await import('@tauri-apps/plugin-log');
+                const msg = obj.msg;
+                switch (obj.level) {
+                    case 10: // trace
+                        await trace(msg);
+                        break;
+                    case 20: // debug
+                        await debug(msg);
+                        break;
+                    case 30: // info
+                        await info(msg);
+                        break;
+                    case 40: // warn
+                        await warn(msg);
+                        break;
+                    case 50: // error
+                    case 60: // fatal
+                        await error(msg);
+                        break;
+                }
+            }
+            return obj;
+        }
+    }
+};
+
 export class Logger {
     private static instance: Logger;
     private logger: pino.Logger;
     private currentOptions: pinoPretty.PrettyOptions;
-    private currentLevel: LogLevel = LogLevel.WARNING; // Track current level
+    private currentLevel: LogLevel = LogLevel.WARNING;
+    private runtime = createRuntime();
 
     private constructor() {
         this.currentOptions = prettyPrintOptions;
         this.logger = this.createLogger(this.currentLevel);
     }
 
-    // Helper method to create logger with consistent configuration
     private createLogger(level: LogLevel): pino.Logger {
+        const transports = [];
+
+        // Always add pretty print transport for console
+        transports.push({
+            target: 'pino-pretty',
+            options: {
+                ...this.currentOptions,
+                messageFormat: '{msg}'
+            }
+        });
+
+        // If we're in Tauri environment, add Tauri transport
+        if (this.runtime.runtimeType === RuntimeType.TAURI) {
+            transports.push(tauriTransport);
+        }
+
         return pino({
             level,
             transport: {
-                target: 'pino-pretty',
-                options: {
-                    ...this.currentOptions,
-                    messageFormat: '{msg}'
-                }
+                targets: transports
             }
         });
     }

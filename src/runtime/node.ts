@@ -16,6 +16,7 @@ import type {
   NetworkInterface,
   NetworkInterfaces
 } from './types';
+import { RuntimeType } from './types';
 import * as fsCallback from 'fs';
 import type { NetworkInterfaceInfo } from 'os';
 
@@ -132,6 +133,7 @@ export class NodePath implements Path {
 }
 
 export class NodeRuntime implements Runtime {
+  readonly runtimeType = RuntimeType.NODE;
   fs = new NodeFileSystem();
   path = new NodePath();
   os: OS = {

@@ -4,9 +4,11 @@ import { join, dirname, basename, extname, resolve, normalize, isAbsolute } from
 import { Command } from '@tauri-apps/plugin-shell';
 import { exit } from '@tauri-apps/plugin-process';
 import type { Runtime, FileStat, CPUInfo, NetworkInterfaces, SpawnResult, BufferEncoding } from './types';
+import { RuntimeType } from './types';
 import { window } from '@tauri-apps/api';
 
 export class TauriRuntime implements Runtime {
+  readonly runtimeType = RuntimeType.TAURI;
   fs = {
     async readFile(path: string, encoding: BufferEncoding = 'utf-8'): Promise<string> {
       try {
