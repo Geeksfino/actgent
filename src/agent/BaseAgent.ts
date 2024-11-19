@@ -10,17 +10,19 @@ import { Session } from '../core/Session';
 import { LoggingConfig } from '../core/configs';
 import { JSONOutput, Tool, ToolOutput } from '../core/Tool';
 import { logger } from '../core/Logger';
-
-const defaultCommunicationConfig: CommunicationConfig = {};
+import { RequestHandler } from './ICommunication';
 
 export abstract class BaseAgent<
   T extends readonly ClassificationTypeConfig[],
   K extends IClassifier<T>,
   P extends IAgentPromptTemplate
->  {
+>  implements RequestHandler {
   protected core!: AgentCore;
   private classifier!: K;
   private promptTemplate!: P;
+  private svcConfig: AgentServiceConfig;
+  private communication?: Communication;
+  private sessions: Map<string, Session> = new Map();
   
   protected abstract useClassifierClass(schemaTypes: T): new () => K;
   protected abstract usePromptTemplateClass(): new (classificationTypes: T) => P;
@@ -41,6 +43,7 @@ export abstract class BaseAgent<
     schemaTypes: T,
     loggingConfig?: LoggingConfig
   ) {
+    this.svcConfig = svc_config;
     this.init(core_config, svc_config, schemaTypes, loggingConfig);
   }
 
@@ -109,6 +112,15 @@ export abstract class BaseAgent<
     if (loggingConfig) {
       this.core.setLoggingConfig(loggingConfig);
     }
+    
+    if (this.svcConfig.communicationConfig) {
+      this.communication = new Communication(
+        this.svcConfig.communicationConfig,
+        this
+      );
+      await this.communication.start();
+    }
+    
     this.core.start();
   }
 
@@ -230,7 +242,26 @@ export abstract class BaseAgent<
 
   public async shutdown(): Promise<void> {
     this.log('default', 'Shutting down agent...');
+    
+    if (this.communication) {
+      await this.communication.stop();
+    }
+    
     await this.core.shutdown();
     this.log('default', 'Agent shutdown complete.');
+  }
+
+  async onCreateSession(owner: string, description: string, enhancePrompt?: boolean): Promise<Session> {
+    const session = await this.createSession(owner, description, enhancePrompt);
+    this.sessions.set(session.sessionId, session);
+    return session;
+  }
+
+  async onChat(sessionId: string, message: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+    await session.chat(message, 'user');
   }
 }

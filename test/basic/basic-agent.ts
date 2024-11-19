@@ -1,18 +1,24 @@
-import { ClassificationTypeConfig } from '@finogeeks/actgent/core';
-import { InferClassificationUnion } from '@finogeeks/actgent/core';
-import { AgentServiceConfigurator } from '@finogeeks/actgent/helpers';
-import { AgentBuilder } from '@finogeeks/actgent/agent';
+import { AgentCoreConfig, AgentServiceConfig, ToolOutput } from '@finogeeks/actgent';
+import { AgentServiceConfigurator } from '@finogeeks/actgent';
+import { AgentBuilder } from '@finogeeks/actgent';
 
-const coreConfig = {
+const coreConfig: AgentCoreConfig = {
   name: "BaseAgent",
   role: "Software Product Manager",
   goal: 'Create software specification',
   capabilities: 'assist in testing',
 };
 
-// make sure to set the correct agent configuration in .agent.env file - rename .agent.env.example to .agent.env and edit as needed
-const svcConfig = AgentServiceConfigurator.getAgentConfiguration("test/basic");
-console.log("service config: " + JSON.stringify(svcConfig));
+// Define service config with networking enabled
+const svcConfig = await AgentServiceConfigurator.getAgentConfiguration("test/basic");
+
+// If you need to override communication config, do it after getting the base config
+svcConfig.communicationConfig = {
+  host: 'localhost',
+  httpPort: 3000
+};
+
+console.log("Service config:", JSON.stringify(svcConfig, null, 2));
 
 // Define the schema types
 const schemaTypes = [
@@ -55,24 +61,45 @@ const schemaTypes = [
       },
     },
   },
-];
+] as const;
 
-// Use AgentBuilder to create the agent
-const agentBuilder = new AgentBuilder(coreConfig, svcConfig);
-const testAgent = agentBuilder.build("TestAgent", schemaTypes);
+async function main() {
+  try {
+    // Use AgentBuilder to create the agent
+    const agentBuilder = new AgentBuilder(coreConfig, svcConfig);
+    const testAgent = agentBuilder.build("TestAgent", [...schemaTypes]);
 
-testAgent.registerStreamCallback((delta: string) => {
-  console.log(delta);
-});
-testAgent.run();
+    // Register stream callback for console output
+    testAgent.registerStreamCallback((delta: string) => {
+      process.stdout.write(delta);
+    });
 
-const session = await testAgent.createSession("owner", 'How to create web site?');
+    // Start the agent (this will also start the HTTP server)
+    await testAgent.run();
+    console.log(`Agent started and listening on http://localhost:${svcConfig.communicationConfig?.httpPort}`);
 
-// Handler function to print out data received
-const handler = (data: InferClassificationUnion<readonly ClassificationTypeConfig[]>): void => {
-  console.log("Received event from session:", data);
-};
+    // Optional: Create a test session directly
+    const session = await testAgent.createSession("owner", 'How to create web site?');
 
-// Pass the handler to the session
-session.onEvent(handler);
-console.log("session completed");
+    // Update the handler to handle both classification and tool outputs
+    const handler = (data: { messageType: string } & Record<string, any> | ToolOutput): void => {
+      console.log("Received event from session:", JSON.stringify(data, null, 2));
+    };
+
+    // Pass the handler to the session
+    session.onEvent(handler);
+
+    // Keep the process running
+    process.on('SIGINT', async () => {
+      console.log('Shutting down...');
+      await testAgent.shutdown();
+      process.exit(0);
+    });
+
+  } catch (error) {
+    console.error('Error starting agent:', error);
+    process.exit(1);
+  }
+}
+
+main();
