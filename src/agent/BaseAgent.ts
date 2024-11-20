@@ -136,6 +136,19 @@ export abstract class BaseAgent<
       this.defaultToolResultHandler(result, session);
     });
 
+    // If HTTP streaming is enabled, add network broadcasting as an additional callback
+    // This is independent of whether LLM streaming is enabled
+    if (this.communication && this.svcConfig.communicationConfig?.enableStreaming) {
+      logger.debug(`Adding network broadcast callback for session ${session.sessionId}`);
+      // Create a new callback that broadcasts to network
+      const broadcastCallback = (delta: string) => {
+        this.communication?.broadcastStreamData(session.sessionId, delta);
+      };
+      
+      // Add it as an additional callback for HTTP streaming
+      this.core.registerStreamCallback(broadcastCallback);
+    }
+
     return session;
   }
 
@@ -184,6 +197,7 @@ export abstract class BaseAgent<
   }
 
   public registerStreamCallback(callback?: (delta: string) => void): void {
+    logger.debug(`Registering stream callback: ${!!callback}`);
     if (callback) {
       this.core.registerStreamCallback(callback);
     } else {

@@ -34,7 +34,7 @@ export class AgentCore {
   public llmConfig: LLMConfig | null;
   public executionContext: ExecutionContext = ExecutionContext.getInstance();
   promptTemplate: IAgentPromptTemplate;
-  streamCallback?: (delta: string) => void;
+  private streamCallbacks: Set<(delta: string) => void> = new Set();
   streamBuffer: string = "";
   llmClient: OpenAI;
   toolRegistry: Map<string, Tool<any, any, any>> = new Map();
@@ -196,7 +196,7 @@ export class AgentCore {
   }
 
   public registerStreamCallback(callback: (delta: string) => void): void {
-    this.streamCallback = callback;
+    this.streamCallbacks.add(callback);
   }
 
   processStreamBuffer(force: boolean = false) {
@@ -207,16 +207,18 @@ export class AgentCore {
 
     // Process all complete lines
     for (const line of completeLines) {
-      if (this.streamCallback) {
-        this.streamCallback(line + "\n"); // Call the callback with each complete line
+      for (const callback of this.streamCallbacks) {
+        callback(line + "\n"); // Call the callback with each complete line
       }
     }
 
     // Flush the buffer if it's too large (threshold) or force flush is true
     const bufferThreshold = 100; // You can adjust this value as needed
     if (force || this.streamBuffer.length > bufferThreshold) {
-      if (this.streamCallback && this.streamBuffer) {
-        this.streamCallback(this.streamBuffer); // Flush the remaining content in the buffer
+      for (const callback of this.streamCallbacks) {
+        if (callback && this.streamBuffer) {
+          callback(this.streamBuffer); // Flush the remaining content in the buffer
+        }
       }
       this.streamBuffer = ""; // Clear the buffer after flushing
     }
@@ -324,7 +326,7 @@ export class AgentCore {
       };
 
       // Stream mode
-      if (this.llmConfig?.streamMode && this.streamCallback) {
+      if (this.llmConfig?.streamMode && this.streamCallbacks.size > 0) {
         const streamConfig: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming =
           {
             ...baseConfig,

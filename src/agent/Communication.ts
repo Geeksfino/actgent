@@ -1,56 +1,53 @@
 import { CommunicationConfig } from '../core/configs';
-import { BaseCommunicationProtocol, RequestHandler } from './ICommunication';
 import { HttpProtocol } from './protocols/HttpProtocol';
+import { StreamingProtocol } from './protocols/StreamingProtocol';
+import { BaseCommunicationProtocol, RequestHandler } from './ICommunication';
 import { logger } from '../core/Logger';
 
 export class Communication {
-  private protocols: BaseCommunicationProtocol[] = [];
+  private httpProtocol?: HttpProtocol;
+  private streamingProtocol?: StreamingProtocol;
+  private config: CommunicationConfig;
+  private handler: RequestHandler;
 
-  constructor(
-    private config: CommunicationConfig,
-    private handler: RequestHandler
-  ) {}
+  constructor(config: CommunicationConfig, handler: RequestHandler) {
+    this.config = config;
+    this.handler = handler;
+  }
 
   async start(): Promise<void> {
-    // Initialize HTTP if port is configured
+    // Start HTTP protocol if port is configured
     if (this.config.httpPort) {
-      const httpProtocol = new HttpProtocol(
+      this.httpProtocol = new HttpProtocol(
         this.handler,
         this.config.httpPort,
         this.config.host
       );
-      this.protocols.push(httpProtocol);
-    }
+      await this.httpProtocol.start();
 
-    // Future: Initialize NATS if configured
-    // if (this.config.natsUrl) {
-    //   const natsProtocol = new NatsProtocol(this.handler, this.config.natsUrl);
-    //   this.protocols.push(natsProtocol);
-    // }
-
-    // Future: Initialize gRPC if configured
-    // if (this.config.grpcPort) {
-    //   const grpcProtocol = new GrpcProtocol(this.handler, this.config.grpcPort);
-    //   this.protocols.push(grpcProtocol);
-    // }
-
-    // Start all configured protocols
-    for (const protocol of this.protocols) {
-      try {
-        await protocol.start();
-      } catch (error) {
-        logger.error(`Failed to start protocol: ${error}`);
-      }
+      // When HTTP is enabled, also start streaming server
+      // Note: This doesn't mean streaming will be used - that depends on LLM config
+      this.streamingProtocol = new StreamingProtocol(
+        this.handler,
+        this.config.streamPort || this.config.httpPort + 1,
+        this.config.host
+      );
+      await this.streamingProtocol.start();
     }
   }
 
   async stop(): Promise<void> {
-    for (const protocol of this.protocols) {
-      try {
-        await protocol.stop();
-      } catch (error) {
-        logger.error(`Failed to stop protocol: ${error}`);
-      }
+    if (this.httpProtocol) {
+      await this.httpProtocol.stop();
+    }
+    if (this.streamingProtocol) {
+      await this.streamingProtocol.stop();
+    }
+  }
+
+  public broadcastStreamData(sessionId: string, data: string): void {
+    if (this.streamingProtocol) {
+      this.streamingProtocol.broadcastToSession(sessionId, data);
     }
   }
 }

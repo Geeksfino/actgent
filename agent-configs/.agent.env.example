@@ -3,6 +3,9 @@ LLM_PROVIDER_URL='https://api.deepseek.com/v1'
 LLM_MODEL=deepseek-chat
 LLM_STREAM_MODE=true
 
+AGENT_HOST=localhost
+AGENT_HTTP_PORT=5678
+
 DB_PROVIDER=postgres
 DB_HOST=localhost
 DB_PORT=5432

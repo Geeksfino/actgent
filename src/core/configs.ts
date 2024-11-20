@@ -42,6 +42,8 @@ export interface CommunicationConfig {
   natsUrl?: string;
   httpPort?: number;
   grpcPort?: number;
+  streamPort?: number;
+  enableStreaming?: boolean;
 }
 
 export interface InboxConfig {

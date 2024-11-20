@@ -33,10 +33,7 @@ export class AgentServiceConfigurator {
   }
 
   public static async getAgentConfiguration(basePath?: string, envFile: string = ".agent.env"): Promise<AgentServiceConfig> {
-    // Create runtime instance for static context
     const runtime = createRuntime();
-    
-    // Use process.cwd() as default if basePath is not provided
     const configurator = new AgentServiceConfigurator(basePath || await runtime.process.cwd());
  
     // First read from shell environment variables
@@ -46,6 +43,14 @@ export class AgentServiceConfigurator {
         baseURL: await configurator.getEnvVar('LLM_PROVIDER_URL'),
         model: (await configurator.getEnvVar('LLM_MODEL')) || "",
         streamMode: (await configurator.getEnvVar('LLM_STREAM_MODE')) === 'true'
+      },
+      communicationConfig: {
+        host: await configurator.getEnvVar('AGENT_HOST'),
+        natsUrl: await configurator.getEnvVar('AGENT_NATS_URL'),
+        httpPort: Number(await configurator.getEnvVar('AGENT_HTTP_PORT')) || undefined,
+        grpcPort: Number(await configurator.getEnvVar('AGENT_GRPC_PORT')) || undefined,
+        enableStreaming: (await configurator.getEnvVar('AGENT_ENABLE_STREAMING')) === 'true',
+        streamPort: Number(await configurator.getEnvVar('AGENT_STREAM_PORT')) || undefined
       }
     };
 
@@ -69,6 +74,14 @@ export class AgentServiceConfigurator {
           baseURL: (await configurator.getEnvVar('LLM_PROVIDER_URL')) || configurator.agentServiceConf.llmConfig?.baseURL,
           model: (await configurator.getEnvVar('LLM_MODEL')) || configurator.agentServiceConf.llmConfig?.model || "",
           streamMode: (await configurator.getEnvVar('LLM_STREAM_MODE')) === 'true' || configurator.agentServiceConf.llmConfig?.streamMode || false
+        },
+        communicationConfig: {
+          host: (await configurator.getEnvVar('AGENT_HOST')) || configurator.agentServiceConf.communicationConfig?.host,
+          natsUrl: (await configurator.getEnvVar('AGENT_NATS_URL')) || configurator.agentServiceConf.communicationConfig?.natsUrl,
+          httpPort: Number(await configurator.getEnvVar('AGENT_HTTP_PORT')) || configurator.agentServiceConf.communicationConfig?.httpPort,
+          grpcPort: Number(await configurator.getEnvVar('AGENT_GRPC_PORT')) || configurator.agentServiceConf.communicationConfig?.grpcPort,
+          streamPort: Number(await configurator.getEnvVar('AGENT_STREAM_PORT')),  // HTTP streaming port is separate from LLM streaming
+          enableStreaming: false  // HTTP streaming is controlled by network mode
         }
       };
     } else {
