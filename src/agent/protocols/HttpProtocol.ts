@@ -1,5 +1,4 @@
-import { createServer, Server } from 'http';
-import { parse as parseUrl } from 'url';
+import { Server } from "bun";
 import { BaseCommunicationProtocol, RequestHandler } from '../ICommunication';
 import { logger } from '../../core/Logger';
 
@@ -15,82 +14,112 @@ export class HttpProtocol extends BaseCommunicationProtocol {
   }
 
   async start(): Promise<void> {
-    this.server = createServer(async (req, res) => {
-      const url = parseUrl(req.url || '', true);
-      
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    this.server = Bun.serve({
+      port: this.port,
+      hostname: this.host,
 
-      if (req.method === 'OPTIONS') {
-        res.writeHead(200);
-        res.end();
-        return;
-      }
+      fetch: (async (req: Request) => {
+        // Handle CORS preflight
+        const corsHeaders = {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+        };
 
-      if (req.method !== 'POST') {
-        res.writeHead(405);
-        res.end('Method not allowed');
-        return;
-      }
+        if (req.method === 'OPTIONS') {
+          return new Response(null, { headers: corsHeaders });
+        }
 
-      let body = '';
-      req.on('data', chunk => body += chunk);
-      
-      try {
-        await new Promise((resolve) => {
-          req.on('end', async () => {
-            const data = JSON.parse(body);
-
-            try {
-              switch (url.pathname) {
-                case '/createSession':
-                  const { owner, description, enhancePrompt = false } = data;
-                  const session = await this.handler.onCreateSession(owner, description, enhancePrompt);
-                  res.writeHead(200, { 'Content-Type': 'application/json' });
-                  res.end(JSON.stringify({ sessionId: session.sessionId }));
-                  break;
-
-                case '/chat':
-                  const { sessionId, message } = data;
-                  await this.handler.onChat(sessionId, message);
-                  res.writeHead(200);
-                  res.end(JSON.stringify({ status: 'Message sent' }));
-                  break;
-
-                default:
-                  res.writeHead(404);
-                  res.end('Not found');
-              }
-            } catch (error) {
-              res.writeHead(500);
-              res.end(JSON.stringify({ error: String(error) }));
-            }
-            resolve(undefined);
+        if (req.method !== 'POST') {
+          return new Response('Method not allowed', { 
+            status: 405,
+            headers: corsHeaders 
           });
-        });
-      } catch (error) {
-        res.writeHead(400);
-        res.end(JSON.stringify({ error: 'Invalid request' }));
-      }
+        }
+
+        try {
+          const url = new URL(req.url);
+          const data = await req.json();
+
+          switch (url.pathname) {
+            case '/createSession': {
+              const { owner, description, enhancePrompt = false } = data as {
+                owner: string;
+                description: string;
+                enhancePrompt?: boolean;
+              };
+              const session = await this.handler.onCreateSession(owner, description, enhancePrompt);
+              return new Response(
+                JSON.stringify({ sessionId: session.sessionId }), 
+                { 
+                  headers: { 
+                    ...corsHeaders,
+                    'Content-Type': 'application/json' 
+                  } 
+                }
+              );
+            }
+
+            case '/chat': {
+              const { sessionId, message } = data as {
+                sessionId: string;
+                message: string;
+              };
+              await this.handler.onChat(sessionId, message);
+              return new Response(
+                JSON.stringify({ status: 'Message sent' }), 
+                { 
+                  headers: { 
+                    ...corsHeaders,
+                    'Content-Type': 'application/json' 
+                  } 
+                }
+              );
+            }
+
+            default:
+              return new Response('Not found', { 
+                status: 404,
+                headers: corsHeaders 
+              });
+          }
+        } catch (error) {
+          logger.error('HTTP server error:', error);
+          return new Response(
+            JSON.stringify({ error: String(error) }), 
+            { 
+              status: error instanceof Error ? 500 : 400,
+              headers: {
+                ...corsHeaders,
+                'Content-Type': 'application/json'
+              }
+            }
+          );
+        }
+      }).bind(this),
+
+      error(error: Error) {
+        logger.error('HTTP server error:', error);
+        return new Response(
+          JSON.stringify({ error: 'Internal server error' }), 
+          { 
+            status: 500,
+            headers: {
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*'
+            }
+          }
+        );
+      },
     });
 
-    await new Promise<void>((resolve) => {
-      this.server?.listen(this.port, this.host, () => {
-        logger.info(`HTTP server started on http://${this.host}:${this.port}`);
-        resolve();
-      });
-    });
+    logger.info(`HTTP server started on http://${this.host}:${this.port}`);
   }
 
   async stop(): Promise<void> {
     if (this.server) {
-      await new Promise<void>((resolve) => {
-        this.server?.close(() => {
-          logger.info('HTTP server closed');
-          resolve();
-        });
-      });
+      this.server.stop();
+      logger.info('HTTP server closed');
     }
   }
 } 
