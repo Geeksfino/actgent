@@ -16,38 +16,79 @@ export class Communication {
   }
 
   async start(): Promise<void> {
-    // Start HTTP protocol if port is configured
-    if (this.config.httpPort) {
-      this.httpProtocol = new HttpProtocol(
-        this.handler,
-        this.config.httpPort,
-        this.config.host
-      );
-      await this.httpProtocol.start();
+    logger.debug('[Communication] Starting communication layer...');
+    try {
+      // Start HTTP protocol if port is configured
+      if (this.config.httpPort) {
+        this.httpProtocol = new HttpProtocol(
+          this.handler,
+          this.config.httpPort,
+          this.config.host
+        );
+        logger.debug('[Communication] Starting HTTP protocol');
+        await this.httpProtocol.start();
+      }
 
-      // When HTTP is enabled, also start streaming server
-      // Note: This doesn't mean streaming will be used - that depends on LLM config
-      this.streamingProtocol = new StreamingProtocol(
-        this.handler,
-        this.config.streamPort || this.config.httpPort + 1,
-        this.config.host
-      );
-      await this.streamingProtocol.start();
+      // Start streaming protocol only if streaming is enabled and we have a port
+      if (this.config.enableStreaming) {
+        const streamPort = this.config.streamPort || (this.config.httpPort ? this.config.httpPort + 1 : undefined);
+        if (streamPort) {
+          this.streamingProtocol = new StreamingProtocol(
+            this.handler,
+            streamPort,
+            this.config.host
+          );
+          logger.debug('[Communication] Streaming enabled, starting streaming protocol');
+          await this.streamingProtocol.start();
+        } else {
+          logger.warning('Streaming enabled but no port configured');
+        }
+      } else {
+        logger.debug('[Communication] Streaming disabled, skipping streaming protocol');
+      }
+      
+      logger.info('[Communication] Communication layer started successfully');
+    } catch (error) {
+      logger.error('[Communication] Failed to start communication layer:', error);
+      throw error;
     }
   }
 
   async stop(): Promise<void> {
-    if (this.httpProtocol) {
-      await this.httpProtocol.stop();
-    }
-    if (this.streamingProtocol) {
-      await this.streamingProtocol.stop();
+    logger.debug('[Communication] Stopping communication layer...');
+    try {
+      // Stop streaming first to close all client connections
+      if (this.streamingProtocol) {
+        logger.debug('[Communication] Stopping streaming protocol');
+        await this.streamingProtocol.stop();
+        this.streamingProtocol = undefined;
+      }
+
+      // Then stop HTTP server
+      if (this.httpProtocol) {
+        logger.debug('[Communication] Stopping HTTP protocol');
+        await this.httpProtocol.stop();
+        this.httpProtocol = undefined;
+      }
+
+      logger.info('[Communication] Communication layer stopped successfully');
+    } catch (error) {
+      logger.error('[Communication] Error during shutdown:', error);
+      throw error;
     }
   }
 
   public broadcastStreamData(sessionId: string, data: string): void {
-    if (this.streamingProtocol) {
-      this.streamingProtocol.broadcastToSession(sessionId, data);
+    logger.debug('[Communication] Broadcasting stream data');
+    try {
+      if (this.streamingProtocol && this.config.enableStreaming) {
+        this.streamingProtocol.broadcast(data);
+        logger.debug('[Communication] Stream data broadcast successful');
+      } else {
+        logger.debug('[Communication] No streaming protocol available for broadcast');
+      }
+    } catch (error) {
+      logger.error('[Communication] Error broadcasting stream data:', error);
     }
   }
 }

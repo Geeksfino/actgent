@@ -23,7 +23,8 @@ export abstract class BaseAgent<
   private svcConfig: AgentServiceConfig;
   private communication?: Communication;
   private sessions: Map<string, Session> = new Map();
-  
+  private httpStreamCallback?: (delta: string) => void;
+
   protected abstract useClassifierClass(schemaTypes: T): new () => K;
   protected abstract usePromptTemplateClass(): new (classificationTypes: T) => P;
 
@@ -53,6 +54,7 @@ export abstract class BaseAgent<
     schemaTypes: T,
     loggingConfig?: LoggingConfig
   ) {
+    this.svcConfig = svc_config;
     const llmConfig = svc_config.llmConfig;
 
     this.classifier = this.createClassifier(schemaTypes);
@@ -113,12 +115,22 @@ export abstract class BaseAgent<
       this.core.setLoggingConfig(loggingConfig);
     }
     
-    if (this.svcConfig.communicationConfig) {
+    // Initialize communication if HTTP port is configured
+    if (this.svcConfig.communicationConfig?.httpPort) {
       this.communication = new Communication(
         this.svcConfig.communicationConfig,
         this
       );
       await this.communication.start();
+
+      // Set up streaming if enabled and core streaming is enabled
+      if (this.svcConfig.communicationConfig.enableStreaming && this.core.llmConfig?.streamMode) {
+        logger.debug('Setting up streaming callback');
+        this.httpStreamCallback = (delta: string) => {
+          this.communication?.broadcastStreamData('', delta);
+        };
+        this.core.registerStreamCallback(this.httpStreamCallback);
+      }
     }
     
     this.core.start();
@@ -135,19 +147,6 @@ export abstract class BaseAgent<
     session.onToolResult((result: any, session: Session) => {
       this.defaultToolResultHandler(result, session);
     });
-
-    // If HTTP streaming is enabled, add network broadcasting as an additional callback
-    // This is independent of whether LLM streaming is enabled
-    if (this.communication && this.svcConfig.communicationConfig?.enableStreaming) {
-      logger.debug(`Adding network broadcast callback for session ${session.sessionId}`);
-      // Create a new callback that broadcasts to network
-      const broadcastCallback = (delta: string) => {
-        this.communication?.broadcastStreamData(session.sessionId, delta);
-      };
-      
-      // Add it as an additional callback for HTTP streaming
-      this.core.registerStreamCallback(broadcastCallback);
-    }
 
     return session;
   }
@@ -196,15 +195,27 @@ export abstract class BaseAgent<
     this.classifier.handleLLMResponse(parsedResponse, session);
   }
 
-  public registerStreamCallback(callback?: (delta: string) => void): void {
-    logger.debug(`Registering stream callback: ${!!callback}`);
-    if (callback) {
+  public async shutdown(): Promise<void> {
+    // Clean up HTTP streaming callback
+    if (this.httpStreamCallback) {
+      logger.debug('Removing HTTP stream callback during shutdown');
+      this.core.removeStreamCallback(this.httpStreamCallback);
+      this.httpStreamCallback = undefined;
+    }
+
+    if (this.communication) {
+      await this.communication.stop();
+    }
+    await this.core.shutdown();
+  }
+
+  // Allow registration of additional stream callbacks
+  public registerStreamCallback(callback: (delta: string) => void): void {
+    if (this.core.llmConfig?.streamMode) {
+      logger.debug('Registering additional stream callback');
       this.core.registerStreamCallback(callback);
     } else {
-      // Default line-by-line stream handler
-      this.core.registerStreamCallback((delta: string) => {
-        process.stdout.write(delta);
-      });
+      logger.warning('Stream callback registration requested but core streaming is disabled');
     }
   }
 
@@ -252,17 +263,6 @@ export abstract class BaseAgent<
     console.log('findHelperAgent called with subtask:', subtask);
     const agent = await AgentRegistry.getInstance().findAgentByCapabilities(subtask);
     return agent;
-  }
-
-  public async shutdown(): Promise<void> {
-    this.log('default', 'Shutting down agent...');
-    
-    if (this.communication) {
-      await this.communication.stop();
-    }
-    
-    await this.core.shutdown();
-    this.log('default', 'Agent shutdown complete.');
   }
 
   async onCreateSession(owner: string, description: string, enhancePrompt?: boolean): Promise<Session> {

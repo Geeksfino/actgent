@@ -1,8 +1,8 @@
-import { AgentCoreConfig, AgentServiceConfig, ToolOutput } from '@finogeeks/actgent';
+import { AgentCoreConfig, LoggingConfig } from '@finogeeks/actgent';
 import { AgentServiceConfigurator } from '@finogeeks/actgent';
 import { AgentBuilder } from '@finogeeks/actgent';
 import { program } from 'commander';
-import { logger, LogLevel } from '../../src/core/Logger';
+import { logger, LogLevel } from '@finogeeks/actgent';
 
 // Configure command line options
 program
@@ -118,6 +118,12 @@ async function main() {
     const agentBuilder = new AgentBuilder(coreConfig, svcConfig);
     const testAgent = agentBuilder.build("TestAgent", [...schemaTypes]);
 
+    // Set up logging configuration for console output with debug level
+    const loggingConfig: LoggingConfig = {
+      type: 'console',
+      level: 'debug'
+    };
+
     // Register stream callback in local mode
     if (!options.network) {
       testAgent.registerStreamCallback((delta: string) => {
@@ -125,8 +131,8 @@ async function main() {
       });
     }
 
-    // Start the agent
-    await testAgent.run();
+    // Start the agent with the logging config
+    await testAgent.run(loggingConfig);
 
     // Handle local mode
     if (!options.network) {

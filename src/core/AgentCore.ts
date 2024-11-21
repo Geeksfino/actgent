@@ -196,7 +196,13 @@ export class AgentCore {
   }
 
   public registerStreamCallback(callback: (delta: string) => void): void {
+    logger.debug('Registering stream callback');
     this.streamCallbacks.add(callback);
+  }
+
+  public removeStreamCallback(callback: (delta: string) => void): void {
+    logger.debug('Removing stream callback');
+    this.streamCallbacks.delete(callback);
   }
 
   processStreamBuffer(force: boolean = false) {
@@ -208,7 +214,11 @@ export class AgentCore {
     // Process all complete lines
     for (const line of completeLines) {
       for (const callback of this.streamCallbacks) {
-        callback(line + "\n"); // Call the callback with each complete line
+        try {
+          callback(line + "\n"); // Call the callback with each complete line
+        } catch (error) {
+          logger.error(`Error in stream callback: ${error}`);
+        }
       }
     }
 
@@ -217,7 +227,11 @@ export class AgentCore {
     if (force || this.streamBuffer.length > bufferThreshold) {
       for (const callback of this.streamCallbacks) {
         if (callback && this.streamBuffer) {
-          callback(this.streamBuffer); // Flush the remaining content in the buffer
+          try {
+            callback(this.streamBuffer); // Flush the remaining content in the buffer
+          } catch (error) {
+            logger.error(`Error in stream callback during force flush: ${error}`);
+          }
         }
       }
       this.streamBuffer = ""; // Clear the buffer after flushing

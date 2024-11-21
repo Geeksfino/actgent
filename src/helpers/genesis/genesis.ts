@@ -313,7 +313,12 @@ async function chatLoop(): Promise<void> {
 
       if (userInput.toLowerCase() === '/exit') {
         console.log("Thank you for using AgentSmith. Shutting down...");
-        await AgentSmith.shutdown();
+        try {
+          await AgentSmith.shutdown();
+          rl.close();
+        } catch (error) {
+          console.error("Error during shutdown:", error);
+        }
         break;
       }
 

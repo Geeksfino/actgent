@@ -80,8 +80,8 @@ export class AgentServiceConfigurator {
           natsUrl: (await configurator.getEnvVar('AGENT_NATS_URL')) || configurator.agentServiceConf.communicationConfig?.natsUrl,
           httpPort: Number(await configurator.getEnvVar('AGENT_HTTP_PORT')) || configurator.agentServiceConf.communicationConfig?.httpPort,
           grpcPort: Number(await configurator.getEnvVar('AGENT_GRPC_PORT')) || configurator.agentServiceConf.communicationConfig?.grpcPort,
-          streamPort: Number(await configurator.getEnvVar('AGENT_STREAM_PORT')),  // HTTP streaming port is separate from LLM streaming
-          enableStreaming: false  // HTTP streaming is controlled by network mode
+          streamPort: Number(await configurator.getEnvVar('AGENT_STREAM_PORT')) || configurator.agentServiceConf.communicationConfig?.streamPort,
+          enableStreaming: (await configurator.getEnvVar('AGENT_ENABLE_STREAMING')) === 'true' || configurator.agentServiceConf.communicationConfig?.enableStreaming || false
         }
       };
     } else {
