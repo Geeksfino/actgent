@@ -16,7 +16,7 @@ export class Communication {
   }
 
   async start(): Promise<void> {
-    logger.debug('[Communication] Starting communication layer...');
+    logger.trace('[Communication] Starting communication layer...');
     try {
       // Start HTTP protocol if port is configured
       if (this.config.httpPort) {
@@ -25,7 +25,7 @@ export class Communication {
           this.config.httpPort,
           this.config.host
         );
-        logger.debug('[Communication] Starting HTTP protocol');
+        logger.trace('[Communication] Starting HTTP protocol');
         await this.httpProtocol.start();
       }
 
@@ -38,13 +38,13 @@ export class Communication {
             streamPort,
             this.config.host
           );
-          logger.debug('[Communication] Streaming enabled, starting streaming protocol');
+          logger.trace('[Communication] Streaming enabled, starting streaming protocol');
           await this.streamingProtocol.start();
         } else {
           logger.warning('Streaming enabled but no port configured');
         }
       } else {
-        logger.debug('[Communication] Streaming disabled, skipping streaming protocol');
+        logger.trace('[Communication] Streaming disabled, skipping streaming protocol');
       }
       
       logger.info('[Communication] Communication layer started successfully');
@@ -55,18 +55,18 @@ export class Communication {
   }
 
   async stop(): Promise<void> {
-    logger.debug('[Communication] Stopping communication layer...');
+    logger.trace('[Communication] Stopping communication layer...');
     try {
       // Stop streaming first to close all client connections
       if (this.streamingProtocol) {
-        logger.debug('[Communication] Stopping streaming protocol');
+        logger.trace('[Communication] Stopping streaming protocol');
         await this.streamingProtocol.stop();
         this.streamingProtocol = undefined;
       }
 
       // Then stop HTTP server
       if (this.httpProtocol) {
-        logger.debug('[Communication] Stopping HTTP protocol');
+        logger.trace('[Communication] Stopping HTTP protocol');
         await this.httpProtocol.stop();
         this.httpProtocol = undefined;
       }
@@ -79,13 +79,13 @@ export class Communication {
   }
 
   public broadcastStreamData(sessionId: string, data: string): void {
-    logger.debug('[Communication] Broadcasting stream data');
+    logger.trace('[Communication] Broadcasting stream data');
     try {
       if (this.streamingProtocol && this.config.enableStreaming) {
         this.streamingProtocol.broadcast(data);
-        logger.debug('[Communication] Stream data broadcast successful');
+        logger.trace('[Communication] Stream data broadcast successful');
       } else {
-        logger.debug('[Communication] No streaming protocol available for broadcast');
+        logger.trace('[Communication] No streaming protocol available for broadcast');
       }
     } catch (error) {
       logger.error('[Communication] Error broadcasting stream data:', error);
