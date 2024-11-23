@@ -11,15 +11,15 @@ export class HttpProtocol extends BaseCommunicationProtocol {
     super(handler);
     this.port = port;
     this.host = host;
-    logger.debug(`HttpProtocol initialized with port ${port} and host ${host}`);
+    logger.trace(`HttpProtocol initialized with port ${port} and host ${host}`);
   }
 
   async start(): Promise<void> {
-    logger.debug('[HttpProtocol] Starting HTTP protocol...');
+    logger.trace('[HttpProtocol] Starting HTTP protocol...');
     try {
-      logger.debug(`[HttpProtocol] Starting server on ${this.host}:${this.port}`);
+      logger.trace(`[HttpProtocol] Starting server on ${this.host}:${this.port}`);
 
-      logger.debug(`Starting HTTP server on ${this.host}:${this.port}`);
+      logger.trace(`Starting HTTP server on ${this.host}:${this.port}`);
       
       this.server = Bun.serve({
         port: this.port,
@@ -27,9 +27,9 @@ export class HttpProtocol extends BaseCommunicationProtocol {
         development: false,
 
         fetch: (async (req: Request) => {
-          logger.debug(`[HttpProtocol] Received request: ${req.method} ${req.url}`);
+          logger.trace(`[HttpProtocol] Received request: ${req.method} ${req.url}`);
           const url = new URL(req.url);
-          logger.debug(`Received ${req.method} request to ${url.pathname}`);
+          logger.trace(`Received ${req.method} request to ${url.pathname}`);
 
           // Handle CORS preflight
           const corsHeaders = {
@@ -39,12 +39,12 @@ export class HttpProtocol extends BaseCommunicationProtocol {
           };
 
           if (req.method === 'OPTIONS') {
-            logger.debug('Handling CORS preflight request');
+            logger.trace('Handling CORS preflight request');
             return new Response(null, { headers: corsHeaders });
           }
 
           if (req.method !== 'POST') {
-            logger.debug(`Rejecting non-POST method: ${req.method}`);
+            logger.trace(`Rejecting non-POST method: ${req.method}`);
             return new Response('Method not allowed', { 
               status: 405,
               headers: corsHeaders 
@@ -53,18 +53,18 @@ export class HttpProtocol extends BaseCommunicationProtocol {
 
           try {
             const data = await req.json();
-            logger.debug(`Request data:`, data);
+            logger.trace(`Request data:`, data);
 
             switch (url.pathname) {
               case '/createSession': {
-                logger.debug('Processing createSession request');
+                logger.trace('Processing createSession request');
                 const { owner, description, enhancePrompt = false } = data as {
                   owner: string;
                   description: string;
                   enhancePrompt?: boolean;
                 };
                 const session = await this.handler.onCreateSession(owner, description, enhancePrompt);
-                logger.debug(`Session created with ID: ${session.sessionId}`);
+                logger.trace(`Session created with ID: ${session.sessionId}`);
                 return new Response(
                   JSON.stringify({ sessionId: session.sessionId }), 
                   { 
@@ -77,7 +77,7 @@ export class HttpProtocol extends BaseCommunicationProtocol {
               }
 
               case '/chat': {
-                logger.debug('Processing chat request');
+                logger.trace('Processing chat request');
                 const { sessionId, message } = data as {
                   sessionId: string;
                   message: string;
@@ -95,7 +95,7 @@ export class HttpProtocol extends BaseCommunicationProtocol {
               }
 
               default:
-                logger.debug(`Unknown endpoint: ${url.pathname}`);
+                logger.trace(`Unknown endpoint: ${url.pathname}`);
                 return new Response('Not found', { 
                   status: 404,
                   headers: corsHeaders 
@@ -104,7 +104,7 @@ export class HttpProtocol extends BaseCommunicationProtocol {
           } catch (error) {
             logger.error('HTTP server error:', error);
             const errorMessage = error instanceof Error ? error.message : String(error);
-            logger.debug(`Error details: ${errorMessage}`);
+            logger.trace(`Error details: ${errorMessage}`);
             return new Response(
               JSON.stringify({ error: errorMessage }), 
               { 
@@ -120,7 +120,7 @@ export class HttpProtocol extends BaseCommunicationProtocol {
 
         error(error: Error) {
           logger.error('HTTP server error:', error);
-          logger.debug(`Server error details: ${error.stack}`);
+          logger.trace(`Server error details: ${error.stack}`);
           return new Response(
             JSON.stringify({ error: 'Internal server error' }), 
             { 
@@ -143,13 +143,13 @@ export class HttpProtocol extends BaseCommunicationProtocol {
   }
 
   async stop(): Promise<void> {
-    logger.debug('[HttpProtocol] Stopping HTTP protocol...');
+    logger.trace('[HttpProtocol] Stopping HTTP protocol...');
     try {
       if (this.server) {
-        logger.debug('[HttpProtocol] Stopping server');
+        logger.trace('[HttpProtocol] Stopping server');
         this.server.stop(true); // Force immediate stop
         this.server = undefined;
-        logger.debug('[HttpProtocol] Server stopped successfully');
+        logger.trace('[HttpProtocol] Server stopped successfully');
       }
     } catch (error) {
       logger.error(`[HttpProtocol] Error during shutdown: ${error}`);

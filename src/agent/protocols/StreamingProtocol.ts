@@ -18,20 +18,20 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
     super(handler);
     this.port = port;
     this.host = host;
-    logger.debug(`[StreamingProtocol] StreamingProtocol initialized with port ${port} and host ${host}`);
+    logger.trace(`[StreamingProtocol] StreamingProtocol initialized with port ${port} and host ${host}`);
   }
 
   async start(): Promise<void> {
-    logger.debug('[StreamingProtocol] Starting streaming protocol...');
+    logger.trace('[StreamingProtocol] Starting streaming protocol...');
     try {
-      logger.debug(`[StreamingProtocol] Starting server on ${this.host}:${this.port}`);
+      logger.trace(`[StreamingProtocol] Starting server on ${this.host}:${this.port}`);
       
       this.server = Bun.serve({
         port: this.port,
         hostname: this.host,
         development: false,
         fetch: (req: Request): Response => {
-          logger.debug(`[StreamingProtocol] Received connection request from ${req.url}`);
+          logger.trace(`[StreamingProtocol] Received connection request from ${req.url}`);
           return this.handleRequest(req);
         },
       });
@@ -43,7 +43,7 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
   }
 
   private handleRequest(req: Request): Response {
-    logger.debug(`[StreamingProtocol] New stream connection request`);
+    logger.trace(`[StreamingProtocol] New stream connection request`);
 
     const headers = {
       "Access-Control-Allow-Origin": "*",
@@ -76,7 +76,7 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
   }
 
   private initializeStream(controller: ReadableStreamDefaultController, req: Request) {
-    logger.debug(`[StreamingProtocol] Initializing stream...`);
+    logger.trace(`[StreamingProtocol] Initializing stream...`);
 
     const streamController = new StreamController(controller, this);
     
@@ -93,14 +93,14 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
 
     // Add to global streams
     this.streams.add(streamController);
-    logger.debug(`[StreamingProtocol] Active streams: ${this.streams.size}`);
+    logger.trace(`[StreamingProtocol] Active streams: ${this.streams.size}`);
 
     // Setup more frequent keepalive messages
     const keepaliveInterval = setInterval(keepStreamAlive, 5000); // Every 5 seconds
 
     // Handle client disconnect
     req.signal.addEventListener("abort", () => {
-      logger.debug(`[StreamingProtocol] Client disconnected`);
+      logger.trace(`[StreamingProtocol] Client disconnected`);
       isAlive = false;
       this.cleanupConnection(streamController, keepaliveInterval);
     });
@@ -109,7 +109,7 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
   private cleanupConnection(controller: StreamController, keepaliveInterval: TimerHandle) {
     clearInterval(keepaliveInterval);
     this.streams.delete(controller);
-    logger.debug(`[StreamingProtocol] Connection cleaned up`);
+    logger.trace(`[StreamingProtocol] Connection cleaned up`);
   }
 
   public broadcast(data: string): void {
@@ -119,19 +119,19 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
   }
 
   async stop(): Promise<void> {
-    logger.debug('[StreamingProtocol] Stopping streaming protocol...');
+    logger.trace('[StreamingProtocol] Stopping streaming protocol...');
     try {
       // Stop the server first to prevent new connections
       if (this.server) {
-        logger.debug('[StreamingProtocol] Stopping server');
+        logger.trace('[StreamingProtocol] Stopping server');
         this.server.stop(true); // Force immediate stop
         this.server = undefined;
-        logger.debug('[StreamingProtocol] Server stopped');
+        logger.trace('[StreamingProtocol] Server stopped');
       }
 
       // Close all streams
       for (const stream of this.streams) {
-        logger.debug('[StreamingProtocol] Closing stream connection');
+        logger.trace('[StreamingProtocol] Closing stream connection');
         try {
           stream.close();
         } catch (error) {
@@ -139,14 +139,14 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
         }
       }
       this.streams.clear();
-      logger.debug('[StreamingProtocol] All streams closed');
+      logger.trace('[StreamingProtocol] All streams closed');
 
       // Clear all intervals
       for (const interval of this.keepaliveIntervals.values()) {
         clearInterval(interval);
       }
       this.keepaliveIntervals.clear();
-      logger.debug('[StreamingProtocol] All keepalive intervals cleared');
+      logger.trace('[StreamingProtocol] All keepalive intervals cleared');
     } catch (error) {
       logger.error(`[StreamingProtocol] Error during shutdown: ${error}`);
       throw error;
