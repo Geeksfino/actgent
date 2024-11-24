@@ -108,13 +108,42 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
 
   private cleanupConnection(controller: StreamController, keepaliveInterval: TimerHandle) {
     clearInterval(keepaliveInterval);
+    // Send close event before cleanup
+    controller.enqueue(JSON.stringify({ 
+      type: "close", 
+      message: "Stream closed" 
+    }));
     this.streams.delete(controller);
     logger.trace(`[StreamingProtocol] Connection cleaned up`);
   }
 
   public broadcast(data: string): void {
+    logger.trace(`[StreamingProtocol] Broadcasting to ${this.streams.size} streams`);
     for (const stream of this.streams) {
       stream.enqueue(data);
+    }
+    logger.trace('[StreamingProtocol] Broadcast complete');
+  }
+
+  public sendResponseComplete(sessionId: string): void {
+    logger.warning(`[StreamingProtocol] Sending response complete for session ${sessionId}`);
+    try {
+      this.broadcast('[DONE]');
+      logger.warning('[StreamingProtocol] Response complete sent');
+    } catch (error) {
+      logger.warning('[StreamingProtocol] Error sending response complete:', error);
+    }
+  }
+
+  public sendStreamError(sessionId: string, error: string): void {
+    const errorEvent = JSON.stringify({
+      type: "error",
+      sessionId: sessionId,
+      error: error
+    });
+    
+    for (const stream of this.streams) {
+      stream.enqueue(errorEvent);
     }
   }
 
@@ -164,13 +193,23 @@ class StreamController {
   ) {}
 
   enqueue(data: string) {
-    if (!this.isActive) return;
+    if (!this.isActive) {
+      logger.trace('[StreamController] Skipping enqueue - stream not active');
+      return;
+    }
     
     try {
-      const message = `data: ${data}\n\n`;
-      this.controller.enqueue(this.encoder.encode(message));
+      // Special handling for [DONE] message
+      if (data === '[DONE]') {
+        logger.warning('[StreamController] Sending completion signal');
+        this.controller.enqueue(this.encoder.encode(data + '\n\n'));
+      } else {
+        const message = `data: ${data}\n\n`;
+        logger.warning('[StreamController] Enqueueing message:', message);
+        this.controller.enqueue(this.encoder.encode(message));
+      }
     } catch (error) {
-      logger.error('[StreamingProtocol] Error enqueueing stream data:', error);
+      logger.error('[StreamController] Error enqueueing stream data:', error);
     }
   }
 

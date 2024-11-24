@@ -266,9 +266,24 @@ export abstract class BaseAgent<
   }
 
   async onCreateSession(owner: string, description: string, enhancePrompt?: boolean): Promise<Session> {
-    const session = await this.createSession(owner, description, enhancePrompt);
-    this.sessions.set(session.sessionId, session);
-    return session;
+    try {
+      const session = await this.createSession(owner, description, enhancePrompt);
+      this.sessions.set(session.sessionId, session);
+
+      // Signal response completion through streaming protocol
+      // This is probably not useful at all and subject to removal because after session creation, 
+      // here we don't know yet when the streaming at the streaming callback will finish
+      if (this.communication?.streamingProtocol) {
+        logger.warning(`[BaseAgent] Signaling response_complete for session creation: ${session.sessionId}`);
+        this.communication.streamingProtocol.sendResponseComplete(session.sessionId);
+      } else {
+        logger.warning('[BaseAgent] No streaming protocol available for response_complete signal');
+      }
+      return session;
+    } catch (error) {
+      // Re-throw the error to maintain existing error handling
+      throw error;
+    }
   }
 
   async onChat(sessionId: string, message: string): Promise<void> {
@@ -276,6 +291,21 @@ export abstract class BaseAgent<
     if (!session) {
       throw new Error('Session not found');
     }
-    await session.chat(message, 'user');
+    try {
+      await session.chat(message, 'user');
+      
+      // Signal response completion through streaming protocol
+      // This is probably not useful at all and subject to removal because after session creation, 
+      // here we don't know yet when the streaming at the streaming callback will finish
+      if (this.communication?.streamingProtocol) {
+        logger.trace(`[BaseAgent] Signaling response_complete for chat: ${sessionId}`);
+        this.communication.streamingProtocol.sendResponseComplete(sessionId);
+      } else {
+        logger.trace('[BaseAgent] No streaming protocol available for response_complete signal');
+      }
+    } catch (error) {
+      // Re-throw the error to maintain existing error handling
+      throw error;
+    }
   }
 }

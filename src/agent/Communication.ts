@@ -6,13 +6,17 @@ import { logger } from '../core/Logger';
 
 export class Communication {
   private httpProtocol?: HttpProtocol;
-  private streamingProtocol?: StreamingProtocol;
+  private _streamingProtocol?: StreamingProtocol;
   private config: CommunicationConfig;
   private handler: RequestHandler;
 
   constructor(config: CommunicationConfig, handler: RequestHandler) {
     this.config = config;
     this.handler = handler;
+  }
+
+  get streamingProtocol(): StreamingProtocol | undefined {
+    return this._streamingProtocol;
   }
 
   async start(): Promise<void> {
@@ -33,13 +37,13 @@ export class Communication {
       if (this.config.enableStreaming) {
         const streamPort = this.config.streamPort || (this.config.httpPort ? this.config.httpPort + 1 : undefined);
         if (streamPort) {
-          this.streamingProtocol = new StreamingProtocol(
+          this._streamingProtocol = new StreamingProtocol(
             this.handler,
             streamPort,
             this.config.host
           );
           logger.trace('[Communication] Streaming enabled, starting streaming protocol');
-          await this.streamingProtocol.start();
+          await this._streamingProtocol.start();
         } else {
           logger.warning('Streaming enabled but no port configured');
         }
@@ -58,10 +62,10 @@ export class Communication {
     logger.trace('[Communication] Stopping communication layer...');
     try {
       // Stop streaming first to close all client connections
-      if (this.streamingProtocol) {
+      if (this._streamingProtocol) {
         logger.trace('[Communication] Stopping streaming protocol');
-        await this.streamingProtocol.stop();
-        this.streamingProtocol = undefined;
+        await this._streamingProtocol.stop();
+        this._streamingProtocol = undefined;
       }
 
       // Then stop HTTP server
@@ -81,8 +85,8 @@ export class Communication {
   public broadcastStreamData(sessionId: string, data: string): void {
     logger.trace('[Communication] Broadcasting stream data');
     try {
-      if (this.streamingProtocol && this.config.enableStreaming) {
-        this.streamingProtocol.broadcast(data);
+      if (this._streamingProtocol && this.config.enableStreaming) {
+        this._streamingProtocol.broadcast(data);
         logger.trace('[Communication] Stream data broadcast successful');
       } else {
         logger.trace('[Communication] No streaming protocol available for broadcast');
