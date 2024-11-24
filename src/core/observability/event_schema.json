@@ -1,0 +1,259 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LLM Agent Observability Event Schema",
+  "description": "Schema for monitoring and observing LLM agent behavior and performance",
+  "$defs": {
+    "eventTypes": {
+      "type": "string",
+      "enum": [
+        "TASK_STARTED",
+        "TASK_COMPLETED",
+        "PROMPT_GENERATED",
+        "STRATEGY_SELECTION",
+        "STRATEGY_SWITCH",
+        "LLM_REQUEST",
+        "LLM_RESPONSE",
+        "TOOL_SELECTION",
+        "TOOL_EXECUTION",
+        "TOOL_RESULT",
+        "CONTEXT_SWITCH",
+        "MEMORY_ACCESS",
+        "MEMORY_UPDATE",
+        "REASONING_STEP",
+        "SELF_REFLECTION",
+        "ERROR",
+        "WARNING",
+        "METRIC_REPORT"
+      ]
+    },
+    "strategyTypes": {
+      "type": "string",
+      "enum": [
+        "straight",
+        "reasoning_and_act",
+        "chain_of_thought",
+        "plan_and_act",
+        "custom"
+      ]
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+    }
+  },
+  "type": "object",
+  "required": ["eventId", "timestamp", "eventType", "agentId", "data"],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "description": "Unique identifier for the event"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the event occurred"
+    },
+    "eventType": {
+      "$ref": "#/$defs/eventTypes",
+      "description": "Type of agent event"
+    },
+    "agentId": {
+      "type": "string",
+      "description": "Unique identifier for the agent instance"
+    },
+    "sessionId": {
+      "type": "string",
+      "description": "Identifier for the current interaction session"
+    },
+    "parentEventId": {
+      "type": "string",
+      "description": "ID of the parent event if this is part of a sequence"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "taskInfo": {
+          "type": "object",
+          "properties": {
+            "taskId": { "type": "string" },
+            "taskType": { "type": "string" },
+            "taskDescription": { "type": "string" },
+            "priority": { "type": "integer", "minimum": 1, "maximum": 5 },
+            "status": { "type": "string" },
+            "progress": { "type": "number", "minimum": 0, "maximum": 100 },
+            "requiresTools": { "type": "boolean" }
+          }
+        },
+        "strategyInfo": {
+          "type": "object",
+          "properties": {
+            "currentStrategy": { "$ref": "#/$defs/strategyTypes" },
+            "previousStrategy": { "type": "string" },
+            "selectionReason": { "type": "string" },
+            "confidenceScore": { "type": "number" },
+            "contextFactors": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "factor": { "type": "string" },
+                  "weight": { "type": "number" },
+                  "impact": { "type": "string" }
+                }
+              }
+            },
+            "strategyStats": {
+              "type": "object",
+              "properties": {
+                "successRate": { "type": "number" },
+                "averageTokens": { "type": "number" },
+                "averageLatency": { "type": "number" },
+                "costEfficiency": { "type": "number" }
+              }
+            }
+          }
+        },
+        "promptInfo": {
+          "type": "object",
+          "properties": {
+            "promptId": { "type": "string" },
+            "promptTemplate": { "type": "string" },
+            "promptTokens": { "type": "integer" },
+            "variables": { "type": "object" },
+            "strategy": { "type": "string" },
+            "temperature": { "type": "number" },
+            "maxTokens": { "type": "integer" },
+            "systemPrompt": { "type": "string" },
+            "userPrompt": { "type": "string" },
+            "promptConstraints": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "reasoningInfo": {
+          "type": "object",
+          "properties": {
+            "step": { "type": "integer" },
+            "type": { "type": "string" },
+            "thought": { "type": "string" },
+            "observation": { "type": "string" },
+            "plan": { "type": "array", "items": { "type": "string" }},
+            "nextAction": { "type": "string" },
+            "alternatives": { "type": "array", "items": { "type": "string" }},
+            "confidenceScore": { "type": "number" }
+          }
+        },
+        "toolInfo": {
+          "type": "object",
+          "properties": {
+            "toolId": { "type": "string" },
+            "toolName": { "type": "string" },
+            "toolDescription": { "type": "string" },
+            "arguments": { "type": "object" },
+            "executionStart": { "type": "string", "format": "date-time" },
+            "executionEnd": { "type": "string", "format": "date-time" },
+            "status": { "type": "string" },
+            "result": { "type": "object" },
+            "error": { "type": "object" },
+            "retryCount": { "type": "integer" },
+            "selectionReason": { "type": "string" },
+            "alternativeTools": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "toolName": { "type": "string" },
+                  "relevanceScore": { "type": "number" }
+                }
+              }
+            }
+          }
+        },
+        "llmInfo": {
+          "type": "object",
+          "properties": {
+            "modelId": { "type": "string" },
+            "requestTokens": { "type": "integer" },
+            "responseTokens": { "type": "integer" },
+            "latency": { "type": "number" },
+            "cost": { "type": "number" },
+            "cached": { "type": "boolean" },
+            "outputFormat": { "type": "string" },
+            "parseSuccess": { "type": "boolean" },
+            "reasoning": { "type": "string" },
+            "confidence": { "type": "number" }
+          }
+        },
+        "contextInfo": {
+          "type": "object",
+          "properties": {
+            "previousContext": { "type": "string" },
+            "newContext": { "type": "string" },
+            "switchReason": { "type": "string" },
+            "contextSize": { "type": "integer" },
+            "relevantTools": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "memoryInfo": {
+          "type": "object",
+          "properties": {
+            "operation": { "type": "string" },
+            "memoryType": { "type": "string" },
+            "keyTerms": { "type": "array", "items": { "type": "string" }},
+            "relevanceScore": { "type": "number" },
+            "memorySize": { "type": "integer" },
+            "toolHistory": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "toolName": { "type": "string" },
+                  "usage": { "type": "integer" },
+                  "successRate": { "type": "number" }
+                }
+              }
+            }
+          }
+        },
+        "reflectionInfo": {
+          "type": "object",
+          "properties": {
+            "reflectionType": { "type": "string" },
+            "assessment": { "type": "string" },
+            "confidence": { "type": "number" },
+            "improvements": { "type": "array", "items": { "type": "string" }},
+            "reasoning": { "type": "string" },
+            "strategyEffectiveness": { "type": "number" },
+            "toolEffectiveness": { "type": "number" }
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "properties": {
+            "responseTime": { "type": "number" },
+            "tokenUsage": { "type": "integer" },
+            "memoryUsage": { "type": "integer" },
+            "costPerToken": { "type": "number" },
+            "confidenceScore": { "type": "number" },
+            "accuracyScore": { "type": "number" },
+            "toolExecutionTime": { "type": "number" },
+            "strategySuccessRate": { "type": "number" }
+          }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "version": { "type": "string" },
+        "environment": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" }},
+        "source": { "type": "string" }
+      }
+    }
+  }
+}

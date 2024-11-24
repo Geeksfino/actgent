@@ -17,6 +17,7 @@ import { Subject } from "rxjs";
 import { IClassifier } from "./IClassifier";
 import { logger, LogLevel } from './Logger';
 import { InferContextBuilder } from "./InferContextBuilder";
+import { getEventEmitter } from "./observability/AgentEventEmitter";
 
 interface StorageConfig {
   shortTerm?: MemoryStorage<any>;
@@ -56,7 +57,7 @@ export class AgentCore {
     storageConfig?: StorageConfig,
     loggingConfig?: LoggingConfig
   ) {
-    this.id = ""; // No id until registered
+    this.id = config.name; // temporary 
     this.name = config.name;
     this.role = config.role;
     this.goal = config.goal || "";
@@ -82,8 +83,6 @@ export class AgentCore {
       workingMemoryStorage
     );
 
-    //console.log("AgentCore LLM:" + JSON.stringify(this.llmConfig, null, 2));
-
     if (this.llmConfig) {
       this.llmClient = new OpenAI({
         apiKey: this.llmConfig.apiKey,
@@ -93,7 +92,7 @@ export class AgentCore {
       throw new Error("No LLM client found");
     }
 
-    this.promptManager = new PromptManager(promptTemplate); // Use the passed promptTemplate
+    this.promptManager = new PromptManager(promptTemplate);
     this.promptManager.setGoal(this.goal);
     this.promptManager.setRole(this.role);
     this.promptManager.setCapabilities(this.capabilities);
@@ -108,6 +107,11 @@ export class AgentCore {
     // Update logging initialization
     if (loggingConfig) {
       logger.setDestination(loggingConfig);
+    }
+
+    // Set agent ID in event emitter if already assigned
+    if (this.id) {
+      getEventEmitter().setCurrentAgent(this.id);
     }
 
     logger.debug('Initializing AgentCore');
@@ -241,16 +245,20 @@ export class AgentCore {
   private async processMessage(message: Message): Promise<void> {
     const sessionContext = this.sessionContextManager[message.sessionId];
 
+    // Set current agent and session in event emitter
+    const emitter = getEventEmitter();
+    emitter.setCurrentAgent(this.id);
+    emitter.setCurrentSession(message.sessionId);
+
     // Log the input message
     logger.debug(`Input: ${message.payload.input}`);
 
     sessionContext.addMessage(message);
-    await this.memory.processMessage(message, sessionContext);  // doesn't return anything. will figure out later
+    await this.memory.processMessage(message, sessionContext);
 
     const response = await this.promptLLM(message);
 
     // Handle the response based on message type
-    // logger.debug(`Response: ${response}`);
     const cleanedResponse = this.cleanLLMResponse(response);
     logger.debug(`Cleaned response: ${cleanedResponse}`);
     const extractedResponse = this.promptTemplate.extractFromLLMResponse(cleanedResponse);
@@ -259,6 +267,10 @@ export class AgentCore {
     sessionContext.addMessage(responseMessage);
 
     this.handleLLMResponse(cleanedResponse, session);
+
+    // Clear session context from event emitter after processing
+    // maybe not needed
+    // emitter.setCurrentSession(undefined);
   }
 
   public async getOrCreateSessionContext(message: Message): Promise<Session> {
@@ -576,7 +588,7 @@ export class AgentCore {
   }
 
   // Helper method to try formatting JSON strings
-  private static   parseNestedJson<T>(data: T): T {
+  private static parseNestedJson<T>(data: T): T {
     if (typeof data === 'string') {
       try {
         return JSON.parse(data) as T;

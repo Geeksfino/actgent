@@ -3,6 +3,8 @@ import { ClassificationTypeConfig } from "./IClassifier";
 import { z } from "zod";
 import { EventEmitter } from "events";
 import { InferClassificationUnion } from "./TypeInference";
+import { getEventEmitter } from "./observability/AgentEventEmitter";
+import crypto from "crypto";
 
 export type ToolInput = InferClassificationUnion<readonly ClassificationTypeConfig[]>;
 
@@ -119,7 +121,7 @@ export abstract class Tool<
     protected readonly events?: ToolEvents<ToolInput, TOutput>
   ) {
     this.options = options || ({} as TOptions);
-    this.emitter = new EventEmitter();
+    this.emitter = getEventEmitter();
   }
 
   public setContext(context: ExecutionContext) {
@@ -200,13 +202,45 @@ export abstract class Tool<
         Object.assign(finalOptions, preferences.customOptions);
       }
 
+      // Emit tool start event
+      this.emitter.emit('TOOL_STARTED', {
+        eventId: crypto.randomUUID(),
+        eventType: 'TOOL_STARTED',
+        timestamp: new Date().toISOString(),
+        data: {
+          toolInfo: {
+            toolName: this.name,
+            arguments: input,
+            executionStart: new Date().toISOString(),
+            status: 'started'
+          }
+        }
+      });
+
       await this.events?.onStart?.(input, this.context, finalOptions);
 
+      const startTime = new Date().toISOString();
       const result = await this.withRetry(
         () => this.execute(input, this.context, finalOptions),
         input,
         finalOptions
       );
+
+      // Emit tool completion event
+      this.emitter.emit('TOOL_COMPLETED', {
+        eventId: crypto.randomUUID(),
+        eventType: 'TOOL_COMPLETED',
+        timestamp: new Date().toISOString(),
+        data: {
+          toolInfo: {
+            toolName: this.name,
+            result,
+            executionStart: startTime,
+            executionEnd: new Date().toISOString(),
+            status: 'completed'
+          }
+        }
+      });
 
       await this.events?.onSuccess?.(result, input, this.context, finalOptions);
       return result;
@@ -222,12 +256,26 @@ export abstract class Tool<
               stack: error.stack,
             });
 
-      await this.events?.onError?.(
-        toolError,
-        input,
-        this.context,
-        options
-      );
+      // Emit tool error event
+      this.emitter.emit('TOOL_ERROR', {
+        eventId: crypto.randomUUID(),
+        eventType: 'TOOL_ERROR',
+        timestamp: new Date().toISOString(),
+        data: {
+          toolInfo: {
+            toolName: this.name,
+            error: {
+              name: toolError.name,
+              message: toolError.message,
+              stack: toolError.stack,
+              ...toolError.context
+            },
+            status: 'error'
+          }
+        }
+      });
+
+      await this.events?.onError?.(toolError, input, this.context, options);
       throw toolError;
     }
   }
