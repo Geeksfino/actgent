@@ -38,7 +38,13 @@ export interface IObservable {
  */
 export abstract class Observable implements IObservable {
   protected emitter = getEventEmitter();
-  protected agentId: string = 'unknown';
+  protected agentId: string;
+
+  constructor() {
+    // Get current agent ID from emitter
+    const emitter = getEventEmitter();
+    this.agentId = emitter.getCurrentAgent() || 'unknown';
+  }
 
   public emit(eventType: string, payload: AgentEvent): void {
     this.emitter.emit(eventType, payload);
@@ -57,7 +63,7 @@ export abstract class Observable implements IObservable {
     return {
       eventId: uuidv4(),
       timestamp: new Date().toISOString(),
-      eventType: error ? 'ERROR' : 'METHOD_EXECUTION',
+      eventType: error ? 'ERROR' : 'GENERAL',
       agentId: this.agentId,
       metadata: {
         version: '1.0',

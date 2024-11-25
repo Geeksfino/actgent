@@ -29,7 +29,6 @@ const TaskInfo = z.object({
 const ContextFactor = z.object({
   factor: z.string(),
   weight: z.number(),
-  impact: z.string(),
 });
 
 const StrategyStats = z.object({
@@ -45,7 +44,6 @@ const StrategyInfo = z.object({
   selectionReason: z.string().optional(),
   confidenceScore: z.number().optional(),
   contextFactors: z.array(ContextFactor).optional(),
-  strategyStats: StrategyStats.optional(),
 });
 
 const PromptInfo = z.object({

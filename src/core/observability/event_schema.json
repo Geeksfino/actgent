@@ -6,6 +6,7 @@
     "eventTypes": {
       "type": "string",
       "enum": [
+        "GENERAL",
         "TASK_STARTED",
         "TASK_COMPLETED",
         "PROMPT_GENERATED",
@@ -97,21 +98,13 @@
                 "type": "object",
                 "properties": {
                   "factor": { "type": "string" },
-                  "weight": { "type": "number" },
-                  "impact": { "type": "string" }
-                }
-              }
-            },
-            "strategyStats": {
-              "type": "object",
-              "properties": {
-                "successRate": { "type": "number" },
-                "averageTokens": { "type": "number" },
-                "averageLatency": { "type": "number" },
-                "costEfficiency": { "type": "number" }
+                  "weight": { "type": "number" }
+                },
+                "required": ["factor", "weight"]
               }
             }
-          }
+          },
+          "required": ["currentStrategy"]
         },
         "promptInfo": {
           "type": "object",
