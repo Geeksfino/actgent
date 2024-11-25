@@ -1,8 +1,10 @@
-import { InferMode } from "../core/InferContext";
-import { InferContext } from "../core/InferContext";
-import { InferStrategy } from "../core/InferContext";
+import type { InferMode, InferContext, InferStrategy } from "../core/InferContext";
 import { logger } from "../core/Logger";
 import { loadModule} from 'cld3-asm';
+import { Observable, Observe } from "../core/observability/Observable";
+import { AgentEvent } from "../core/observability/event_validation";
+import { v4 as uuidv4 } from 'uuid';
+import { getEventBuilder } from '../core/observability/AgentEventBuilder';
 
 export type ReActMode = 'react' | 'direct';
 
@@ -11,7 +13,7 @@ export interface ComplexityScore {
   reason: string;
 }
 
-export abstract class ReActModeStrategy implements InferStrategy {
+export abstract class ReActModeStrategy extends Observable implements InferStrategy {
   protected complexityThreshold: number = 5;
   protected currentMode: InferMode = {
     value: 'direct',
@@ -20,13 +22,47 @@ export abstract class ReActModeStrategy implements InferStrategy {
   
   abstract evaluateMode(context: InferContext): Promise<ReActMode>;
   
+  protected abstract getSelectionReason(context: InferContext): string;
+  
+  @Observe({
+    metadata: {
+      source: 'ReActModeStrategy',
+      tags: ['complexity', 'scoring']
+    }
+  })
   protected calculateComplexity(input: string): ComplexityScore {
-    return {
+    const score = {
       score: 0,
       reason: "Base implementation"
     };
+    
+    const event = getEventBuilder()
+      .create()
+      .withType('METRIC_REPORT')
+      .withSource('ReActModeStrategy')
+      .withTags(['complexity', 'scoring'])
+      .withData({
+        strategyInfo: {
+          currentStrategy: 'custom',
+          confidenceScore: score.score,
+          contextFactors: [{
+            factor: 'complexity',
+            weight: 1.0
+          }]
+        }
+      })
+      .build();
+    
+    this.emit('METRIC_REPORT', event as AgentEvent);
+    return score;
   }
 
+  @Observe({
+    metadata: {
+      source: 'ReActModeStrategy',
+      tags: ['mode', 'evaluation', 'strategy']
+    }
+  })
   async evaluateStrategyMode(context: InferContext): Promise<InferMode> {
     const taskContext: InferContext = {
       ...context,
@@ -34,24 +70,82 @@ export abstract class ReActModeStrategy implements InferStrategy {
       accumulatedContext: context.metadata?.accumulatedContext as string[] || [],
       conversationHistory: context.metadata?.conversationHistory || [],
     };
-    logger.trace(`Evaluating mode for context: ${JSON.stringify(taskContext, null, 2)}`);
-    const mode = await this.evaluateMode(taskContext);
 
-    this.currentMode = {
+    logger.trace(`Evaluating mode for context: ${JSON.stringify(taskContext, null, 2)}`);
+    
+    // Emit strategy selection start
+    const selectionEvent = getEventBuilder()
+      .create()
+      .withType('STRATEGY_SELECTION')
+      .withSource('ReActModeStrategy')
+      .withTags(['mode', 'evaluation', 'strategy'])
+      .withData({
+        context: {
+          input: taskContext.input,
+          mode: this.currentMode
+        }
+      })
+      .build();
+
+    this.emit('STRATEGY_SELECTION', selectionEvent as AgentEvent);
+
+    const mode = await this.evaluateMode(taskContext);
+    const newMode: InferMode = {
       value: mode,
       metadata: {
-        contextSize: context.recentMessages?.length,
-        hasSubstantialContext: context.recentMessages && 
-                              context.recentMessages.length >= 3,
-        accumulatedContextSize: taskContext.accumulatedContext?.length || 0
+        reason: this.getSelectionReason(taskContext)
       }
     };
-    
+
+    // Only emit switch event if mode changed
+    if (newMode.value !== this.currentMode.value) {
+      const switchEvent = getEventBuilder()
+        .create()
+        .withType('STRATEGY_SWITCH')
+        .withSource('ReActModeStrategy')
+        .withTags(['mode', 'switch', 'strategy'])
+        .withData({
+          previousMode: this.currentMode,
+          newMode: newMode,
+          reason: newMode.metadata?.reason
+        })
+        .build();
+
+      this.emit('STRATEGY_SWITCH', switchEvent as AgentEvent);
+      this.currentMode = newMode;
+    }
+
     return this.currentMode;
   }
 
-  getCurrentMode(): InferMode {
+  public getCurrentMode(): InferMode {
     return this.currentMode;
+  }
+
+  // Map react/direct modes to schema-defined strategy types
+  protected mapModeToStrategy(mode: ReActMode): string {
+    return mode === 'react' ? 'REACT_MODE' : 'DIRECT_MODE';
+  }
+
+  /**
+   * Override generateEvent to provide specific event generation logic
+   */
+  public generateEvent(methodName: string, result: any, error?: any): Partial<AgentEvent> {
+    const event = getEventBuilder()
+      .create()
+      .withType(error ? 'ERROR' : 'GENERAL')
+      .withSource('ReActModeStrategy')
+      .withTags(['mode', 'evaluation', 'strategy'])
+      .withData({
+        strategyInfo: {
+          currentStrategy: result?.currentStrategy || 'straight',
+          confidenceScore: result?.confidenceScore || 1,
+          contextFactors: result?.contextFactors || []
+        }
+      })
+      .build();
+
+    return event;
   }
 }
 
@@ -157,6 +251,11 @@ export class KeywordBasedStrategy extends ReActModeStrategy {
     return complexity.score >= this.complexityThreshold ? 'react' : 'direct';
   }
 
+  protected getSelectionReason(context: InferContext): string {
+    return `Context size: ${context.recentMessages?.length}, Has substantial context: ${context.recentMessages && 
+                              context.recentMessages.length >= 3}`;
+  }
+
   private async detectLanguage(input: string): Promise<string> {
     const languageResult = await this.detector.then(detector => detector.findLanguage(input));
     return languageResult.language;
@@ -180,6 +279,10 @@ export class UserPreferenceStrategy extends ReActModeStrategy {
   async evaluateMode(context: InferContext): Promise<ReActMode> {
     return this.preference;
   }
+
+  protected getSelectionReason(context: InferContext): string {
+    return `User preference: ${this.preference}`;
+  }
 }
 
 export class AutoSwitchingStrategy extends ReActModeStrategy {
@@ -201,6 +304,16 @@ export class AutoSwitchingStrategy extends ReActModeStrategy {
 
     const complexity = this.calculateComplexity(context.input || '');
     return complexity.score >= this.complexityThreshold ? 'react' : 'direct';
+  }
+
+  protected getSelectionReason(context: InferContext): string {
+    const hasSubstantialContext = context.accumulatedContext && 
+                                 context.accumulatedContext.length >= this.contextThreshold;
+    if (hasSubstantialContext) {
+      return `Sufficient context accumulated: ${context.accumulatedContext?.length}`;
+    } else {
+      return `Complexity score: ${this.calculateComplexity(context.input || '').score}`;
+    }
   }
 }
 
@@ -224,4 +337,4 @@ export class ReActModeSelector {
   getCurrentMode(): ReActMode {
     return this.mode;
   }
-} 
+}

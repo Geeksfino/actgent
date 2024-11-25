@@ -4,4 +4,7 @@ export { AgentBuilder } from './AgentBuilder';
 export { Communication } from './Communication';
 export { ReActClassifier } from './ReActClassifier';
 export { ReActPromptTemplate as DefaultPromptTemplate } from './ReActPromptTemplate';
-export { ReActModeStrategy } from './ReActModeStrategy';
+export { ReActModeStrategy,  
+        AutoSwitchingStrategy, 
+        KeywordBasedStrategy, 
+        UserPreferenceStrategy  } from './ReActModeStrategy';
