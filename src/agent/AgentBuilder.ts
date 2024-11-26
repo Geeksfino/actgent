@@ -7,12 +7,15 @@ import { SchemaBuilder } from './SchemaBuilder';
 import { ExecutionContext } from '../core/ExecutionContext';
 import { KeywordBasedStrategy } from './ReActModeStrategy';
 import { InferStrategy } from '../core/InferContext';
+import { ReActLLMResponseStreamParser } from './ReActLLMResponseStreamParser';
+import { getEventEmitter } from '../core/observability/AgentEventEmitter';
 
 export class AgentBuilder {
   private coreConfig: AgentCoreConfig;
   private serviceConfig: AgentServiceConfig;
   private context: ExecutionContext;
   private promptStrategy: InferStrategy;
+  private streamParser: ReActLLMResponseStreamParser | undefined;
 
   constructor(
     coreConfig: AgentCoreConfig, 
@@ -40,6 +43,13 @@ export class AgentBuilder {
     return this;
   }
 
+  public withStreamObservability(): AgentBuilder {
+    this.streamParser = new ReActLLMResponseStreamParser();
+    // Initialize event emitter
+    getEventEmitter().initialize();
+    return this;
+  }
+
   public create(): BaseAgent<Readonly<ClassificationTypeConfig[]>, ReActClassifier<Readonly<ClassificationTypeConfig[]>>, ReActPromptTemplate<Readonly<ClassificationTypeConfig[]>>> {
     const schemaBuilder = new SchemaBuilder(this.coreConfig.instructions || []);
     const schemaTypes = schemaBuilder.build();
@@ -53,6 +63,7 @@ export class AgentBuilder {
     type SchemaTypes = Readonly<T>;
 
     const builderStrategy = this.promptStrategy;
+    const streamParser = this.streamParser;
 
     class DynamicAgent extends BaseAgent<SchemaTypes, ReActClassifier<SchemaTypes>, ReActPromptTemplate<SchemaTypes>> {
       private readonly promptStrategy: InferStrategy;
@@ -66,6 +77,14 @@ export class AgentBuilder {
         super(coreConfig, serviceConfig, schemaTypes);
         this.setExecutionContext(context);
         this.promptStrategy = promptStrategy;
+
+        // Set up stream callback if stream parser exists
+        if (streamParser) {
+          const callback = (chunk: string) => {
+            streamParser.processChunk(chunk);
+          };
+          this.core.registerStreamCallback(callback);
+        }
       }
 
       protected useClassifierClass(): new () => ReActClassifier<SchemaTypes> {

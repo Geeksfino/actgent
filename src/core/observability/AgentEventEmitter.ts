@@ -12,6 +12,7 @@ export class AgentEventEmitter extends EventEmitter {
   private agentListeners: Map<string, Set<(...args: any[]) => void>> = new Map();
   private currentAgentId: string = 'unknown';
   private currentSessionId: string = 'unknown';
+  private isInitialized: boolean = false;
 
   private constructor() {
     super();
@@ -24,6 +25,13 @@ export class AgentEventEmitter extends EventEmitter {
       AgentEventEmitter.instance = new AgentEventEmitter();
     }
     return AgentEventEmitter.instance;
+  }
+
+  public initialize(): void {
+    if (!this.isInitialized) {
+      logger.trace('Initializing AgentEventEmitter');
+      this.isInitialized = true;
+    }
   }
 
   // Add middleware to the pipeline
@@ -136,6 +144,10 @@ export class AgentEventEmitter extends EventEmitter {
 
   // Override emit to include validation and middleware processing
   public emit(eventType: string, event: AgentEvent): boolean {
+    if (!this.isInitialized) {
+      logger.warning('AgentEventEmitter not initialized, events may be lost');
+      this.initialize();
+    }
     const currentAgent = this.getCurrentAgent();
     logger.trace(`Emitting event for agent: ${currentAgent}`);
 

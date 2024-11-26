@@ -165,14 +165,22 @@
         "reasoningInfo": {
           "type": "object",
           "properties": {
-            "step": { "type": "integer" },
-            "type": { "type": "string" },
-            "thought": { "type": "string" },
-            "observation": { "type": "string" },
-            "plan": { "type": "array", "items": { "type": "string" }},
-            "nextAction": { "type": "string" },
-            "alternatives": { "type": "array", "items": { "type": "string" }},
-            "confidenceScore": { "type": "number" }
+            "analysis": { "type": "string" },
+            "plan": { 
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "thoughts": { "type": "string" },
+            "next_steps": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "expectation": { "type": "string" },
+            "review": { "type": "string" },
+            "suggestions": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
           }
         },
         "toolInfo": {

@@ -47,23 +47,17 @@ const monitorEvents = () => {
     console.log('[OBSERVABILITY] Initializing event monitoring');
     
     // Register event listeners
-    const eventTypes = ['STRATEGY_SELECTION', 'STRATEGY_SWITCH'];
+    const eventTypes = ['STRATEGY_SELECTION', 'STRATEGY_SWITCH', 'LLM_RESPONSE'];
     
     eventTypes.forEach(type => {
       const upperType = type.toUpperCase();
       
       // Register basic strategy listener
-      if (['STRATEGY_SELECTION', 'STRATEGY_SWITCH'].includes(upperType)) {
-        const strategyListener = (event: AgentEvent) => {
-          console.log(chalk.magenta(`\n[STRATEGY] Event received: ${upperType}`));
-          console.log(chalk.gray('Raw event:'), event);
-        };
-        emitter.on(upperType, strategyListener);
-        console.log(chalk.green(`[OBSERVABILITY] Successfully registered strategy listener for ${upperType}`));
-      }
+      emitter.on(upperType, (event) => {
+        console.log(chalk.green(`[OBSERVABILITY] Received ${upperType} event:`), JSON.stringify(event, null, 2));
+      });
     });
 
-    // Mark listeners as initialized
     global.__eventListenersInitialized = true;
   }
 
@@ -144,9 +138,9 @@ async function main() {
     destination: 'console'
   };
 
-  // Build and start agent
   const agent = await new AgentBuilder(coreConfig, svcConfig)
     .withPromptStrategy(strategy)
+    .withStreamObservability()
     .build("ObservableAgent", [...schemaTypes]);
   
   if (!options.network) {

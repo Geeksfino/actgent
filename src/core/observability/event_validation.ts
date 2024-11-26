@@ -78,15 +78,24 @@ const PromptInfo = z.object({
   promptConstraints: z.array(z.string()).optional(),
 });
 
-const ReasoningInfo = z.object({
-  step: z.number().int().optional(),
-  type: z.string().optional(),
-  thought: z.string().optional(),
-  observation: z.string().optional(),
+export interface ReasoningInfo {
+  analysis?: string;
+  plan?: string[];
+  thoughts?: string;
+  next_steps?: string[];
+  expectation?: string;
+  review?: string;
+  suggestions?: string[];
+}
+
+const reasoningInfoSchema = z.object({
+  analysis: z.string().optional(),
   plan: z.array(z.string()).optional(),
-  nextAction: z.string().optional(),
-  alternatives: z.array(z.string()).optional(),
-  confidenceScore: z.number().optional(),
+  thoughts: z.string().optional(),
+  next_steps: z.array(z.string()).optional(),
+  expectation: z.string().optional(),
+  review: z.string().optional(),
+  suggestions: z.array(z.string()).optional()
 });
 
 const LLMInfo = z.object({
@@ -192,7 +201,7 @@ export const EventDataSchema = z.object({
   taskInfo: TaskInfo.optional(),
   strategyInfo: StrategyInfo.optional(),
   promptInfo: PromptInfo.optional(),
-  reasoningInfo: ReasoningInfo.optional(),
+  reasoningInfo: reasoningInfoSchema.optional(),
   llmInfo: LLMInfo.optional(),
   contextInfo: ContextInfo.optional(),
   memoryInfo: MemoryInfo.optional(),
