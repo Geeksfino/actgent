@@ -29,13 +29,31 @@ const TaskInfo = z.object({
 const ContextFactor = z.object({
   factor: z.string(),
   weight: z.number(),
+  info: z.record(z.any()).optional()
 });
 
-const StrategyStats = z.object({
-  successRate: z.number(),
-  averageTokens: z.number(),
-  averageLatency: z.number(),
-  costEfficiency: z.number(),
+const MatchedPattern = z.object({
+  pattern: z.string(),
+  weight: z.number(),
+  matches: z.array(z.string())
+});
+
+const ContextHistoryEntry = z.object({
+  timestamp: z.string(),
+  length: z.number(),
+  threshold: z.number()
+});
+
+const UserPreference = z.object({
+  value: z.string(),
+  source: z.string(),
+  timestamp: z.string()
+});
+
+const DecisionMetrics = z.object({
+  matchedPatterns: z.array(MatchedPattern).optional(),
+  contextHistory: z.array(ContextHistoryEntry).optional(),
+  userPreference: UserPreference.optional()
 });
 
 const StrategyInfo = z.object({
@@ -44,6 +62,7 @@ const StrategyInfo = z.object({
   selectionReason: z.string().optional(),
   confidenceScore: z.number().optional(),
   contextFactors: z.array(ContextFactor).optional(),
+  decisionMetrics: DecisionMetrics.optional()
 });
 
 const PromptInfo = z.object({

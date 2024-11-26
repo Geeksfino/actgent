@@ -17,6 +17,7 @@ program
   .option('--stream-port <port>', 'streaming server port (network mode only)', '5679')
   .option('--description <text>', 'Input description for local mode')
   .option('--strategy <type>', 'Strategy type (auto, keyword, preference)', 'auto')
+  .option('--mode <mode>', 'Mode for preference strategy (react/direct), required when strategy=preference', 'direct')
   .option('--trace-events', 'Show all events in trace mode', false)
   .option('--preferred-mode <mode>', 'Preferred mode for UserPreferenceStrategy (react/direct)', 'react');
 
@@ -27,6 +28,12 @@ if (process.argv.length === 2) {
 
 program.parse();
 const options = program.opts();
+
+// Validate strategy and mode combination
+if (options.strategy === 'preference' && !['react', 'direct'].includes(options.mode)) {
+  console.error(chalk.red('Error: When using preference strategy, --mode must be either "react" or "direct"'));
+  process.exit(1);
+}
 
 // Configure logging
 logger.setLevel(options.logLevel?.toLowerCase() as LogLevel || 'info');
@@ -76,7 +83,7 @@ const configureStrategy = (type: string) => {
     case 'keyword':
       return new KeywordBasedStrategy();
     case 'preference':
-      return new UserPreferenceStrategy(options.preferredMode as 'react' | 'direct');
+      return new UserPreferenceStrategy(options.mode as 'react' | 'direct');
     case 'auto':
     default:
       return new AutoSwitchingStrategy();
@@ -85,11 +92,6 @@ const configureStrategy = (type: string) => {
 
 async function main() {
   
-  // Initialize event monitoring first - do this BEFORE agent setup
-  const emitter = monitorEvents();
-  
-  // Define service config
-  // Define the schema types
   const strategy = configureStrategy(options.strategy);
   const schemaTypes = [
     {
@@ -152,7 +154,8 @@ async function main() {
       process.stdout.write(delta);
     });
   }
-  
+    
+  const emitter = monitorEvents();
   console.log("running agent");
   await agent.run(loggingConfig);
 

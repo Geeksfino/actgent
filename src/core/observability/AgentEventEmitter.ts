@@ -60,12 +60,7 @@ export class AgentEventEmitter extends EventEmitter {
 
   // Get current agent ID
   public getCurrentAgent(): string {
-    const stack = new Error().stack;
-    if (!stack) return this.currentAgentId;
-
-    // Extract agent ID from call stack
-    const match = stack.match(/Agent\[([\w-]+)\]/);
-    return match ? match[1] : this.currentAgentId;
+     return this.currentAgentId;
   }
 
   // Get current session ID

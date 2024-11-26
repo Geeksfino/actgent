@@ -11,6 +11,13 @@ export type ReActMode = 'react' | 'direct';
 export interface ComplexityScore {
   score: number;
   reason: string;
+  matches: Array<{pattern: string, weight: number, match: string}>;
+}
+
+interface PatternMatch {
+  pattern: string;
+  weight: number;
+  match: string;
 }
 
 export abstract class ReActModeStrategy extends Observable implements InferStrategy {
@@ -27,7 +34,8 @@ export abstract class ReActModeStrategy extends Observable implements InferStrat
   protected calculateComplexity(input: string): ComplexityScore {
     const score = {
       score: 0,
-      reason: "Base implementation"
+      reason: "Base implementation",
+      matches: []
     };
     
     return score;
@@ -44,20 +52,60 @@ export abstract class ReActModeStrategy extends Observable implements InferStrat
 
     logger.trace(`Evaluating mode for context: ${JSON.stringify(taskContext, null, 2)}`);
     
+    // Calculate complexity once and store it
+    const complexity = this.calculateComplexity(taskContext.input || '');
     const mode = await this.evaluateMode(taskContext);
+    
     const newMode: InferMode = {
       value: mode,
       metadata: {
-        reason: this.getSelectionReason(taskContext)
+        reason: complexity.reason,
+        complexity: complexity
       }
     };
 
-    if (newMode.value !== this.currentMode.value) {
-      const oldMode = this.currentMode;
-      this.currentMode = newMode;
-    }
+    const oldMode = this.currentMode;
+    this.currentMode = newMode;
 
     return this.currentMode;
+  }
+
+  public generateEvent(methodName: string, result: any, error?: any): Partial<AgentEvent> {
+    const complexity = result?.metadata?.complexity || { score: 0, reason: 'No complexity data', matches: [] };
+    const currentStrategy = this.mapModeToStrategy(result?.value as ReActMode);
+    
+    return {
+      metadata: {
+        version: '1.0',
+        source: this.constructor.name,
+        tags: ['mode', 'evaluation', 'strategy']
+      },
+      eventType: 'STRATEGY_SELECTION',
+      data: {
+        strategyInfo: {
+          currentStrategy,
+          confidenceScore: Math.abs(complexity.score) / this.complexityThreshold,
+          contextFactors: [
+            {
+              factor: 'complexity_score',
+              weight: complexity.score,
+              info: {
+                threshold: this.complexityThreshold,
+                reason: complexity.reason
+              }
+            }
+          ],
+          decisionMetrics: {
+            matchedPatterns: complexity.matches.map((match: PatternMatch) => ({
+              pattern: match.pattern,
+              weight: match.weight,
+              score: match.weight,
+              matches: [match.match]
+            }))
+          }
+        }
+      }
+    };
   }
 
   public getCurrentMode(): InferMode {
@@ -71,40 +119,8 @@ export abstract class ReActModeStrategy extends Observable implements InferStrat
     return mode === 'react' ? 'reasoning_and_act' : 'straight';
   }
 
-  /**
-   * Base implementation of generateEvent
-   */
-  public generateEvent(methodName: string, result: any, error?: any): Partial<AgentEvent> {
-    // Check if this is a mode switch
-    const isSwitch = result?.oldMode && result?.newMode;
-    const eventType = isSwitch ? 'STRATEGY_SWITCH' : 'STRATEGY_SELECTION';
-    
-    const data: any = {
-      strategyInfo: {
-        currentStrategy: this.mapModeToStrategy(isSwitch ? result.newMode.value : this.currentMode.value),
-        confidenceScore: 1,
-        contextFactors: [
-          {
-            factor: isSwitch ? 'mode_change' : 'evaluation',
-            weight: 1
-          }
-        ]
-      }
-    };
-
-    // Add switch-specific fields if this is a mode switch
-    if (isSwitch) {
-      data.strategyInfo.previousStrategy = this.mapModeToStrategy(result.oldMode.value);
-      data.strategyInfo.selectionReason = result.newMode.metadata?.reason || 'Mode switch triggered';
-    }
-
-    return getEventBuilder()
-      .create()
-      .withType(eventType)
-      .withSource(this.constructor.name)
-      .withTags(['mode', isSwitch ? 'switch' : 'evaluation', 'strategy'])
-      .withData(data)
-      .build();
+  protected getStrategySpecificInfo(context: InferContext): Record<string, any> {
+    return {};
   }
 }
 
@@ -131,14 +147,15 @@ export class KeywordBasedStrategy extends ReActModeStrategy {
     
     // Default react patterns
     this.defaultReactPatterns = new Map([
-      [/\b(plan|consider|analyze|determine if|depends on|find the best|calculate)\b/i, 3],
+      [/\b(plan|consider|analyze|determine|depends on|find the best|calculate)\b/i, 3],
       [/\b(if|might|should|could|depending on)\b/i, 2],
       [/\b(compare|better|best|more efficient|most suitable)\b/i, 2],
       [/\b(balance|trade-off|optimize|constraints)\b/i, 3],
       [/\b(and|then|while|but)\b/i, 1],
       [/\b(because|due to|implies|suggests)\b/i, 2],
       [/\b(possibly|potentially|estimate|assume)\b/i, 2],
-      [/\b(strategy|policy|factors|scenarios|outcomes)\b/i, 3]
+      [/\b(strategy|policy|factors|scenarios|outcomes)\b/i, 3],
+      [/\b(implement|architect|structure|pattern)\b/i, 4]
     ]);
     this.activeReactPatterns = new Map(this.defaultReactPatterns);
 
@@ -148,7 +165,7 @@ export class KeywordBasedStrategy extends ReActModeStrategy {
       [/\b(provide|give me|find|look up|define)\b/i, 1],
       [/\b(current|latest|retrieve|fetch|show)\b/i, 1],
       [/\b(list|summarize|show|display|detail)\b/i, 1],
-      [/\b(give|state|tell me|reveal)\b/i, 1],
+      [/\b(give|state|tell me|explain|reveal)\b/i, 1],
       [/\b(confirm|verify|double-check)\b/i, 1]
     ]);
     this.activeDirectPatterns = new Map(this.defaultDirectPatterns);
@@ -158,6 +175,8 @@ export class KeywordBasedStrategy extends ReActModeStrategy {
       directPatterns: this.defaultDirectPatterns,
       complexityThreshold: this.complexityThreshold
     });
+    
+    logger.info('Initialized KeywordBasedStrategy');
   }
 
   public addLanguagePattern(language: string, pattern: PatternConfig) {
@@ -167,29 +186,72 @@ export class KeywordBasedStrategy extends ReActModeStrategy {
   protected calculateComplexity(input: string): ComplexityScore {
     let score = 0;
     let reasons: string[] = [];
+    const matches: Array<{pattern: string, weight: number, match: string}> = [];
 
+    logger.info(`Calculating complexity for input: "${input}"`);
+    
     this.activeReactPatterns.forEach((value, pattern) => {
       if (pattern.test(input)) {
         score += value;
-        reasons.push(`ReAct pattern "${pattern.source}": +${value}`);
-      } else {
-        logger.trace(`Pattern "${pattern.source}" did not match input: "${input}"`);
+        const match = input.match(pattern);
+        if (match) {
+          matches.push({
+            pattern: pattern.source,
+            weight: value,
+            match: match[0]
+          });
+          reasons.push(`ReAct pattern "${pattern.source}" matched "${match[0]}": +${value}`);
+          logger.info(`Matched ReAct pattern: ${pattern.source}, score: +${value}, match: "${match[0]}"`);
+        }
       }
     });
 
     this.activeDirectPatterns.forEach((value, pattern) => {
       if (pattern.test(input)) {
         score -= value;
-        reasons.push(`Direct pattern "${pattern.source}": -${value}`);
-      } else {
-        logger.trace(`Pattern "${pattern.source}" did not match input: "${input}"`);
+        const match = input.match(pattern);
+        if (match) {
+          matches.push({
+            pattern: pattern.source,
+            weight: -value,
+            match: match[0]
+          });
+          reasons.push(`Direct pattern "${pattern.source}" matched "${match[0]}": -${value}`);
+          logger.info(`Matched Direct pattern: ${pattern.source}, score: -${value}, match: "${match[0]}"`);
+        }
       }
     });
 
-    logger.debug(`Final complexity score: ${score} (${reasons.join(', ')})`);
+    logger.info(`Final complexity score: ${score} (threshold: ${this.complexityThreshold})`);
+    if (reasons.length === 0) {
+      reasons.push('No patterns matched');
+    }
+    
     return {
       score,
-      reason: reasons.join(', ')
+      reason: reasons.join(', '),
+      matches
+    };
+  }
+
+  protected getStrategySpecificInfo(context: InferContext): Record<string, any> {
+    const complexity = this.calculateComplexity(context.input || '');
+    
+    return {
+      confidenceScore: Math.abs(complexity.score) / this.complexityThreshold,
+      contextFactors: [
+        { 
+          factor: 'complexity_score', 
+          weight: complexity.score,
+          info: { 
+            threshold: this.complexityThreshold,
+            reason: complexity.reason
+          }
+        }
+      ],
+      decisionMetrics: {
+        matchedPatterns: complexity.matches
+      }
     };
   }
 
@@ -211,8 +273,8 @@ export class KeywordBasedStrategy extends ReActModeStrategy {
   }
 
   protected getSelectionReason(context: InferContext): string {
-    return `Context size: ${context.recentMessages?.length}, Has substantial context: ${context.recentMessages && 
-                              context.recentMessages.length >= 3}`;
+    const complexity = this.calculateComplexity(context.input || '');
+    return complexity.reason;
   }
 
   private async detectLanguage(input: string): Promise<string> {
@@ -221,31 +283,9 @@ export class KeywordBasedStrategy extends ReActModeStrategy {
   }
 }
 
-export class UserPreferenceStrategy extends ReActModeStrategy {
-  private preference: ReActMode;
-  
-  constructor(preference: ReActMode) {
-    super();
-    logger.debug(`Use UserPreferenceStrategy`);
-    this.preference = preference;
-    // Set the currentMode based on preference immediately
-    this.currentMode = {
-      value: preference,
-      metadata: {}
-    };
-  }
-
-  async evaluateMode(context: InferContext): Promise<ReActMode> {
-    return this.preference;
-  }
-
-  protected getSelectionReason(context: InferContext): string {
-    return `User preference: ${this.preference}`;
-  }
-}
-
 export class AutoSwitchingStrategy extends ReActModeStrategy {
   private contextThreshold = 3;
+  private contextHistory: Array<{timestamp: string, length: number}> = [];
   
   constructor() {
     super();
@@ -253,16 +293,20 @@ export class AutoSwitchingStrategy extends ReActModeStrategy {
   }
 
   async evaluateMode(context: InferContext): Promise<ReActMode> {
-    const hasSubstantialContext = context.accumulatedContext && 
-                                 context.accumulatedContext.length >= this.contextThreshold;
+    const contextLength = context.accumulatedContext?.length || 0;
     
-    if (hasSubstantialContext) {
-      logger.debug('Sufficient context accumulated, switching to direct mode');
-      return 'direct';
+    // Record context length history
+    this.contextHistory.push({
+      timestamp: new Date().toISOString(),
+      length: contextLength
+    });
+    
+    // Keep last 10 entries
+    if (this.contextHistory.length > 10) {
+      this.contextHistory.shift();
     }
-
-    const complexity = this.calculateComplexity(context.input || '');
-    return complexity.score >= this.complexityThreshold ? 'react' : 'direct';
+    
+    return contextLength >= this.contextThreshold ? 'react' : 'direct';
   }
 
   protected getSelectionReason(context: InferContext): string {
@@ -273,6 +317,74 @@ export class AutoSwitchingStrategy extends ReActModeStrategy {
     } else {
       return `Complexity score: ${this.calculateComplexity(context.input || '').score}`;
     }
+  }
+
+  protected getStrategySpecificInfo(context: InferContext): Record<string, any> {
+    const contextLength = context.accumulatedContext?.length || 0;
+    return {
+      confidenceScore: contextLength / this.contextThreshold,
+      contextFactors: [
+        { 
+          factor: 'context_length', 
+          weight: contextLength,
+          info: { threshold: this.contextThreshold }
+        }
+      ],
+      decisionMetrics: {
+        contextHistory: this.contextHistory.map(entry => ({
+          ...entry,
+          threshold: this.contextThreshold
+        }))
+      }
+    };
+  }
+}
+
+export class UserPreferenceStrategy extends ReActModeStrategy {
+  private preference: ReActMode;
+  private preferenceTimestamp: string;
+  private preferenceSource: string = 'user_explicit';
+
+  constructor(preference: ReActMode, source: string = 'user_explicit') {
+    super();
+    logger.debug(`Use UserPreferenceStrategy`);
+    this.preference = preference;
+    this.preferenceSource = source;
+    this.preferenceTimestamp = new Date().toISOString();
+    this.currentMode = {
+      value: preference,
+      metadata: {
+        reason: `User explicitly set mode to ${preference}`
+      }
+    };
+  }
+
+  async evaluateMode(context: InferContext): Promise<ReActMode> {
+    return this.preference;
+  }
+
+  protected getSelectionReason(context: InferContext): string {
+    return `User preference: ${this.preference}`;
+  }
+
+  protected getStrategySpecificInfo(context: InferContext): Record<string, any> {
+    return {
+      confidenceScore: 1, // User preference is always 100% confident
+      contextFactors: [
+        { 
+          factor: 'user_preference',
+          weight: 1,
+          info: { source: this.preferenceSource }
+        }
+      ],
+      decisionMetrics: {
+        userPreference: {
+          value: this.preference,
+          source: this.preferenceSource,
+          timestamp: this.preferenceTimestamp
+        }
+      }
+    };
   }
 }
 

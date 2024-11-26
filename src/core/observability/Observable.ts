@@ -39,12 +39,24 @@ export interface IObservable {
  */
 export abstract class Observable implements IObservable {
   protected emitter = getEventEmitter();
-  agentId: string;
+  private _agentId: string | undefined;
 
   constructor() {
-    // Get current agent ID from emitter
-    const emitter = getEventEmitter();
-    this.agentId = emitter.getCurrentAgent() || 'unknown';
+    // Don't get agent ID in constructor
+  }
+
+  // Getter for agentId that lazily gets it from emitter
+  get agentId(): string {
+    if (!this._agentId) {
+      const emitter = getEventEmitter();
+      this._agentId = emitter.getCurrentAgent() || 'unknown';
+    }
+    return this._agentId;
+  }
+
+  // Allow setting agentId explicitly
+  set agentId(id: string) {
+    this._agentId = id;
   }
 
   public emit(eventType: string, payload: AgentEvent): void {
@@ -86,19 +98,16 @@ export function Observe(config: ObserveConfig = {}) {
   ) {
     const originalMethod = descriptor.value;
 
-    descriptor.value = async function (...args: any[]) {
-      // Get the observable instance from config or this
+    descriptor.value = async function (this: Observable, ...args: any[]) {
+      // Get the observable instance - prefer explicit config.observable, fallback to 'this'
       const observable = config.observable || this;
       
       if (!(observable instanceof Observable)) {
-        throw new Error('@Observe decorator requires either config.observable to be set or this to be an Observable instance');
+        throw new Error('@Observe decorator requires an Observable instance');
       }
 
       try {
-        // Execute the original method
-        const result = await originalMethod.apply(this, args);
-
-        // Handle both ObservableResult and regular returns
+        const result = await originalMethod.apply(observable, args);
         let eventData: Partial<AgentEvent>;
         let finalResult = result;
 
@@ -111,12 +120,15 @@ export function Observe(config: ObserveConfig = {}) {
           eventData = observable.generateEvent(propertyKey, result);
         }
 
+        console.log("eventData: ", eventData);
+        console.log("this.agentId: ", this.agentId);
+
         // Ensure required fields are present
         const event: AgentEvent = {
           ...eventData,
           eventId: eventData.eventId || uuidv4(),
           timestamp: eventData.timestamp || new Date().toISOString(),
-          eventType: eventData.eventType || 'METHOD_EXECUTION',
+          eventType: eventData.eventType || 'GENERAL',
           agentId: eventData.agentId || observable.agentId,
           metadata: {
             ...eventData.metadata,

@@ -98,9 +98,47 @@
                 "type": "object",
                 "properties": {
                   "factor": { "type": "string" },
-                  "weight": { "type": "number" }
+                  "weight": { "type": "number" },
+                  "info": { 
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            },
+            "decisionMetrics": {
+              "type": "object",
+              "properties": {
+                "matchedPatterns": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "pattern": { "type": "string" },
+                      "weight": { "type": "number" },
+                      "matches": { "type": "array", "items": { "type": "string" }}
+                    }
+                  }
                 },
-                "required": ["factor", "weight"]
+                "contextHistory": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "timestamp": { "type": "string" },
+                      "length": { "type": "number" },
+                      "threshold": { "type": "number" }
+                    }
+                  }
+                },
+                "userPreference": {
+                  "type": "object",
+                  "properties": {
+                    "value": { "type": "string" },
+                    "source": { "type": "string" },
+                    "timestamp": { "type": "string" }
+                  }
+                }
               }
             }
           },
