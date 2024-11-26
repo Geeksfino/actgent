@@ -120,9 +120,6 @@ export function Observe(config: ObserveConfig = {}) {
           eventData = observable.generateEvent(propertyKey, result);
         }
 
-        console.log("eventData: ", eventData);
-        console.log("this.agentId: ", this.agentId);
-
         // Ensure required fields are present
         const event: AgentEvent = {
           ...eventData,

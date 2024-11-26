@@ -56,53 +56,46 @@ export abstract class ReActModeStrategy extends Observable implements InferStrat
     const complexity = this.calculateComplexity(taskContext.input || '');
     const mode = await this.evaluateMode(taskContext);
     
+    const oldMode = this.currentMode;
     const newMode: InferMode = {
       value: mode,
       metadata: {
         reason: complexity.reason,
-        complexity: complexity
+        complexity: complexity,
+        oldMode
       }
     };
 
-    const oldMode = this.currentMode;
     this.currentMode = newMode;
 
     return this.currentMode;
   }
 
   public generateEvent(methodName: string, result: any, error?: any): Partial<AgentEvent> {
-    const complexity = result?.metadata?.complexity || { score: 0, reason: 'No complexity data', matches: [] };
-    const currentStrategy = this.mapModeToStrategy(result?.value as ReActMode);
-    
+    const context = {
+      input: result?.metadata?.input || result?.context?.input || '',
+      metadata: result?.metadata || {}
+    };
+
+    // Let each strategy provide its own metrics
+    const strategyInfo = this.getStrategySpecificInfo(context);
+
+    // It's a STRATEGY_SWITCH only if the mode actually changed
+    const oldMode = result?.metadata?.oldMode?.value;
+    const newMode = this.currentMode.value;
+    const isStrategySwitch = oldMode !== undefined && oldMode !== newMode;
+
     return {
       metadata: {
-        version: '1.0',
+        version: "1.0",
         source: this.constructor.name,
-        tags: ['mode', 'evaluation', 'strategy']
+        tags: ["mode", "evaluation", "strategy"]
       },
-      eventType: 'STRATEGY_SELECTION',
+      eventType: isStrategySwitch ? "STRATEGY_SWITCH" : "STRATEGY_SELECTION",
       data: {
         strategyInfo: {
-          currentStrategy,
-          confidenceScore: Math.abs(complexity.score) / this.complexityThreshold,
-          contextFactors: [
-            {
-              factor: 'complexity_score',
-              weight: complexity.score,
-              info: {
-                threshold: this.complexityThreshold,
-                reason: complexity.reason
-              }
-            }
-          ],
-          decisionMetrics: {
-            matchedPatterns: complexity.matches.map((match: PatternMatch) => ({
-              pattern: match.pattern,
-              weight: match.weight,
-              score: match.weight,
-              matches: [match.match]
-            }))
-          }
+          currentStrategy: this.mapModeToStrategy(this.currentMode.value as ReActMode),
+          ...strategyInfo  // Each strategy provides its own confidenceScore, contextFactors, and decisionMetrics
         }
       }
     };
@@ -142,7 +135,7 @@ export class KeywordBasedStrategy extends ReActModeStrategy {
 
   constructor(config?: PatternConfig) {
     super();
-    logger.info(`Use KeywordBasedStrategy`);
+    logger.debug(`Use KeywordBasedStrategy`);
     this.complexityThreshold = config?.complexityThreshold ?? 2;
     
     // Default react patterns
@@ -175,8 +168,6 @@ export class KeywordBasedStrategy extends ReActModeStrategy {
       directPatterns: this.defaultDirectPatterns,
       complexityThreshold: this.complexityThreshold
     });
-    
-    logger.info('Initialized KeywordBasedStrategy');
   }
 
   public addLanguagePattern(language: string, pattern: PatternConfig) {
@@ -235,7 +226,8 @@ export class KeywordBasedStrategy extends ReActModeStrategy {
   }
 
   protected getStrategySpecificInfo(context: InferContext): Record<string, any> {
-    const complexity = this.calculateComplexity(context.input || '');
+    // Use stored complexity from evaluateStrategyMode
+    const complexity = context.metadata?.complexity || this.calculateComplexity(context.input || '');
     
     return {
       confidenceScore: Math.abs(complexity.score) / this.complexityThreshold,
@@ -250,7 +242,12 @@ export class KeywordBasedStrategy extends ReActModeStrategy {
         }
       ],
       decisionMetrics: {
-        matchedPatterns: complexity.matches
+        matchedPatterns: complexity.matches.map((match: PatternMatch) => ({
+          pattern: match.pattern,
+          weight: match.weight,
+          score: match.weight,
+          matches: [match.match]  // Each pattern needs a matches array
+        }))
       }
     };
   }
@@ -285,7 +282,8 @@ export class KeywordBasedStrategy extends ReActModeStrategy {
 
 export class AutoSwitchingStrategy extends ReActModeStrategy {
   private contextThreshold = 3;
-  private contextHistory: Array<{timestamp: string, length: number}> = [];
+  private contextHistory: Array<{timestamp: string, length: number, mode: ReActMode}> = [];
+  private lastTransition: { from: ReActMode, to: ReActMode, timestamp: string } | null = null;
   
   constructor() {
     super();
@@ -294,49 +292,99 @@ export class AutoSwitchingStrategy extends ReActModeStrategy {
 
   async evaluateMode(context: InferContext): Promise<ReActMode> {
     const contextLength = context.accumulatedContext?.length || 0;
+    const previousMode = this.currentMode.value as ReActMode;
+    const newMode = contextLength >= this.contextThreshold ? 'react' : 'direct';
     
-    // Record context length history
+    // Record context length and mode history
     this.contextHistory.push({
       timestamp: new Date().toISOString(),
-      length: contextLength
+      length: contextLength,
+      mode: newMode
     });
     
     // Keep last 10 entries
     if (this.contextHistory.length > 10) {
       this.contextHistory.shift();
     }
+
+    // Track mode transitions
+    if (previousMode !== newMode) {
+      this.lastTransition = {
+        from: previousMode,
+        to: newMode,
+        timestamp: new Date().toISOString()
+      };
+    }
+
+    // Update current mode with metadata
+    this.currentMode = {
+      value: newMode,
+      metadata: {
+        reason: this.getSelectionReason(context),
+        contextLength,
+        threshold: this.contextThreshold,
+        transition: this.lastTransition
+      }
+    };
     
-    return contextLength >= this.contextThreshold ? 'react' : 'direct';
+    return newMode;
   }
 
   protected getSelectionReason(context: InferContext): string {
-    const hasSubstantialContext = context.accumulatedContext && 
-                                 context.accumulatedContext.length >= this.contextThreshold;
+    const contextLength = context.accumulatedContext?.length || 0;
+    const hasSubstantialContext = contextLength >= this.contextThreshold;
+    
     if (hasSubstantialContext) {
-      return `Sufficient context accumulated: ${context.accumulatedContext?.length}`;
+      return `Sufficient context accumulated: ${contextLength} >= ${this.contextThreshold}`;
     } else {
-      return `Complexity score: ${this.calculateComplexity(context.input || '').score}`;
+      const remaining = this.contextThreshold - contextLength;
+      return `Insufficient context: ${contextLength}/${this.contextThreshold} (needs ${remaining} more)`;
     }
   }
 
   protected getStrategySpecificInfo(context: InferContext): Record<string, any> {
     const contextLength = context.accumulatedContext?.length || 0;
+    const recentHistory = this.contextHistory.slice(-3); // Last 3 entries
+    const modeDistribution = this.contextHistory.reduce((acc, entry) => {
+      acc[entry.mode] = (acc[entry.mode] || 0) + 1;
+      return acc;
+    }, {} as Record<ReActMode, number>);
+
     return {
-      confidenceScore: contextLength / this.contextThreshold,
+      confidenceScore: Math.min(contextLength / this.contextThreshold, 1),
       contextFactors: [
         { 
           factor: 'context_length', 
           weight: contextLength,
-          info: { threshold: this.contextThreshold }
+          info: { 
+            threshold: this.contextThreshold,
+            progress: `${contextLength}/${this.contextThreshold}`,
+            isThresholdMet: contextLength >= this.contextThreshold
+          }
         }
       ],
       decisionMetrics: {
-        contextHistory: this.contextHistory.map(entry => ({
-          ...entry,
-          threshold: this.contextThreshold
-        }))
+        recentHistory,
+        modeDistribution,
+        lastTransition: this.lastTransition,
+        stabilityScore: this.calculateStabilityScore()
       }
     };
+  }
+
+  private calculateStabilityScore(): number {
+    if (this.contextHistory.length < 2) return 1;
+    
+    // Count mode changes in recent history
+    let changes = 0;
+    for (let i = 1; i < this.contextHistory.length; i++) {
+      if (this.contextHistory[i].mode !== this.contextHistory[i-1].mode) {
+        changes++;
+      }
+    }
+    
+    // Return stability score (1 = very stable, 0 = very unstable)
+    return Math.max(0, 1 - (changes / this.contextHistory.length));
   }
 }
 
