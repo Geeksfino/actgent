@@ -37,34 +37,22 @@ const monitorEvents = () => {
   
   // Store listeners in a more permanent way
   if (!global.__eventListenersInitialized) {
-    console.log('[DEBUG] Initializing event monitoring');
-    const eventCount: { [key: string]: number } = {};
+    console.log('[OBSERVABILITY] Initializing event monitoring');
     
-    // Debug helper
-    const debugEventListener = (type: string) => (event: AgentEvent) => {
-      console.log(chalk.blue(`\n[DEBUG] Event received: ${type}`));
-      console.log(chalk.gray('Raw event:'), event);
-    };
-
     // Register event listeners
-    const eventTypes = ['STRATEGY_SELECTION', 'STRATEGY_SWITCH', 'METRIC_REPORT', 'GENERAL', 'ERROR'];
+    const eventTypes = ['STRATEGY_SELECTION', 'STRATEGY_SWITCH'];
     
     eventTypes.forEach(type => {
       const upperType = type.toUpperCase();
       
-      // Register basic debug listener
-      const debugListener = debugEventListener(upperType);
-      emitter.on(upperType, debugListener);
-      console.log(chalk.green(`[DEBUG] Successfully registered listener for ${upperType}`));
-      
       // Register basic strategy listener
-      if (['STRATEGY_SELECTION', 'STRATEGY_SWITCH', 'METRIC_REPORT'].includes(upperType)) {
+      if (['STRATEGY_SELECTION', 'STRATEGY_SWITCH'].includes(upperType)) {
         const strategyListener = (event: AgentEvent) => {
           console.log(chalk.magenta(`\n[STRATEGY] Event received: ${upperType}`));
           console.log(chalk.gray('Raw event:'), event);
         };
         emitter.on(upperType, strategyListener);
-        console.log(chalk.green(`[DEBUG] Successfully registered strategy listener for ${upperType}`));
+        console.log(chalk.green(`[OBSERVABILITY] Successfully registered strategy listener for ${upperType}`));
       }
     });
 
@@ -155,7 +143,6 @@ async function main() {
   };
 
   // Build and start agent
-  console.log("calling agent builder");
   const agent = await new AgentBuilder(coreConfig, svcConfig)
     .withPromptStrategy(strategy)
     .build("ObservableAgent", [...schemaTypes]);

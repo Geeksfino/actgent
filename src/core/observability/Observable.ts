@@ -16,6 +16,7 @@ export interface ObservableResult<T> {
 export interface ObserveConfig {
   // Optional fields
   emitAsync?: boolean;
+  observable?: Observable;
   metadata?: {
     version?: string;
     environment?: string;
@@ -38,7 +39,7 @@ export interface IObservable {
  */
 export abstract class Observable implements IObservable {
   protected emitter = getEventEmitter();
-  protected agentId: string;
+  agentId: string;
 
   constructor() {
     // Get current agent ID from emitter
@@ -85,9 +86,12 @@ export function Observe(config: ObserveConfig = {}) {
   ) {
     const originalMethod = descriptor.value;
 
-    descriptor.value = async function (this: Observable, ...args: any[]) {
-      if (!(this instanceof Observable)) {
-        throw new Error('@Observe decorator can only be used on Observable class methods');
+    descriptor.value = async function (...args: any[]) {
+      // Get the observable instance from config or this
+      const observable = config.observable || this;
+      
+      if (!(observable instanceof Observable)) {
+        throw new Error('@Observe decorator requires either config.observable to be set or this to be an Observable instance');
       }
 
       try {
@@ -100,11 +104,11 @@ export function Observe(config: ObserveConfig = {}) {
 
         if (result && typeof result === 'object' && 'result' in result && 'event' in result) {
           // Case 1: Method returns ObservableResult
-          eventData = result.event || this.generateEvent(propertyKey, result.result);
+          eventData = result.event || observable.generateEvent(propertyKey, result.result);
           finalResult = result.result;
         } else {
           // Case 2: Use the observable's generateEvent method
-          eventData = this.generateEvent(propertyKey, result);
+          eventData = observable.generateEvent(propertyKey, result);
         }
 
         // Ensure required fields are present
@@ -113,7 +117,7 @@ export function Observe(config: ObserveConfig = {}) {
           eventId: eventData.eventId || uuidv4(),
           timestamp: eventData.timestamp || new Date().toISOString(),
           eventType: eventData.eventType || 'METHOD_EXECUTION',
-          agentId: eventData.agentId || this.agentId,
+          agentId: eventData.agentId || observable.agentId,
           metadata: {
             ...eventData.metadata,
             ...config.metadata
@@ -121,21 +125,21 @@ export function Observe(config: ObserveConfig = {}) {
         };
 
         if (config.emitAsync) {
-          await this.emitAsync(event.eventType, event);
+          await observable.emitAsync(event.eventType, event);
         } else {
-          this.emit(event.eventType, event);
+          observable.emit(event.eventType, event);
         }
 
         return finalResult;
       } catch (error) {
         // Handle errors
-        const errorEvent = this.generateEvent(propertyKey, null, error);
+        const errorEvent = observable.generateEvent(propertyKey, null, error);
         const event: AgentEvent = {
           ...errorEvent,
           eventId: errorEvent.eventId || uuidv4(),
           timestamp: errorEvent.timestamp || new Date().toISOString(),
           eventType: errorEvent.eventType || 'ERROR',
-          agentId: errorEvent.agentId || this.agentId,
+          agentId: errorEvent.agentId || observable.agentId,
           metadata: {
             ...errorEvent.metadata,
             ...config.metadata
@@ -143,9 +147,9 @@ export function Observe(config: ObserveConfig = {}) {
         };
 
         if (config.emitAsync) {
-          await this.emitAsync(event.eventType, event);
+          await observable.emitAsync(event.eventType, event);
         } else {
-          this.emit(event.eventType, event);
+          observable.emit(event.eventType, event);
         }
         
         throw error;

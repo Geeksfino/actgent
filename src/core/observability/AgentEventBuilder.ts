@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { AgentEvent } from './event_validation';
 import { getEventEmitter } from './AgentEventEmitter';
+import { logger } from '../../core/Logger';
 
 /**
  * Builder class for creating AgentEvent objects with required fields
@@ -26,17 +27,20 @@ export class AgentEventBuilder {
   public create(): AgentEventBuilder {
     const emitter = getEventEmitter();
     const currentAgent = emitter.getCurrentAgent();
-    console.log(`[DEBUG] Creating event for agent: ${currentAgent}`);
+    const currentSession = emitter.getCurrentSession();
+    logger.trace(`Creating event for agent: ${currentAgent} in session: ${currentSession}`);
     
     this.event = {
       eventId: uuidv4(),
       timestamp: new Date().toISOString(),
       agentId: currentAgent,
-      eventType: 'GENERAL',
+      sessionId: currentSession,
       metadata: {
-        version: '1.0',
-        source: 'AgentEventBuilder'
-      }
+        version: "1.0",
+        source: "",
+        tags: [],
+      },
+      data: {},
     };
     return this;
   }
@@ -45,7 +49,7 @@ export class AgentEventBuilder {
    * Set the event type
    */
   public withType(type: string): AgentEventBuilder {
-    console.log(`[DEBUG] Setting event type to: ${type}`);
+    logger.trace(`Setting event type to: ${type}`);
     this.event.eventType = type.toUpperCase(); // Ensure consistent case
     return this;
   }
@@ -95,7 +99,7 @@ export class AgentEventBuilder {
    * Build and return the event
    */
   public build(): Partial<AgentEvent> {
-    console.log(`[DEBUG] Building event with type: ${this.event.eventType}`);
+    logger.trace(`Building event with type: ${this.event.eventType}`);
     const event = { ...this.event };
     this.event = {};
     return event;

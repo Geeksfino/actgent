@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import { AgentEvent, validateAgentEvent } from './event_validation';
+import { logger } from '../../core/Logger';
 
 // Event middleware type
 export type EventMiddleware = (event: AgentEvent) => AgentEvent | null;
@@ -10,15 +11,16 @@ export class AgentEventEmitter extends EventEmitter {
   private middleware: EventMiddleware[] = [];
   private agentListeners: Map<string, Set<(...args: any[]) => void>> = new Map();
   private currentAgentId: string = 'unknown';
+  private currentSessionId: string = 'unknown';
 
   private constructor() {
     super();
-    console.log('[DEBUG] AgentEventEmitter singleton initialized');
+    logger.trace('AgentEventEmitter singleton initialized');
   }
 
   public static getInstance(): AgentEventEmitter {
     if (!AgentEventEmitter.instance) {
-      console.log('[DEBUG] Creating AgentEventEmitter singleton');
+      logger.trace('Creating AgentEventEmitter singleton');
       AgentEventEmitter.instance = new AgentEventEmitter();
     }
     return AgentEventEmitter.instance;
@@ -47,12 +49,13 @@ export class AgentEventEmitter extends EventEmitter {
       this.agentListeners.set(agentId, new Set());
     }
     this.currentAgentId = agentId;
-    console.log(`[DEBUG] Setting current agent to: ${agentId}`);
+    logger.trace(`Setting current agent to: ${agentId}`);
   }
 
   // Set current session ID
   public setCurrentSession(sessionId: string): void {
-    // Removed currentSessionId property
+    this.currentSessionId = sessionId;
+    logger.trace(`Setting current session to: ${sessionId}`);
   }
 
   // Get current agent ID
@@ -67,13 +70,12 @@ export class AgentEventEmitter extends EventEmitter {
 
   // Get current session ID
   public getCurrentSession(): string {
-    // Removed currentSessionId property
-    return 'unknown';
+    return this.currentSessionId;
   }
 
   // Clear session context (but keep agent)
   public clearSessionContext(): void {
-    // Removed currentSessionId property
+    this.currentSessionId = 'unknown';
   }
 
   // Process event through middleware pipeline
@@ -97,7 +99,7 @@ export class AgentEventEmitter extends EventEmitter {
   public on(eventType: string, listener: (event: AgentEvent) => void): this {
     // Normalize event type to uppercase when registering listeners
     const normalizedType = eventType.toUpperCase();
-    console.log(`[DEBUG] Registering listener for event type: ${normalizedType}`);
+    logger.trace(`Registering listener for event type: ${normalizedType}`);
     
     // Add to agent-specific listeners
     const currentAgent = this.getCurrentAgent();
@@ -108,7 +110,7 @@ export class AgentEventEmitter extends EventEmitter {
     
     // Add to global listeners
     super.on(normalizedType, listener);
-    console.log(`[DEBUG] Current listeners for ${normalizedType}: ${this.listenerCount(normalizedType)}`);
+    logger.trace(`Current listeners for ${normalizedType}: ${this.listenerCount(normalizedType)}`);
     return this;
   }
 
@@ -133,36 +135,36 @@ export class AgentEventEmitter extends EventEmitter {
     // Normalize event type to uppercase when counting listeners
     const normalizedType = eventType.toUpperCase();
     const count = super.listenerCount(normalizedType);
-    console.log(`[DEBUG] Listener count for ${normalizedType}: ${count}`);
+    logger.trace(`Listener count for ${normalizedType}: ${count}`);
     return count;
   }
 
   // Override emit to include validation and middleware processing
   public emit(eventType: string, event: AgentEvent): boolean {
     const currentAgent = this.getCurrentAgent();
-    console.log(`[DEBUG] Emitting event for agent: ${currentAgent}`);
+    logger.trace(`Emitting event for agent: ${currentAgent}`);
 
     try {
       // Normalize event type to uppercase
       const normalizedType = eventType.toUpperCase();
       
-      console.log(`[DEBUG] Emitting event of type ${normalizedType} from agent ${currentAgent}:`, JSON.stringify(event, null, 2));
+      logger.trace(`Emitting event of type ${normalizedType} from agent ${currentAgent}: ${JSON.stringify(event, null, 2)}`);
       
       // Validate the event
       validateAgentEvent(event);
-      console.log(`[DEBUG] Event validation passed`);
+      logger.trace('Event validation passed\n');
 
       // Process event through middleware
       const processedEvent = this.processEvent(event);
       if (!processedEvent) {
-        console.log(`[DEBUG] Event filtered out by middleware`);
+        logger.trace('Event filtered out by middleware');
         return false;
       }
 
       // Emit to all listeners since we're already tracking agent-specific ones
       return super.emit(normalizedType, processedEvent);
     } catch (error) {
-      console.error('[ERROR] Failed to emit event:', error);
+      logger.error('Failed to emit event:', error);
       return false;
     }
   }
@@ -182,7 +184,7 @@ export class AgentEventEmitter extends EventEmitter {
       // Emit the processed event
       return super.emit(eventType, processedEvent);
     } catch (error) {
-      console.error('Error emitting event:', error);
+      logger.error('Error emitting event:', error);
       return false;
     }
   }

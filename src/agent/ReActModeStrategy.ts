@@ -24,45 +24,16 @@ export abstract class ReActModeStrategy extends Observable implements InferStrat
   
   protected abstract getSelectionReason(context: InferContext): string;
   
-  @Observe({
-    metadata: {
-      source: 'ReActModeStrategy',
-      tags: ['complexity', 'scoring']
-    }
-  })
   protected calculateComplexity(input: string): ComplexityScore {
     const score = {
       score: 0,
       reason: "Base implementation"
     };
     
-    const event = getEventBuilder()
-      .create()
-      .withType('METRIC_REPORT')
-      .withSource('ReActModeStrategy')
-      .withTags(['complexity', 'scoring'])
-      .withData({
-        strategyInfo: {
-          currentStrategy: 'custom',
-          confidenceScore: score.score,
-          contextFactors: [{
-            factor: 'complexity',
-            weight: 1.0
-          }]
-        }
-      })
-      .build();
-    
-    this.emit('METRIC_REPORT', event as AgentEvent);
     return score;
   }
 
-  @Observe({
-    metadata: {
-      source: 'ReActModeStrategy',
-      tags: ['mode', 'evaluation', 'strategy']
-    }
-  })
+  @Observe()
   async evaluateStrategyMode(context: InferContext): Promise<InferMode> {
     const taskContext: InferContext = {
       ...context,
@@ -73,22 +44,6 @@ export abstract class ReActModeStrategy extends Observable implements InferStrat
 
     logger.trace(`Evaluating mode for context: ${JSON.stringify(taskContext, null, 2)}`);
     
-    // Emit strategy selection start
-    const selectionEvent = getEventBuilder()
-      .create()
-      .withType('STRATEGY_SELECTION')
-      .withSource('ReActModeStrategy')
-      .withTags(['mode', 'evaluation', 'strategy'])
-      .withData({
-        context: {
-          input: taskContext.input,
-          mode: this.currentMode
-        }
-      })
-      .build();
-
-    this.emit('STRATEGY_SELECTION', selectionEvent as AgentEvent);
-
     const mode = await this.evaluateMode(taskContext);
     const newMode: InferMode = {
       value: mode,
@@ -97,21 +52,8 @@ export abstract class ReActModeStrategy extends Observable implements InferStrat
       }
     };
 
-    // Only emit switch event if mode changed
     if (newMode.value !== this.currentMode.value) {
-      const switchEvent = getEventBuilder()
-        .create()
-        .withType('STRATEGY_SWITCH')
-        .withSource('ReActModeStrategy')
-        .withTags(['mode', 'switch', 'strategy'])
-        .withData({
-          previousMode: this.currentMode,
-          newMode: newMode,
-          reason: newMode.metadata?.reason
-        })
-        .build();
-
-      this.emit('STRATEGY_SWITCH', switchEvent as AgentEvent);
+      const oldMode = this.currentMode;
       this.currentMode = newMode;
     }
 
@@ -122,30 +64,47 @@ export abstract class ReActModeStrategy extends Observable implements InferStrat
     return this.currentMode;
   }
 
-  // Map react/direct modes to schema-defined strategy types
+  /**
+   * Maps internal mode to schema-defined strategy type
+   */
   protected mapModeToStrategy(mode: ReActMode): string {
-    return mode === 'react' ? 'REACT_MODE' : 'DIRECT_MODE';
+    return mode === 'react' ? 'reasoning_and_act' : 'straight';
   }
 
   /**
-   * Override generateEvent to provide specific event generation logic
+   * Base implementation of generateEvent
    */
   public generateEvent(methodName: string, result: any, error?: any): Partial<AgentEvent> {
-    const event = getEventBuilder()
-      .create()
-      .withType(error ? 'ERROR' : 'GENERAL')
-      .withSource('ReActModeStrategy')
-      .withTags(['mode', 'evaluation', 'strategy'])
-      .withData({
-        strategyInfo: {
-          currentStrategy: result?.currentStrategy || 'straight',
-          confidenceScore: result?.confidenceScore || 1,
-          contextFactors: result?.contextFactors || []
-        }
-      })
-      .build();
+    // Check if this is a mode switch
+    const isSwitch = result?.oldMode && result?.newMode;
+    const eventType = isSwitch ? 'STRATEGY_SWITCH' : 'STRATEGY_SELECTION';
+    
+    const data: any = {
+      strategyInfo: {
+        currentStrategy: this.mapModeToStrategy(isSwitch ? result.newMode.value : this.currentMode.value),
+        confidenceScore: 1,
+        contextFactors: [
+          {
+            factor: isSwitch ? 'mode_change' : 'evaluation',
+            weight: 1
+          }
+        ]
+      }
+    };
 
-    return event;
+    // Add switch-specific fields if this is a mode switch
+    if (isSwitch) {
+      data.strategyInfo.previousStrategy = this.mapModeToStrategy(result.oldMode.value);
+      data.strategyInfo.selectionReason = result.newMode.metadata?.reason || 'Mode switch triggered';
+    }
+
+    return getEventBuilder()
+      .create()
+      .withType(eventType)
+      .withSource(this.constructor.name)
+      .withTags(['mode', isSwitch ? 'switch' : 'evaluation', 'strategy'])
+      .withData(data)
+      .build();
   }
 }
 
