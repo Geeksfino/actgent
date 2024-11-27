@@ -25,6 +25,13 @@ interface StorageConfig {
   working?: MemoryStorage<any>;
 }
 
+// Special control sequence for stream completion
+const STREAM_CONTROL = {
+  COMPLETE: "\0COMPLETE:",  // Null byte followed by completion reason
+};
+
+export type StreamCallback = (delta: string, control?: { type: 'completion', reason: string }) => void;
+
 export class AgentCore {
   public id: string;
   public name: string;
@@ -35,7 +42,7 @@ export class AgentCore {
   public llmConfig: LLMConfig | null;
   public executionContext: ExecutionContext = ExecutionContext.getInstance();
   promptTemplate: IAgentPromptTemplate;
-  private streamCallbacks: Set<(delta: string) => void> = new Set();
+  private streamCallbacks: Set<StreamCallback> = new Set();
   streamBuffer: string = "";
   llmClient: OpenAI;
   toolRegistry: Map<string, Tool<any, any, any>> = new Map();
@@ -199,12 +206,12 @@ export class AgentCore {
     }
   }
 
-  public registerStreamCallback(callback: (delta: string) => void): void {
+  public registerStreamCallback(callback: StreamCallback): void {
     logger.debug('Registering stream callback');
     this.streamCallbacks.add(callback);
   }
 
-  public removeStreamCallback(callback: (delta: string) => void): void {
+  public removeStreamCallback(callback: StreamCallback): void {
     logger.debug('Removing stream callback');
     this.streamCallbacks.delete(callback);
   }
@@ -370,10 +377,29 @@ export class AgentCore {
           this.streamBuffer += delta;
           this.processStreamBuffer();
         }
-        this.processStreamBuffer(true);
+
+        // Make sure all buffered data is sent before completion signal
+        if (this.streamBuffer) {
+          this.processStreamBuffer(true);
+        }
+
         const lastChunk = chunks[chunks.length - 1];
-        const toolCalls = lastChunk.choices[0];
-        logger.debug(`toolCalls: ${JSON.stringify(toolCalls, null, 2)}`);
+        const finishReason = lastChunk.choices[0]?.finish_reason;
+        logger.info(`[promptLLM] Stream finished with reason: ${finishReason}`);
+        
+        // Only send completion signal after all data is processed
+        if (this.llmConfig?.streamMode && 
+            this.streamCallbacks.size > 0 && 
+            finishReason && 
+            !this.streamBuffer) {  // Ensure buffer is empty
+          for (const callback of this.streamCallbacks) {
+            try {
+              callback("", { type: 'completion', reason: finishReason });
+            } catch (error) {
+              logger.error(`Error in stream callback during completion signal: ${error}`);
+            }
+          }
+        }
       } else {
         // Non-stream mode
         const nonStreamConfig: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming =
@@ -385,7 +411,9 @@ export class AgentCore {
         const response =
           await this.llmClient.chat.completions.create(nonStreamConfig);
         const message = response.choices[0].message;
-        const isToolCalls = response.choices[0].finish_reason === "tool_calls";
+        const finishReason = response.choices[0].finish_reason;
+        logger.info(`[promptLLM] Non-stream finished with reason: ${finishReason}`);
+        const isToolCalls = finishReason === "tool_calls";
 
         if (isToolCalls && message.tool_calls) {
           responseContent = JSON.stringify({
