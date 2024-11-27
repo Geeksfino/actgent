@@ -4,6 +4,7 @@ import { z } from "zod";
 import { EventEmitter } from "events";
 import { InferClassificationUnion } from "./TypeInference";
 import { getEventEmitter } from "./observability/AgentEventEmitter";
+import { AgentEventBuilder } from './observability/AgentEventBuilder';
 import crypto from "crypto";
 
 export type ToolInput = InferClassificationUnion<readonly ClassificationTypeConfig[]>;
@@ -202,20 +203,22 @@ export abstract class Tool<
         Object.assign(finalOptions, preferences.customOptions);
       }
 
-      // Emit tool start event
-      this.emitter.emit('TOOL_STARTED', {
-        eventId: crypto.randomUUID(),
-        eventType: 'TOOL_STARTED',
-        timestamp: new Date().toISOString(),
-        data: {
+      // Emit tool start event using AgentEventBuilder
+      const startEvent = AgentEventBuilder.getInstance()
+        .create()
+        .withType('TOOL_STARTED')
+        .withSource(this.name)
+        .withData({
           toolInfo: {
             toolName: this.name,
             arguments: input,
             executionStart: new Date().toISOString(),
             status: 'started'
           }
-        }
-      });
+        })
+        .build();
+      
+      this.emitter.emit('TOOL_STARTED', startEvent);
 
       await this.events?.onStart?.(input, this.context, finalOptions);
 
@@ -226,12 +229,12 @@ export abstract class Tool<
         finalOptions
       );
 
-      // Emit tool completion event
-      this.emitter.emit('TOOL_COMPLETED', {
-        eventId: crypto.randomUUID(),
-        eventType: 'TOOL_COMPLETED',
-        timestamp: new Date().toISOString(),
-        data: {
+      // Emit tool completion event using AgentEventBuilder
+      const completeEvent = AgentEventBuilder.getInstance()
+        .create()
+        .withType('TOOL_COMPLETED')
+        .withSource(this.name)
+        .withData({
           toolInfo: {
             toolName: this.name,
             result,
@@ -239,8 +242,10 @@ export abstract class Tool<
             executionEnd: new Date().toISOString(),
             status: 'completed'
           }
-        }
-      });
+        })
+        .build();
+      
+      this.emitter.emit('TOOL_COMPLETED', completeEvent);
 
       await this.events?.onSuccess?.(result, input, this.context, finalOptions);
       return result;
@@ -256,12 +261,12 @@ export abstract class Tool<
               stack: error.stack,
             });
 
-      // Emit tool error event
-      this.emitter.emit('TOOL_ERROR', {
-        eventId: crypto.randomUUID(),
-        eventType: 'TOOL_ERROR',
-        timestamp: new Date().toISOString(),
-        data: {
+      // Emit tool error event using AgentEventBuilder
+      const errorEvent = AgentEventBuilder.getInstance()
+        .create()
+        .withType('TOOL_ERROR')
+        .withSource(this.name)
+        .withData({
           toolInfo: {
             toolName: this.name,
             error: {
@@ -272,8 +277,10 @@ export abstract class Tool<
             },
             status: 'error'
           }
-        }
-      });
+        })
+        .build();
+      
+      this.emitter.emit('TOOL_ERROR', errorEvent);
 
       await this.events?.onError?.(toolError, input, this.context, options);
       throw toolError;
