@@ -3,8 +3,15 @@ import { BaseCommunicationProtocol, AgentRequestHandler } from "../ICommunicatio
 import { logger } from "../../core/Logger";
 import { type ServeOptions } from "bun";
 import { Session } from "../../core/Session";
+import { getEventEmitter } from "../../core/observability/AgentEventEmitter";
 
 type TimerHandle = ReturnType<typeof setInterval>;
+
+// Stream controller type enum
+export enum StreamType {
+  RAW = 'raw',
+  OBSERVE = 'observe'
+}
 
 export class StreamingProtocol extends BaseCommunicationProtocol {
   private server?: Server;
@@ -44,7 +51,8 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
 
   private handleRequest(req: Request): Response {
     logger.trace(`[StreamingProtocol] New stream connection request`);
-
+    const url = new URL(req.url);
+    
     const headers = {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, OPTIONS",
@@ -63,47 +71,107 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
       return new Response("Method not allowed", { status: 405, headers });
     }
 
+    // Handle different endpoints
+    switch (url.pathname) {
+      case '/raw':
+        return this.handleRawStream(req, headers);
+      case '/observe':
+        return this.handleObservabilityStream(req, headers);
+      default:
+        return new Response('Not Found', { status: 404 });
+    }
+  }
+
+  private handleRawStream(req: Request, headers: Record<string, string>): Response {
     try {
       const stream = new ReadableStream({
-        start: (controller) => this.initializeStream(controller, req),
+        start: (controller) => {
+          const streamController = new StreamController(controller, this, StreamType.RAW);
+          this.streams.add(streamController);
+          
+          // Keep the stream alive
+          let isAlive = true;
+          
+          const keepStreamAlive = () => {
+            if (!isAlive) return;
+            streamController.sendKeepalive();
+          };
+
+          // Send initial connected message
+          streamController.enqueue(JSON.stringify({ type: "connected" }));
+
+          // Setup more frequent keepalive messages
+          const keepaliveInterval = setInterval(keepStreamAlive, 5000); // Every 5 seconds
+
+          // Handle client disconnect
+          req.signal.addEventListener("abort", () => {
+            logger.trace(`[StreamingProtocol] Client disconnected`);
+            isAlive = false;
+            this.cleanupConnection(streamController, keepaliveInterval);
+          });
+        }
       });
 
       return new Response(stream, { headers });
     } catch (error) {
-      logger.error(`[StreamingProtocol] Error in stream request:`, error);
+      logger.error(`[StreamingProtocol] Error in raw stream:`, error);
       return new Response("Internal Server Error", { status: 500, headers });
     }
   }
 
-  private initializeStream(controller: ReadableStreamDefaultController, req: Request) {
-    logger.trace(`[StreamingProtocol] Initializing stream...`);
+  private handleObservabilityStream(req: Request, headers: Record<string, string>): Response {
+    try {
+      const stream = new ReadableStream({
+        start: (controller) => {
+          const streamController = new StreamController(controller, this, StreamType.OBSERVE);
+          
+          // Send initial connected message
+          streamController.enqueue(JSON.stringify({ type: "connected" }));
 
-    const streamController = new StreamController(controller, this);
-    
-    // Keep the stream alive
-    let isAlive = true;
-    
-    const keepStreamAlive = () => {
-      if (!isAlive) return;
-      streamController.sendKeepalive();
-    };
+          // Register event listeners for all event types
+          const emitter = getEventEmitter();
+          // Normalize event types to uppercase to match emitter's normalization
+          const eventTypes = ['STRATEGY_SELECTION', 'STRATEGY_SWITCH', 'LLM_RESPONSE'].map(type => type.toUpperCase());
+          
+          const listeners = eventTypes.map(type => {
+            const listener = (event: any) => {
+              logger.trace(`[StreamingProtocol] Received ${type} event: ${JSON.stringify(event)}`);
+              streamController.enqueue(JSON.stringify({
+                type: 'event',
+                eventType: type,
+                data: event
+              }));
+            };
+            emitter.on(type, listener);
+            return { type, listener };
+          });
 
-    // Send initial connected message
-    streamController.enqueue(JSON.stringify({ type: "connected" }));
+          // Setup keepalive for observability stream
+          const keepaliveInterval = setInterval(() => {
+            streamController.sendKeepalive();
+          }, 5000);
 
-    // Add to global streams
-    this.streams.add(streamController);
-    logger.trace(`[StreamingProtocol] Active streams: ${this.streams.size}`);
+          // Handle client disconnect
+          req.signal.addEventListener("abort", () => {
+            logger.trace(`[StreamingProtocol] Observability client disconnected`);
+            // Remove all event listeners
+            listeners.forEach(({ type, listener }) => {
+              emitter.off(type, listener);
+            });
+            clearInterval(keepaliveInterval);
+            this.streams.delete(streamController);
+          });
 
-    // Setup more frequent keepalive messages
-    const keepaliveInterval = setInterval(keepStreamAlive, 5000); // Every 5 seconds
+          // Add to global streams
+          this.streams.add(streamController);
+        }
+      });
 
-    // Handle client disconnect
-    req.signal.addEventListener("abort", () => {
-      logger.trace(`[StreamingProtocol] Client disconnected`);
-      isAlive = false;
-      this.cleanupConnection(streamController, keepaliveInterval);
-    });
+      return new Response(stream, { headers });
+    } catch (error) {
+      logger.error(`[StreamingProtocol] Error in observability stream:`, error);
+      return new Response("Internal Server Error", { status: 500, headers });
+    }
   }
 
   private cleanupConnection(controller: StreamController, keepaliveInterval: TimerHandle) {
@@ -118,11 +186,12 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
   }
 
   public broadcast(data: string): void {
-    logger.trace(`[StreamingProtocol] Broadcasting to ${this.streams.size} streams`);
+    logger.trace(`[StreamingProtocol] Broadcasting to raw streams`);
     for (const stream of this.streams) {
-      stream.enqueue(data);
+      if (stream.type === StreamType.RAW) {
+        stream.enqueue(data);
+      }
     }
-    logger.trace('[StreamingProtocol] Broadcast complete');
   }
 
   public sendResponseComplete(sessionId: string): void {
@@ -184,50 +253,34 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
 }
 
 class StreamController {
+  public readonly id: string = Math.random().toString(36).substring(7);
   private isActive: boolean = true;
   private encoder = new TextEncoder();
 
   constructor(
     private controller: ReadableStreamDefaultController,
-    private protocol: StreamingProtocol
+    private protocol: StreamingProtocol,
+    public readonly type: StreamType
   ) {}
 
-  enqueue(data: string) {
-    if (!this.isActive) {
-      logger.trace('[StreamController] Skipping enqueue - stream not active');
-      return;
-    }
+  public enqueue(data: string) {
+    if (!this.isActive) return;
     
-    try {
-      // Special handling for [DONE] message
-      if (data === '[DONE]') {
-        logger.warning('[StreamController] Sending completion signal');
-        this.controller.enqueue(this.encoder.encode(data + '\n\n'));
-      } else {
-        const message = `data: ${data}\n\n`;
-        logger.warning('[StreamController] Enqueueing message:', message);
-        this.controller.enqueue(this.encoder.encode(message));
-      }
-    } catch (error) {
-      logger.error('[StreamController] Error enqueueing stream data:', error);
-    }
+    // Format as SSE data
+    const message = data.split('\n')
+      .map(line => `data: ${line}`)
+      .join('\n') + '\n\n';
+      
+    this.controller.enqueue(this.encoder.encode(message));
   }
 
-  sendKeepalive() {
+  public sendKeepalive() {
     if (!this.isActive) return;
     this.controller.enqueue(this.encoder.encode(": keepalive\n\n"));
   }
 
-  close() {
-    if (!this.isActive) return;
-    
-    try {
-      this.isActive = false;
-      const closeMessage = JSON.stringify({ type: "close", message: "Server stopping" });
-      this.enqueue(closeMessage);
-      this.controller.close();
-    } catch (error) {
-      logger.error('[StreamingProtocol] Error closing stream:', error);
-    }
+  public close() {
+    this.isActive = false;
+    this.controller.close();
   }
 }

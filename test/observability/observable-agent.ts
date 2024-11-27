@@ -131,6 +131,17 @@ async function main() {
 
   const svcConfig = await AgentServiceConfigurator.getAgentConfiguration("test/observability");
   
+  // Configure communication settings for network mode
+  if (options.network) {
+    svcConfig.communicationConfig = {
+      ...svcConfig.communicationConfig,
+      host: 'localhost',
+      httpPort: Number(options.httpPort),
+      streamPort: Number(options.streamPort),
+      enableStreaming: true  // Enable streaming in network mode
+    };
+  }
+  
   // Configure strategy
   const loggingConfig: LoggingConfig = {
     level: (options.logLevel?.toLowerCase() as 'debug' | 'info' | 'warn' | 'error') || 'info',
