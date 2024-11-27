@@ -10,13 +10,12 @@ import { Session } from '../core/Session';
 import { LoggingConfig } from '../core/configs';
 import { JSONOutput, Tool, ToolOutput } from '../core/Tool';
 import { logger } from '../core/Logger';
-import { RequestHandler } from './ICommunication';
 
 export abstract class BaseAgent<
   T extends readonly ClassificationTypeConfig[],
   K extends IClassifier<T>,
   P extends IAgentPromptTemplate
->  implements RequestHandler {
+>   {
   protected core!: AgentCore;
   private classifier!: K;
   private promptTemplate!: P;
@@ -259,53 +258,14 @@ export abstract class BaseAgent<
     return this.core.getTool(name);
   }
 
+  public getSession(sessionId: string): Session | undefined {
+    return this.sessions.get(sessionId);
+  }   
+
   private async findHelperAgent(subtask: string): Promise<AgentCore | null> {
     console.log('findHelperAgent called with subtask:', subtask);
     const agent = await AgentRegistry.getInstance().findAgentByCapabilities(subtask);
     return agent;
   }
 
-  async onCreateSession(owner: string, description: string, enhancePrompt?: boolean): Promise<Session> {
-    try {
-      const session = await this.createSession(owner, description, enhancePrompt);
-      this.sessions.set(session.sessionId, session);
-
-      // Signal response completion through streaming protocol
-      // This is probably not useful at all and subject to removal because after session creation, 
-      // here we don't know yet when the streaming at the streaming callback will finish
-      if (this.communication?.streamingProtocol) {
-        logger.warning(`[BaseAgent] Signaling response_complete for session creation: ${session.sessionId}`);
-        this.communication.streamingProtocol.sendResponseComplete(session.sessionId);
-      } else {
-        logger.warning('[BaseAgent] No streaming protocol available for response_complete signal');
-      }
-      return session;
-    } catch (error) {
-      // Re-throw the error to maintain existing error handling
-      throw error;
-    }
-  }
-
-  async onChat(sessionId: string, message: string): Promise<void> {
-    const session = this.sessions.get(sessionId);
-    if (!session) {
-      throw new Error('Session not found');
-    }
-    try {
-      await session.chat(message, 'user');
-      
-      // Signal response completion through streaming protocol
-      // This is probably not useful at all and subject to removal because after session creation, 
-      // here we don't know yet when the streaming at the streaming callback will finish
-      if (this.communication?.streamingProtocol) {
-        logger.trace(`[BaseAgent] Signaling response_complete for chat: ${sessionId}`);
-        this.communication.streamingProtocol.sendResponseComplete(sessionId);
-      } else {
-        logger.trace('[BaseAgent] No streaming protocol available for response_complete signal');
-      }
-    } catch (error) {
-      // Re-throw the error to maintain existing error handling
-      throw error;
-    }
-  }
 }

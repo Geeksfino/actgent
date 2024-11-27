@@ -1,18 +1,19 @@
 import { CommunicationConfig } from '../core/configs';
 import { HttpProtocol } from './protocols/HttpProtocol';
 import { StreamingProtocol } from './protocols/StreamingProtocol';
-import { BaseCommunicationProtocol, RequestHandler } from './ICommunication';
+import { BaseCommunicationProtocol, AgentRequestHandler } from './ICommunication';
 import { logger } from '../core/Logger';
+import { BaseAgent } from './BaseAgent';
 
 export class Communication {
   private httpProtocol?: HttpProtocol;
   private _streamingProtocol?: StreamingProtocol;
   private config: CommunicationConfig;
-  private handler: RequestHandler;
+  private handler: AgentRequestHandler;
 
-  constructor(config: CommunicationConfig, handler: RequestHandler) {
+  constructor(config: CommunicationConfig, agent: BaseAgent<any, any, any>) {
     this.config = config;
-    this.handler = handler;
+    this.handler = new AgentRequestHandler(agent);
   }
 
   get streamingProtocol(): StreamingProtocol | undefined {

@@ -1,5 +1,5 @@
 import { Server } from "bun";
-import { BaseCommunicationProtocol, RequestHandler } from "../ICommunication";
+import { BaseCommunicationProtocol, AgentRequestHandler } from "../ICommunication";
 import { logger } from "../../core/Logger";
 import { type ServeOptions } from "bun";
 import { Session } from "../../core/Session";
@@ -14,7 +14,7 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
   private keepaliveIntervals: Map<string, TimerHandle> = new Map();
   private readonly encoder = new TextEncoder();
 
-  constructor(handler: RequestHandler, port: number = 3001, host: string = "localhost") {
+  constructor(handler: AgentRequestHandler, port: number = 3001, host: string = "localhost") {
     super(handler);
     this.port = port;
     this.host = host;

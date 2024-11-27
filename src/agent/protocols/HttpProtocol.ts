@@ -1,5 +1,5 @@
 import { Server } from "bun";
-import { BaseCommunicationProtocol, RequestHandler } from '../ICommunication';
+import { BaseCommunicationProtocol, AgentRequestHandler } from '../ICommunication';
 import { logger } from '../../core/Logger';
 
 export class HttpProtocol extends BaseCommunicationProtocol {
@@ -7,7 +7,7 @@ export class HttpProtocol extends BaseCommunicationProtocol {
   private port: number;
   private host: string;
 
-  constructor(handler: RequestHandler, port: number = 3000, host: string = 'localhost') {
+  constructor(handler: AgentRequestHandler, port: number = 3000, host: string = 'localhost') {
     super(handler);
     this.port = port;
     this.host = host;
