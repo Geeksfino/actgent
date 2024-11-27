@@ -10,7 +10,8 @@ type TimerHandle = ReturnType<typeof setInterval>;
 // Stream controller type enum
 export enum StreamType {
   RAW = 'raw',
-  OBSERVE = 'observe'
+  OBSERVE = 'observe',
+  SESSION = 'session'
 }
 
 export class StreamingProtocol extends BaseCommunicationProtocol {
@@ -78,6 +79,12 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
       case '/observe':
         return this.handleObservabilityStream(req, headers);
       default:
+        // Check for session endpoint pattern
+        const sessionMatch = url.pathname.match(/^\/session\/([^\/]+)$/);
+        if (sessionMatch) {
+          const sessionId = sessionMatch[1];
+          return this.handleSessionStream(sessionId, req, headers);
+        }
         return new Response('Not Found', { status: 404 });
     }
   }
@@ -171,6 +178,60 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
     } catch (error) {
       logger.error(`[StreamingProtocol] Error in observability stream:`, error);
       return new Response("Internal Server Error", { status: 500, headers });
+    }
+  }
+
+  private handleSessionStream(sessionId: string, req: Request, headers: Record<string, string>): Response {
+    try {
+      const stream = new ReadableStream({
+        start: (controller) => {
+          const streamController = new StreamController(controller, this, StreamType.SESSION);
+          this.streams.add(streamController);
+          
+          // Keep the stream alive
+          let isAlive = true;
+          
+          const keepStreamAlive = () => {
+            if (!isAlive) return;
+            streamController.sendKeepalive();
+          };
+
+          // Send initial connected message
+          streamController.enqueue(JSON.stringify({ type: "connected", sessionId }));
+
+          // Set up keepalive interval
+          const intervalId = setInterval(keepStreamAlive, 30000);
+          this.keepaliveIntervals.set(streamController.id, intervalId);
+
+          // Set up event handler for the specific session
+          const session = this.handler.getAgent().getSession(sessionId);
+          if (!session) {
+            streamController.enqueue(JSON.stringify({ type: "error", message: `Session ${sessionId} not found` }));
+            streamController.close();
+            return;
+          }
+
+          // Subscribe to session events
+          session.onEvent((event) => {
+            if (!isAlive) return;
+            streamController.enqueue(JSON.stringify({ type: "event", data: event }));
+          });
+
+          // Cleanup when the client disconnects
+          req.signal.addEventListener("abort", () => {
+            isAlive = false;
+            clearInterval(intervalId);
+            this.keepaliveIntervals.delete(streamController.id);
+            this.streams.delete(streamController);
+            streamController.close();
+          });
+        }
+      });
+
+      return new Response(stream, { headers });
+    } catch (error) {
+      logger.error(`[StreamingProtocol] Error in session stream: ${error}`);
+      return new Response(JSON.stringify({ error: "Internal Server Error" }), { status: 500, headers });
     }
   }
 

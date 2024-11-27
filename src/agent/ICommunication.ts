@@ -8,6 +8,10 @@ export class AgentRequestHandler {
         private agent: BaseAgent<any, any, any>,
     ) {}
 
+    getAgent(): BaseAgent<any, any, any> {
+        return this.agent;
+    }
+    
     async onCreateSession(owner: string, description: string, enhancePrompt?: boolean): Promise<Session> {
         try {
             const session = await this.agent.createSession(owner, description, enhancePrompt);
