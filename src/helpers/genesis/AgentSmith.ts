@@ -8,6 +8,7 @@ import * as BuiltInTools from "../../tools";
 import { z } from "zod";
 import { createRuntime } from "../../runtime";
 import { RuntimeType } from "../../runtime/types";
+import { UserPreferenceStrategy } from "../../agent/ReActModeStrategy";
 
 const runtime = createRuntime();
 
@@ -26,7 +27,10 @@ const agentConfig = await AgentCoreConfigurator.loadMarkdownConfig(configPath);
 
 const currentDir = await runtime.process.cwd();
 const svcConfig = await AgentServiceConfigurator.getAgentConfiguration("src/helpers/genesis");
-const AgentSmith = new AgentBuilder(agentConfig, svcConfig).create();
+const AgentSmith = new AgentBuilder(agentConfig, svcConfig)
+  .withPromptStrategy(new UserPreferenceStrategy('react'))
+  .withStreamObservability()
+  .create();
 
 // Register the AgentGenerator tool
 AgentSmith.registerTool(new AgentGenerator()); 
