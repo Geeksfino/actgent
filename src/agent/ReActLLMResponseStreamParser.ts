@@ -142,41 +142,25 @@ export class ReActLLMResponseStreamParser extends Observable {
       const { extracted, remainingBuffer } = this.extractProgressiveKeys(this.buffer);
       if (Object.keys(extracted).length > 0) {
         logger.debug('Extracted data:', extracted);
-        const parsedData = extracted;
-        this.updatePartialResponse(parsedData);
+        // Transform the extracted data to match the expected structure
+        const parsedData: any = {};
+        if ('context' in extracted) {
+          parsedData.context = extracted.context;
+        }
+        if ('additional_info' in extracted) {
+          parsedData.additional_info = extracted.additional_info;
+        }
+        
+        // Only update if we have relevant keys
+        if (Object.keys(parsedData).length > 0) {
+          this.updatePartialResponse(parsedData);
+        }
       }
 
       this.buffer = remainingBuffer;
     } catch (error) {
       logger.error(`Error processing stream chunk: ${error}`);
     }
-  }
-
-  private findCompleteJson(buffer: string): { json: string, remainingBuffer: string } | null {
-    let depth = 0;
-    let startIndex = -1;
-
-    for (let i = 0; i < buffer.length; i++) {
-      const char = buffer[i];
-
-      if (char === '{') {
-        if (depth === 0) {
-          startIndex = i;
-        }
-        depth++;
-      } else if (char === '}') {
-        depth--;
-
-        if (depth === 0 && startIndex !== -1) {
-          // Found a complete, balanced JSON object
-          const json = buffer.substring(startIndex, i + 1);
-          const remainingBuffer = buffer.substring(i + 1);
-          return { json, remainingBuffer };
-        }
-      }
-    }
-
-    return null;
   }
 
   processChunk_old(chunk: string): void {
@@ -208,6 +192,33 @@ export class ReActLLMResponseStreamParser extends Observable {
     } catch (error) {
       logger.error(`Error processing stream chunk: ${error}`);
     }
+  }
+
+  private findCompleteJson(buffer: string): { json: string, remainingBuffer: string } | null {
+    let depth = 0;
+    let startIndex = -1;
+
+    for (let i = 0; i < buffer.length; i++) {
+      const char = buffer[i];
+
+      if (char === '{') {
+        if (depth === 0) {
+          startIndex = i;
+        }
+        depth++;
+      } else if (char === '}') {
+        depth--;
+
+        if (depth === 0 && startIndex !== -1) {
+          // Found a complete, balanced JSON object
+          const json = buffer.substring(startIndex, i + 1);
+          const remainingBuffer = buffer.substring(i + 1);
+          return { json, remainingBuffer };
+        }
+      }
+    }
+
+    return null;
   }
 
   // Update our partial response and emit events when we have new metadata
