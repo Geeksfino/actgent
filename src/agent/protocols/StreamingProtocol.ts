@@ -131,13 +131,13 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
       const stream = new ReadableStream({
         start: (controller) => {
           const streamController = new StreamController(controller, this, StreamType.OBSERVE);
+          this.streams.add(streamController);
           
           // Send initial connected message
           streamController.enqueue(JSON.stringify({ type: "connected" }));
 
           // Register event listeners for all event types
           const emitter = getEventEmitter();
-          // Normalize event types to uppercase to match emitter's normalization
           const eventTypes = ['STRATEGY_SELECTION', 'STRATEGY_SWITCH', 'LLM_RESPONSE'].map(type => type.toUpperCase());
           
           const listeners = eventTypes.map(type => {
@@ -157,6 +157,7 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
           const keepaliveInterval = setInterval(() => {
             streamController.sendKeepalive();
           }, 5000);
+          this.keepaliveIntervals.set(streamController.id, keepaliveInterval);
 
           // Handle client disconnect
           req.signal.addEventListener("abort", () => {
@@ -165,12 +166,8 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
             listeners.forEach(({ type, listener }) => {
               emitter.off(type, listener);
             });
-            clearInterval(keepaliveInterval);
-            this.streams.delete(streamController);
+            this.cleanupConnection(streamController, keepaliveInterval);
           });
-
-          // Add to global streams
-          this.streams.add(streamController);
         }
       });
 
@@ -199,15 +196,15 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
           // Send initial connected message
           streamController.enqueue(JSON.stringify({ type: "connected", sessionId }));
 
-          // Set up keepalive interval
-          const intervalId = setInterval(keepStreamAlive, 30000);
+          // Set up keepalive interval - match raw stream interval
+          const intervalId = setInterval(keepStreamAlive, 5000); // Every 5 seconds
           this.keepaliveIntervals.set(streamController.id, intervalId);
 
           // Set up event handler for the specific session
           const session = this.handler.getAgent().getSession(sessionId);
           if (!session) {
             streamController.enqueue(JSON.stringify({ type: "error", message: `Session ${sessionId} not found` }));
-            streamController.close();
+            this.cleanupConnection(streamController, intervalId);
             return;
           }
 
@@ -220,10 +217,8 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
           // Cleanup when the client disconnects
           req.signal.addEventListener("abort", () => {
             isAlive = false;
-            clearInterval(intervalId);
-            this.keepaliveIntervals.delete(streamController.id);
-            this.streams.delete(streamController);
-            streamController.close();
+            logger.trace(`[StreamingProtocol] Session stream ${sessionId} disconnected`);
+            this.cleanupConnection(streamController, intervalId);
           });
         }
       });
@@ -235,15 +230,22 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
     }
   }
 
-  private cleanupConnection(controller: StreamController, keepaliveInterval: TimerHandle) {
-    clearInterval(keepaliveInterval);
-    // Send close event before cleanup
-    controller.enqueue(JSON.stringify({ 
-      type: "close", 
-      message: "Stream closed" 
-    }));
+  private cleanupConnection(controller: StreamController, keepaliveInterval?: TimerHandle) {
+    // Clean up keepalive interval if provided
+    if (keepaliveInterval) {
+      clearInterval(keepaliveInterval);
+      this.keepaliveIntervals.delete(controller.id);
+    }
+    // Otherwise try to find it in the map
+    else {
+      const interval = this.keepaliveIntervals.get(controller.id);
+      if (interval) {
+        clearInterval(interval);
+        this.keepaliveIntervals.delete(controller.id);
+      }
+    }
     this.streams.delete(controller);
-    logger.trace(`[StreamingProtocol] Connection cleaned up`);
+    controller.close();
   }
 
   public broadcast(data: string): void {
@@ -337,6 +339,7 @@ class StreamController {
 
   public sendKeepalive() {
     if (!this.isActive) return;
+    // Use standard SSE comment format for keepalive
     this.controller.enqueue(this.encoder.encode(": keepalive\n\n"));
   }
 
