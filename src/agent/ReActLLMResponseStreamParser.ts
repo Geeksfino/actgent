@@ -31,7 +31,6 @@ export class ReActLLMResponseStreamParser extends Observable {
   private buffer: string = '';
   private partialResponse: PartialLLMResponse = {};
   private step: number = 1;
-  private hasEmittedContext: boolean = false;
 
   constructor() {
     super();
@@ -225,19 +224,18 @@ export class ReActLLMResponseStreamParser extends Observable {
   private updatePartialResponse(parsed: any): void {
     logger.debug('Updating partial response with:', parsed);
 
-    // Emit context event if we have context and haven't emitted it yet
-    if (parsed.context && !this.hasEmittedContext) {
+    // Emit context event if we have it
+    if (parsed.context) {
       const contextEvent = this.generateEvent('emitContextEvent', parsed);
       logger.debug('Emitting context event:', contextEvent);
-      this.emitAsync('LLM_RESPONSE', contextEvent); // Use sync emit for reliability
-      this.hasEmittedContext = true;
+      this.emitAsync('LLM_RESPONSE', contextEvent);
     }
 
     // Emit additional info event if we have it
     if (parsed.additional_info) {
       const additionalEvent = this.generateEvent('emitAdditionalInfoEvent', parsed);
       logger.debug('Emitting additional info event:', additionalEvent);
-      this.emitAsync('LLM_RESPONSE', additionalEvent); // Use sync emit for reliability
+      this.emitAsync('LLM_RESPONSE', additionalEvent);
     }
 
     // Update our partial response for future reference
@@ -259,7 +257,5 @@ export class ReActLLMResponseStreamParser extends Observable {
   reset(): void {
     this.buffer = '';
     this.partialResponse = {};
-    this.hasEmittedContext = false;
-    this.step = 1;
   }
 }
