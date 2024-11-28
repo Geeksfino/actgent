@@ -26,7 +26,7 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
     session: Session
   ): void {
     try {
-      const { isToolCall, instruction, parsedLLMResponse, validationResult } = 
+      const { isToolCall, instruction, parsedLLMResponse, answer, validationResult } = 
         this.parseLLMResponse(response, {
           level: 'lenient',  // Initial parsing with lenient validation
           allowPartialMatch: true,
@@ -37,8 +37,10 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
         session.triggerToolCallsHandlers(parsedLLMResponse);
       } else if (session.core.hasToolForCurrentInstruction(instruction)) { // if the instruction is a tool call, trigger the tool call handlers
         session.triggerEventHandlers(parsedLLMResponse);
+        session.triggerConversationHandlers(answer);
       } else {
         session.triggerConversationHandlers(parsedLLMResponse);
+        session.triggerConversationHandlers(answer);
       }
     } catch (error) {
       const extractedInstruction = this.tryExtractMessageType(response);
@@ -64,6 +66,7 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
     isToolCall: boolean;
     instruction: string | undefined;
     parsedLLMResponse: InferClassificationUnion<T>;
+    answer: string | undefined;
     validationResult: ValidationResult<InferClassificationUnion<T>>;
   };
 

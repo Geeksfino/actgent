@@ -82,6 +82,7 @@ When responding, choose the appropriate path:
     "context": "<Understanding and approach summary>",
     "primary_action": {
         "response_purpose": "<Either TOOL_INVOCATION or DIRECT_RESPONSE>",
+        "response_description": "<Descriptive answer>",
         "response_content": ${schemas}
     },
     "additional_info": "<Supporting details or next steps>"
@@ -95,6 +96,7 @@ When responding, choose the appropriate path:
    - context: A summary of the user's request and the approach you will take to respond.
    - primary_action: MUST contain both "response_purpose" and "response_content"
       - response_purpose: Either "TOOL_INVOCATION" or "DIRECT_RESPONSE"
+      - response_description: A plain summary of response_content used to reply to user for conversation
       - response_content: The content of your response, formatted according to the requirements of the selected response_purpose.
 
 ${this.useExample()}
@@ -134,6 +136,7 @@ Adopt the Reasoning and Action (ReAct) Analysis Protocol:
   },
   "primary_action": {
     "response_purpose": "<TOOL_INVOCATION or DIRECT_RESPONSE>",
+    "response_description": "<Descriptive answer>",
     "response_content": ${schemas}
   },
   "additional_info": {
@@ -157,6 +160,7 @@ Execution Guidelines:
    - context: A summary of the user's request and the approach you will take to respond.
    - primary_action: MUST contain both "response_purpose" and "response_content"
       - response_purpose: Either "TOOL_INVOCATION" or "DIRECT_RESPONSE"
+      - response_description: A plain text description of response_content to be used to reply to user
       - response_content: The content of your response, formatted according to the requirements of the selected response_purpose.
 
 ${this.useExample()}
@@ -172,6 +176,7 @@ ${this.useExample()}
   "context": "Identified as a straightforward request for travel information.",
   "primary_action": {
     "response_purpose": "DIRECT_RESPONSE",
+    "response_description": "I will provide you some information about Paris.",
     "response_content": {
       "messageType": "provide_travel_info",
       "destination_info": {

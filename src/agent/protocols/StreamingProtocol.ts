@@ -209,9 +209,16 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
           }
 
           // Subscribe to session events
-          session.onEvent((event) => {
+          session.onConversation((event) => {
             if (!isAlive) return;
-            streamController.enqueue(JSON.stringify({ type: "event", data: event }));
+            // Wrap the string in the expected structure
+            const wrappedEvent = {
+              type: "event",
+              data: {
+                content: event  
+              }
+            };
+            streamController.enqueue(JSON.stringify(wrappedEvent));
           });
 
           // Cleanup when the client disconnects
