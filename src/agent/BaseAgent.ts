@@ -21,7 +21,6 @@ export abstract class BaseAgent<
   private promptTemplate!: P;
   private svcConfig: AgentServiceConfig;
   private communication?: Communication;
-  private sessions: Map<string, Session> = new Map();
   private httpStreamCallback?: (delta: string, control?: { type: 'completion', reason: string }) => void;
 
   protected abstract useClassifierClass(schemaTypes: T): new () => K;
@@ -270,7 +269,7 @@ export abstract class BaseAgent<
   }
 
   public getSession(sessionId: string): Session | undefined {
-    return this.sessions.get(sessionId);
+    return this.core.getSessionContext(sessionId).getSession();
   }   
 
   private async findHelperAgent(subtask: string): Promise<AgentCore | null> {
