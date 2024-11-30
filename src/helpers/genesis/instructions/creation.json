@@ -1,5 +1,5 @@
 {
-  "name": "<agent name>",
+  "agent_name": "<agent name>",
   "role": "<role of the agent>",
   "goal": "<goal of the agent>",
   "capabilities": "<capabilities of the agent>",

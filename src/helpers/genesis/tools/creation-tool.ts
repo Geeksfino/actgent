@@ -5,7 +5,7 @@ import { Instruction } from "../../../core/configs";
 import { z } from "zod";
 
 export interface AgentGeneratorInput {
-  name: string;
+  agent_name: string;
   role: string;
   goal: string;
   capabilities: string;
@@ -34,7 +34,7 @@ export class AgentGenerator extends Tool<
 
   schema(): z.ZodSchema<AgentGeneratorInput> {
     return z.object({
-      name: z.string(),
+      agent_name: z.string(),
       role: z.string(),
       goal: z.string(),
       capabilities: z.string(),
@@ -57,7 +57,7 @@ export class AgentGenerator extends Tool<
     console.log(`Tool preferences:`, agentPrefs);
 
     const options: AgentScaffoldOptions = {
-      name: input.name,
+      agent_name: input.agent_name,
       role: input.role,
       goal: input.goal,
       capabilities: input.capabilities,
@@ -71,7 +71,7 @@ export class AgentGenerator extends Tool<
 
     return new JSONOutput({
       agentDir: agentDir,
-      agentName: input.name,
+      agentName: input.agent_name,
       instructions: input.instructions
     });
   }

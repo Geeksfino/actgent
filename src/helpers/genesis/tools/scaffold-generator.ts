@@ -5,7 +5,7 @@ import { Instruction } from '../../../core/configs';
 const runtime = createRuntime();
 
 export interface AgentScaffoldOptions {
-    name: string;
+    agent_name: string;
     role: string;
     goal: string;
     capabilities: string;
@@ -45,15 +45,15 @@ async function copyDirectory(src: string, dest: string) {
     }
 }
 
-async function generateAgentScaffold({ name, role, goal, capabilities, instructions, tools = [], outputDir }: AgentScaffoldOptions) {
+async function generateAgentScaffold({ agent_name, role, goal, capabilities, instructions, tools = [], outputDir }: AgentScaffoldOptions) {
     // Handle tilde expansion
     const homeDir = await runtime.os.homedir();
     outputDir = outputDir.replace(/^~/, homeDir);
     console.log(`Scaffold output directory: ${outputDir}`);
-    console.log(`Scaffold agent name: ${name}`);
+    console.log(`Scaffold agent name: ${agent_name}`);
 
     // Create the agent directory
-    const agentDir = runtime.path.join(outputDir, name);
+    const agentDir = runtime.path.join(outputDir, agent_name);
     await fs.mkdir(agentDir, { recursive: true });
 
     // Create main directory and instructions subdirectory
@@ -82,11 +82,11 @@ async function generateAgentScaffold({ name, role, goal, capabilities, instructi
     ).join('\n');
 
     const toolRegistrations = tools.map(toolName =>
-        `${name}.registerTool(new ${toolName}());`
+        `${agent_name}.registerTool(new ${toolName}());`
     ).join('\n');
 
     const replacements = { 
-        name, 
+        agent_name, 
         role, 
         goal, 
         capabilities,
@@ -104,7 +104,7 @@ async function generateAgentScaffold({ name, role, goal, capabilities, instructi
 
     // Write files first
     await Promise.all([
-        fs.writeFile(runtime.path.join(agentDir, `${name}.ts`), agentCode),
+        fs.writeFile(runtime.path.join(agentDir, `${agent_name}.ts`), agentCode),
         fs.writeFile(runtime.path.join(agentDir, 'brain.md'), configMd),
         fs.writeFile(runtime.path.join(agentDir, 'index.ts'), indexCode),
         fs.writeFile(runtime.path.join(agentDir, '.agent.env'), envContent),
@@ -175,9 +175,9 @@ async function main() {
         process.exit(1);
     }
 
-    const [name, role, goal, capabilities, outputDir] = args;
+    const [agent_name, role, goal, capabilities, outputDir] = args;
     try {
-        const createdDir = await generateAgentScaffold({ name, role, goal, capabilities, instructions: [], tools: [], outputDir });
+        const createdDir = await generateAgentScaffold({ agent_name, role, goal, capabilities, instructions: [], tools: [], outputDir });
         console.log(`Agent scaffold created successfully at: ${createdDir}`);
     } catch (error) {
         console.error('Error creating agent scaffold:', error);
