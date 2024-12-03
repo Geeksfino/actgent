@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { Instruction } from '../../../core/configs';
 import { createRuntime } from '../../../runtime';
+import { AgentCoreConfigurator } from '../../AgentCoreConfigurator';
 
 const runtime = createRuntime();
 
@@ -14,51 +15,9 @@ export interface AgentSerializeResult {
     tools: string[];
 }
 
-async function readMarkdownFrontMatter(filePath: string): Promise<Record<string, any>> {
-    const content = await fs.readFile(filePath, 'utf-8');
-    const frontMatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
-    if (!frontMatterMatch) return {};
-
-    const frontMatter: Record<string, any> = {};
-    const lines = frontMatterMatch[1].split('\n');
-    for (const line of lines) {
-        const [key, ...valueParts] = line.split(':');
-        if (key && valueParts.length) {
-            frontMatter[key.trim()] = valueParts.join(':').trim();
-        }
-    }
-    return frontMatter;
-}
-
-async function extractInstructions(instructionsDir: string): Promise<Instruction[]> {
-    const instructions: Instruction[] = [];
-    const files = await fs.readdir(instructionsDir);
-    
-    for (const file of files) {
-        if (file.endsWith('.md')) {
-            const filePath = path.join(instructionsDir, file);
-            const content = await fs.readFile(filePath, 'utf-8');
-            const frontMatter = await readMarkdownFrontMatter(filePath);
-            const description = content.split('---\n')[2]?.trim() || '';
-            
-            // Try to read corresponding JSON schema if it exists
-            const schemaPath = path.join(instructionsDir, `${path.parse(file).name}.json`);
-            let schemaTemplate;
-            try {
-                const schemaContent = await fs.readFile(schemaPath, 'utf-8');
-                schemaTemplate = JSON.parse(schemaContent);
-            } catch {
-                schemaTemplate = undefined;
-            }
-
-            instructions.push({
-                name: frontMatter.instructionName || path.parse(file).name,
-                description,
-                schemaTemplate
-            });
-        }
-    }
-    return instructions;
+async function extractInstructions(instructionsDir: string, brainPath: string): Promise<Instruction[]> {
+    const config = await AgentCoreConfigurator.loadMarkdownConfig(brainPath);
+    return config.instructions || [];
 }
 
 async function extractAgentConfig(brainPath: string): Promise<{
@@ -66,26 +25,12 @@ async function extractAgentConfig(brainPath: string): Promise<{
     goal: string;
     capabilities: string;
 }> {
-    const content = await fs.readFile(brainPath, 'utf-8');
-    const lines = content.split('\n');
-    
-    const config = {
-        role: '',
-        goal: '',
-        capabilities: ''
+    const config = await AgentCoreConfigurator.loadMarkdownConfig(brainPath);
+    return {
+        role: config.role || '',
+        goal: config.goal || '',
+        capabilities: config.capabilities || ''
     };
-
-    for (const line of lines) {
-        if (line.startsWith('role:')) {
-            config.role = line.substring(5).trim();
-        } else if (line.startsWith('goal:')) {
-            config.goal = line.substring(5).trim();
-        } else if (line.startsWith('capabilities:')) {
-            config.capabilities = line.substring(13).trim();
-        }
-    }
-
-    return config;
 }
 
 async function extractTools(indexPath: string): Promise<string[]> {
@@ -109,16 +54,12 @@ export async function serializeAgentScaffold(agentDir: string): Promise<AgentSer
     const agent_name = path.basename(agentDir);
     console.log(`Serializing agent from directory: ${agentDir}`);
     
-    // Extract instructions
-    const instructionsDir = path.join(agentDir, 'instructions');
-    const instructions = await extractInstructions(instructionsDir);
-    
-    // Extract agent configuration from brain.md
     const brainPath = path.join(agentDir, 'brain.md');
-    const config = await extractAgentConfig(brainPath);
-    
-    // Extract tools from index.ts
+    const instructionsDir = path.join(agentDir, 'instructions');
     const indexPath = path.join(agentDir, 'index.ts');
+
+    const config = await extractAgentConfig(brainPath);
+    const instructions = await extractInstructions(instructionsDir, brainPath);
     const tools = await extractTools(indexPath);
 
     return {
