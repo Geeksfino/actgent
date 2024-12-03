@@ -4,12 +4,14 @@ import { Logger, logger, LogLevel} from '../../core/Logger';
 import readline from 'readline';
 import { createRuntime } from "../../runtime";
 import { program } from 'commander';
+import { AdminService } from './services/admin-services';
 
 // Configure command line options
 const runtime = createRuntime();
 
 program
   .option('--log-level <level>', 'set logging level (trace, debug, info, warn, error, fatal)', 'info')
+  .option('--agents-dir <path>', 'directory for generated agents')
   .parse();
 
 const options = program.opts();
@@ -34,15 +36,34 @@ async function initializeAgent() {
   };
   logger.setLevel(options.logLevel.toLowerCase() as LogLevel);
 
+  // Determine agents directory - use command line arg if provided, otherwise default
+  const agentsDir = options.agentsDir 
+    ? runtime.path.resolve(options.agentsDir)  // Resolve to absolute path if provided
+    : runtime.path.join(cwd, "generated-agents");
+  
+  logger.info(`Using agents directory: ${agentsDir}`);
+
+  // Start AdminService with configured agents directory
+  const adminService = new AdminService(11370, 'localhost', agentsDir);
+  await adminService.start();
+  logger.info('AdminService started successfully');
+
   const executionContext = AgentSmith.getExecutionContext();
   executionContext.environment = {
-    outputDirectory: runtime.path.join(cwd, "generated-agents"),
+    outputDirectory: agentsDir,
     tempDirectory: runtime.path.join(tmpdir, "generated-agents-temp")
   };
   executionContext.addToolPreference("AgentGenerator", {
     agentName: ''  
   });
   AgentSmith.run(loggerConfig);
+
+  // Handle cleanup on process exit
+  process.on('SIGINT', async () => {
+    logger.info('Shutting down AdminService...');
+    await adminService.stop();
+    process.exit(0);
+  });
 }
 
 // Add prompt configuration near the top, after other configurations
