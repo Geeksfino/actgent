@@ -1,4 +1,4 @@
-import { ${name} } from './${name}';
+import { ${agent_name} } from './${agent_name}';
 import readline from 'readline';
 import { LoggingConfig } from "@finogeeks/actgent/core";
 import { Logger, logger, LogLevel} from '@finogeeks/actgent/core'
@@ -15,7 +15,7 @@ const options = program.opts();
 logger.setLevel(options.logLevel.toLowerCase() as LogLevel);
 
 const loggerConfig: LoggingConfig = {
-  destination: path.join(process.cwd(), `${${name}.getName()}.log`)
+  destination: path.join(process.cwd(), `${${agent_name}.getName()}.log`)
 };
 
 // Create readline interface
@@ -24,10 +24,10 @@ const rl = readline.createInterface({
     output: process.stdout
 });
 
-${name}.registerStreamCallback((delta: string) => {
+${agent_name}.registerStreamCallback((delta: string) => {
     logger.info(delta);
 });
-${name}.run(loggerConfig);
+${agent_name}.run(loggerConfig);
 
 // Add prompt configuration
 const defaultPrompt = "You: ";
@@ -47,7 +47,7 @@ async function handleInitialInput(): Promise<string> {
         });
 
         if (input.toLowerCase().trim() === '/exit') {
-            console.log("Thank you for using the ${name}. Goodbye!");
+            console.log("Thank you for using the ${agent_name}. Goodbye!");
             process.exit(0);
         }
 
@@ -63,17 +63,17 @@ async function handleInitialInput(): Promise<string> {
 function setupResponseHandler(session: any) {
     session.onEvent((response: any) => {
         if (typeof response === 'string') {
-            console.log(`${${name}.getName()}:`, response);
+            console.log(`${${agent_name}.getName()}:`, response);
         } else if (typeof response === 'object') {
             if ('clarification' in response) {
                 const { questions } = response.clarification;
                 if (questions) {
-                    console.log(`${${name}.getName()}: ${questions.join('\n')}`);
+                    console.log(`${${agent_name}.getName()}: ${questions.join('\n')}`);
                 }
             } else if ('confirmation' in response) {
                 const { prompt, options } = response.confirmation;
                 if (prompt) {
-                    console.log(`${${name}.getName()}: ${prompt}`);
+                    console.log(`${${agent_name}.getName()}: ${prompt}`);
                     if (options) {
                         console.log(`Options: ${options.join(', ')}`);
                     }
@@ -81,23 +81,23 @@ function setupResponseHandler(session: any) {
             } else if ('exception' in response) {
                 const { reason, suggestedAction } = response.exception;
                 if (reason) {
-                    console.log(`${${name}.getName()} Error: ${reason}`);
+                    console.log(`${${agent_name}.getName()} Error: ${reason}`);
                     if (suggestedAction) {
                         console.log(`Suggestion: ${suggestedAction}`);
                     }
                 }
             } else {
-                console.log(`${${name}.getName()}:`, JSON.stringify(response, null, 2));
+                console.log(`${${agent_name}.getName()}:`, JSON.stringify(response, null, 2));
             }
         }
     });
 
     session.onException((response: any) => {
-        console.log(`${${name}.getName()} Error:`, JSON.stringify(response, null, 2));
+        console.log(`${${agent_name}.getName()} Error:`, JSON.stringify(response, null, 2));
     });
 
     session.onConversation((response: any) => {
-        console.log(`${${name}.getName()}:`, JSON.stringify(response, null, 2));
+        console.log(`${${agent_name}.getName()}:`, JSON.stringify(response, null, 2));
     });
 }
 
@@ -109,8 +109,8 @@ async function handleChat(session: any): Promise<void> {
         });
 
         if (userInput.toLowerCase().trim() === '/exit') {
-            console.log("Thank you for using the ${name}. Shutting down...");
-            await ${name}.shutdown();
+            console.log("Thank you for using the ${agent_name}. Shutting down...");
+            await ${agent_name}.shutdown();
             break;
         }
 
@@ -129,11 +129,11 @@ async function handleChat(session: any): Promise<void> {
 // Main chat loop
 async function chatLoop(): Promise<void> {
     try {
-        console.log("Welcome to the ${name}!");
+        console.log("Welcome to the ${agent_name}!");
         console.log("Type '/exit' to end the conversation.");
 
         const initialInput = await handleInitialInput();
-        const session = await ${name}.createSession("user", initialInput);
+        const session = await ${agent_name}.createSession("user", initialInput);
         
         setupResponseHandler(session);
         await handleChat(session);
