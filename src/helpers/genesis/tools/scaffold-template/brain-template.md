@@ -1,5 +1,5 @@
 ---
-name: "${name}"
+name: "${agent_name}"
 role: "${role}"
 goal: "${goal}"
 capabilities: "${capabilities}"

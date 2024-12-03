@@ -13,11 +13,11 @@ const agentConfig = await AgentCoreConfigurator.loadMarkdownConfig(configPath);
 // Load the agent runtime environment from the project root
 const svcConfig = await AgentServiceConfigurator.getAgentConfiguration("./");
 const promptStrategy = await KeywordBasedStrategyBuilder.buildStrategy();
-const ${name} = new AgentBuilder(agentConfig, svcConfig)
+const ${agent_name} = new AgentBuilder(agentConfig, svcConfig)
     .withPromptStrategy(promptStrategy)
     .create();
 
 // Register tools
 ${toolRegistrations}
 
-export { ${name} };
+export { ${agent_name} };
