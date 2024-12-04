@@ -73,6 +73,10 @@ interface WriteRequestBody {
     content: string;
 }
 
+interface Instruction {
+    name: string;
+}
+
 export class AdminService {
     private server?: Server;
     private port: number;
@@ -113,17 +117,40 @@ export class AdminService {
                 try {
                     if (url.pathname.startsWith('/api/v1/agents/')) {
                         logger.debug('[AdminService] Matched agents endpoint');
-                        // Extract just the agent name without the "agents/" prefix
                         const agentName = url.pathname.split('/').slice(4).join('/');
-                        logger.debug(`[AdminService] Extracted agent name: ${agentName}`);
+                        const agentDir = path.join(this.agentsDir, agentName);
+                        logger.debug(`[AdminService] Full agent directory path: ${agentDir}`);
                         
-                        if (req.method === 'GET') {
-                            // Use the configured agents directory
-                            const agentDir = path.join(this.agentsDir, agentName);
-                            logger.debug(`[AdminService] Full agent directory path: ${agentDir}`);
+                        try {
+                            // Retry helper function
+                            async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 5, delay = 1000): Promise<T> {
+                                for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                                    try {
+                                        return await fn();
+                                    } catch (error) {
+                                        if (attempt === maxAttempts) throw error;
+                                        await new Promise(resolve => setTimeout(resolve, delay));
+                                        logger.debug(`[AdminService] Retry attempt ${attempt} of ${maxAttempts}`);
+                                    }
+                                }
+                                throw new Error('Max retries exceeded');
+                            }
                             
-                            const result = await serializeAgentScaffold(agentDir);
-                            return new Response(JSON.stringify(result), { headers: corsHeaders });
+                            const result = await withRetry(() => serializeAgentScaffold(agentDir));
+                            logger.debug(`[AdminService] Serialized agent scaffold: ${JSON.stringify(result, null, 2)}`);
+                            
+                            return new Response(JSON.stringify(result, null, 2).replace(/\\u003[CE]/g, match => 
+                                match === '\\u003E' ? '>' : '<'
+                            ), { headers: corsHeaders });
+                        } catch (error) {
+                            logger.error('[AdminService] Error serializing agent scaffold:', error);
+                            return new Response(
+                                JSON.stringify({
+                                    success: false,
+                                    error: error instanceof Error ? error.message : String(error)
+                                }),
+                                { status: 400, headers: corsHeaders }
+                            );
                         }
                     }
                     

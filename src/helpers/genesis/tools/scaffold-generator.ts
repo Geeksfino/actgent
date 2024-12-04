@@ -162,6 +162,12 @@ ${description}`;
 
     await fs.writeFile(configPath, configContent);
 
+    // Write completion marker as the very last step
+    await fs.writeFile(runtime.path.join(agentDir, '.scaffold-complete'), JSON.stringify({
+        timestamp: new Date().toISOString(),
+        files: ['brain.md', 'index.ts', '.agent.env', 'conf/database.yml']
+    }));
+
     return agentDir;
 }
 
