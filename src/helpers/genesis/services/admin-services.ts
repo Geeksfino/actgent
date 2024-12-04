@@ -56,7 +56,8 @@
  */
 
 import { Server } from "bun";
-import { logger } from '../../../core/Logger';
+import { LoggingConfig } from "../../../core/configs";
+import { logger, LogLevel } from '../../../core/Logger';
 import { serializeAgentScaffold } from '../tools/scaffold-serializer';
 import {
     readFile,
@@ -77,17 +78,95 @@ interface Instruction {
     name: string;
 }
 
+interface RunningAgent {
+    instance: any;  // The actual agent instance
+    loggerConfig: LoggingConfig;
+}
+
 export class AdminService {
     private server?: Server;
     private port: number;
     private host: string;
     private agentsDir: string;
+    private runningAgents: Map<string, RunningAgent> = new Map();
 
     constructor(port: number = 11370, host: string = 'localhost', agentsDir: string) {
         this.port = port;
         this.host = host;
         this.agentsDir = agentsDir;
         logger.trace(`AdminService initialized with port ${port}, host ${host}, and agents directory ${agentsDir}`);
+    }
+
+    async startAgent(agentName: string): Promise<FSOperationResult> {
+        try {
+            if (this.runningAgents.has(agentName)) {
+                return { success: false, error: 'Agent is already running' };
+            }
+
+            const agentDir = path.join(this.agentsDir, agentName);
+            const agentPath = path.join(agentDir, `${agentName}.ts`);
+            
+            if (!await pathExists(agentPath)) {
+                return { success: false, error: 'Agent not found' };
+            }
+
+            // Dynamic import of the agent
+            const agentModule = await import(agentPath);
+            const agent = agentModule[agentName];
+
+            if (!agent) {
+                return { success: false, error: 'Agent class not found in module' };
+            }
+
+            const loggerConfig: LoggingConfig = {
+                destination: path.join(agentDir, `${agentName}.log`)
+            };
+
+            // Register stream callback for logging
+            agent.registerStreamCallback((delta: string) => {
+                logger.info(`[${agentName}] ${delta}`);
+            });
+
+            // Run the agent
+            await agent.run(loggerConfig);
+
+            // Store the running instance
+            this.runningAgents.set(agentName, {
+                instance: agent,
+                loggerConfig
+            });
+
+            return { success: true };
+        } catch (error) {
+            logger.error(`Error starting agent ${agentName}:`, error);
+            return { 
+                success: false, 
+                error: error instanceof Error ? error.message : String(error)
+            };
+        }
+    }
+
+    async stopAgent(agentName: string): Promise<FSOperationResult> {
+        try {
+            const runningAgent = this.runningAgents.get(agentName);
+            if (!runningAgent) {
+                return { success: false, error: 'Agent is not running' };
+            }
+
+            // Cleanup and stop the agent
+            if (runningAgent.instance && typeof runningAgent.instance.stop === 'function') {
+                await runningAgent.instance.stop();
+            }
+
+            this.runningAgents.delete(agentName);
+            return { success: true };
+        } catch (error) {
+            logger.error(`Error stopping agent ${agentName}:`, error);
+            return { 
+                success: false, 
+                error: error instanceof Error ? error.message : String(error)
+            };
+        }
     }
 
     async start(): Promise<void> {
@@ -117,7 +196,22 @@ export class AdminService {
                 try {
                     if (url.pathname.startsWith('/api/v1/agents/')) {
                         logger.debug('[AdminService] Matched agents endpoint');
-                        const agentName = url.pathname.split('/').slice(4).join('/');
+                        const parts = url.pathname.split('/');
+                        const operation = parts[4];
+                        const agentName = parts.slice(5).join('/');
+                        
+                        if (operation === 'start' && req.method === 'POST') {
+                            logger.debug(`[AdminService] Starting agent: ${agentName}`);
+                            const result = await this.startAgent(agentName);
+                            return new Response(JSON.stringify(result), { headers: corsHeaders });
+                        }
+                        
+                        if (operation === 'stop' && req.method === 'POST') {
+                            logger.debug(`[AdminService] Stopping agent: ${agentName}`);
+                            const result = await this.stopAgent(agentName);
+                            return new Response(JSON.stringify(result), { headers: corsHeaders });
+                        }
+                        
                         const agentDir = path.join(this.agentsDir, agentName);
                         logger.debug(`[AdminService] Full agent directory path: ${agentDir}`);
                         
