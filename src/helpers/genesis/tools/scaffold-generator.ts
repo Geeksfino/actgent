@@ -162,11 +162,29 @@ ${description}`;
 
     await fs.writeFile(configPath, configContent);
 
-    // Write completion marker as the very last step
-    await fs.writeFile(runtime.path.join(agentDir, '.scaffold-complete'), JSON.stringify({
-        timestamp: new Date().toISOString(),
-        files: ['brain.md', 'index.ts', '.agent.env', 'conf/database.yml']
-    }));
+    // After all files are generated, create the completion marker
+    const generatedFiles = [
+        `${agent_name}.ts`,
+        'brain.md',
+        'index.ts',
+        '.agent.env',
+        'conf/database.yml',
+        ...instructions.map(i => `instructions/${i.name}.md`),
+        ...instructions.filter(i => i.schemaTemplate).map(i => `instructions/${i.name}.json`)
+    ];
+
+    const completionMarker = {
+        timestamp: Date.now(),
+        files: generatedFiles,
+        agent_name,
+        role,
+        goal
+    };
+
+    await fs.writeFile(
+        runtime.path.join(agentDir, '.scaffold-complete'),
+        JSON.stringify(completionMarker, null, 2)
+    );
 
     return agentDir;
 }

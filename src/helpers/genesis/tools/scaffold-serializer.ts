@@ -28,46 +28,64 @@ async function extractTools(indexPath: string): Promise<string[]> {
     return tools;
 }
 
-export async function serializeAgentScaffold(agentDir: string): Promise<AgentSerializeResult> {
+async function checkScaffoldComplete(agentDir: string): Promise<boolean> {
     const completionMarker = runtime.path.join(agentDir, '.scaffold-complete');
     
     try {
-        // Check if scaffold generation is complete
         const markerContent = await fs.readFile(completionMarker, 'utf-8');
         const { timestamp, files } = JSON.parse(markerContent);
         
         // Verify all required files exist
-        for (const file of files) {
-            await fs.access(runtime.path.join(agentDir, file));
-        }
+        await Promise.all(
+            files.map(async (file: string) => {
+                await fs.access(runtime.path.join(agentDir, file));
+            })
+        );
+        
+        return true;
     } catch (error) {
-        logger.debug("[Scaffold Serializer] Scaffold generation incomplete:", error);
-        throw new Error('Scaffold generation in progress');
+        return false;
     }
+}
 
-    const brainPath = runtime.path.join(agentDir, 'brain.md');
-    const indexPath = runtime.path.join(agentDir, 'index.ts');
+export async function serializeAgentScaffold(agentDir: string): Promise<AgentSerializeResult> {
+    // Wait for scaffold completion with timeout
+    const maxAttempts = 10;
+    const retryDelay = 500; // 500ms
     
-    // Load the complete config using AgentCoreConfigurator
-    logger.debug("[Scaffold Serializer]: loading markdowns");
-    const config = await AgentCoreConfigurator.loadMarkdownConfig(brainPath);
-    logger.debug("[Scaffold Serializer]: Serializing ", config);
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const isComplete = await checkScaffoldComplete(agentDir);
+        
+        if (isComplete) {
+            const completionMarker = runtime.path.join(agentDir, '.scaffold-complete');
+            const markerContent = JSON.parse(await fs.readFile(completionMarker, 'utf-8'));
+            
+            const brainPath = runtime.path.join(agentDir, 'brain.md');
+            const indexPath = runtime.path.join(agentDir, 'index.ts');
+            
+            // Load the complete config using AgentCoreConfigurator
+            const config = await AgentCoreConfigurator.loadMarkdownConfig(brainPath);
+            const tools = await extractTools(indexPath);
+            
+            return {
+                agent_name: markerContent.agent_name,
+                role: markerContent.role,
+                goal: markerContent.goal,
+                capabilities: config.capabilities || '',
+                instructions: config.instructions || [],
+                tools
+            };
+        }
+        
+        if (attempt < maxAttempts) {
+            logger.debug(`[Scaffold Serializer] Waiting for scaffold completion (attempt ${attempt}/${maxAttempts})`);
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+        } else {
+            throw new Error('Scaffold generation timeout: Maximum retry attempts exceeded');
+        }
+    }
     
-    // Extract tools from index.ts
-    const tools = await extractTools(indexPath);
-    
-    // Return the complete serialized result
-    return {
-        agent_name: config.name,
-        role: config.role,
-        goal: config.goal,
-        capabilities: config.capabilities,
-        instructions: config.instructions ? config.instructions.map(instruction => ({
-            ...instruction,
-            schemaTemplate: instruction.schemaTemplate ? JSON.parse(instruction.schemaTemplate) : null
-        })) : [],
-        tools
-    };
+    throw new Error('Scaffold generation incomplete');
 }
 
 // CLI implementation

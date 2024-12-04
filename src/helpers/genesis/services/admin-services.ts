@@ -196,9 +196,16 @@ export class AdminService {
                 try {
                     if (url.pathname.startsWith('/api/v1/agents/')) {
                         logger.debug('[AdminService] Matched agents endpoint');
-                        const parts = url.pathname.split('/');
-                        const operation = parts[4];
-                        const agentName = parts.slice(5).join('/');
+                        const parts = url.pathname.split('/').filter(p => p); // Remove empty parts
+                        
+                        // Check if this is an operation or direct agent access
+                        const isOperation = ['start', 'stop'].includes(parts[3]);
+                        const agentName = isOperation 
+                            ? parts.slice(4).join('/') // Skip ['api', 'v1', 'agents', 'operation']
+                            : parts.slice(3).join('/'); // Skip ['api', 'v1', 'agents']
+                        const operation = isOperation ? parts[3] : null;
+                        
+                        logger.debug(`[AdminService] Parsed path - operation: ${operation}, agent: ${agentName}`);
                         
                         if (operation === 'start' && req.method === 'POST') {
                             logger.debug(`[AdminService] Starting agent: ${agentName}`);
@@ -212,6 +219,7 @@ export class AdminService {
                             return new Response(JSON.stringify(result), { headers: corsHeaders });
                         }
                         
+                        // Handle agent serialization (GET request)
                         const agentDir = path.join(this.agentsDir, agentName);
                         logger.debug(`[AdminService] Full agent directory path: ${agentDir}`);
                         
