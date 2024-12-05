@@ -67,12 +67,50 @@ export async function serializeAgentScaffold(agentDir: string): Promise<AgentSer
             const config = await AgentCoreConfigurator.loadMarkdownConfig(brainPath);
             const tools = await extractTools(indexPath);
             
+            // Process instructions to parse schema templates
+            const instructions = config.instructions?.map(instruction => {
+                try {
+                    // Ensure we have the basic instruction fields
+                    const processedInstruction = {
+                        name: instruction.name,
+                        description: instruction.description || '',
+                        schemaTemplate: undefined
+                    };
+
+                    // Parse schemaTemplate if it exists as a string
+                    if (instruction.schemaTemplate) {
+                        try {
+                            // The schema template from loadMarkdownConfig is always a string
+                            // that needs to be parsed into JSON
+                            processedInstruction.schemaTemplate = JSON.parse(instruction.schemaTemplate);
+                        } catch (parseError) {
+                            logger.warning(
+                                `Failed to parse schema template for instruction ${instruction.name}:`, 
+                                parseError,
+                                '\nSchema template content:', 
+                                instruction.schemaTemplate
+                            );
+                            processedInstruction.schemaTemplate = undefined;
+                        }
+                    }
+
+                    return processedInstruction;
+                } catch (error) {
+                    logger.error(`Error processing instruction ${instruction.name}:`, error);
+                    return {
+                        name: instruction.name || 'unknown',
+                        description: instruction.description || '',
+                        schemaTemplate: undefined
+                    };
+                }
+            }) || [];
+
             return {
                 agent_name: markerContent.agent_name,
                 role: markerContent.role,
                 goal: markerContent.goal,
                 capabilities: config.capabilities || '',
-                instructions: config.instructions || [],
+                instructions,
                 tools
             };
         }
