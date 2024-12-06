@@ -16,38 +16,38 @@
  * ------------------------
  * All FS operations return: { success: boolean, data?: string | string[] | boolean, error?: string }
  * 
- * GET /api/v1/fs/read/{path}
+ * GET /api/v1/fs/{agentName}/read/{path}
  *   Reads file content
  *   Returns: { success: true, data: "file content" }
- *   Example: GET /api/v1/fs/read/path/to/file.txt
+ *   Example: GET /api/v1/fs/myAgent/read/path/to/file.txt
  * 
- * POST /api/v1/fs/write/{path}
+ * POST /api/v1/fs/{agentName}/write/{path}
  *   Writes content to file
  *   Body: { "content": "file content" }
  *   Returns: { success: true }
- *   Example: POST /api/v1/fs/write/path/to/file.txt
+ *   Example: POST /api/v1/fs/myAgent/write/path/to/file.txt
  * 
- * PUT /api/v1/fs/create/{path}
+ * PUT /api/v1/fs/{agentName}/create/{path}
  *   Creates file or directory
  *   Query params: ?recursive=true (optional, for directories)
  *   Returns: { success: true }
- *   Example: PUT /api/v1/fs/create/path/to/dir?recursive=true
+ *   Example: PUT /api/v1/fs/myAgent/create/path/to/dir?recursive=true
  * 
- * DELETE /api/v1/fs/remove/{path}
+ * DELETE /api/v1/fs/{agentName}/remove/{path}
  *   Removes file or directory
  *   Query params: ?recursive=true (optional, for directories)
  *   Returns: { success: true }
- *   Example: DELETE /api/v1/fs/remove/path/to/file.txt
+ *   Example: DELETE /api/v1/fs/myAgent/remove/path/to/file.txt
  * 
- * GET /api/v1/fs/exists/{path}
+ * GET /api/v1/fs/{agentName}/exists/{path}
  *   Checks if path exists
  *   Returns: { success: true, data: true|false }
- *   Example: GET /api/v1/fs/exists/path/to/check
+ *   Example: GET /api/v1/fs/myAgent/exists/path/to/check
  * 
- * GET /api/v1/fs/list/{path}
+ * GET /api/v1/fs/{agentName}/list/{path}
  *   Lists directory contents
  *   Returns: { success: true, data: string[] }
- *   Example: GET /api/v1/fs/list/path/to/dir
+ *   Example: GET /api/v1/fs/myAgent/list/path/to/dir
  * 
  * CORS:
  * - All endpoints support CORS with '*' origin
@@ -258,17 +258,41 @@ export class AdminService {
                     
                     else if (url.pathname.startsWith('/api/v1/fs/')) {
                         logger.debug('[AdminService] Matched fs endpoint');
-                        const operation = url.pathname.split('/')[4];  // Get operation after /api/v1/fs/
-                        const path = url.pathname.split('/').slice(5).join('/');  // Get path after operation
+                        const parts = url.pathname.split('/').filter(p => p); // Remove empty parts
+                        // parts should be ['api', 'v1', 'fs', '{agent_name}', '{operation}', ...rest]
+                        
+                        if (parts.length < 5) {
+                            throw new Error('Invalid file system endpoint path');
+                        }
+
+                        const agentName = parts[3];  // Get agent name after /api/v1/fs/
+                        const operation = parts[4];  // Get operation after agent name
+                        const resourcePath = parts.slice(5).join('/');  // Get remaining path after operation
                         const recursive = url.searchParams.get('recursive') === 'true';
+
+                        // Construct the full path relative to the agent's directory
+                        const agentDir = path.join(this.agentsDir, agentName);
+                        const fullPath = path.join(agentDir, resourcePath);
+
+                        // Verify the path is within the agent's directory
+                        if (!fullPath.startsWith(agentDir)) {
+                            throw new Error('Access denied: Path is outside agent directory');
+                        }
+
+                        logger.debug(`[AdminService] File operation:`, {
+                            agentName,
+                            operation,
+                            resourcePath,
+                            fullPath
+                        });
 
                         let response: FSOperationResult;
 
                         switch (operation) {
                             case 'read':
                                 if (req.method === 'GET') {
-                                    logger.debug(`[AdminService] Attempting to read file: ${path}`);
-                                    response = await readFile(path);
+                                    logger.debug(`[AdminService] Reading file: ${fullPath}`);
+                                    response = await readFile(fullPath);
                                     return new Response(JSON.stringify(response), { headers: corsHeaders });
                                 }
                                 break;
@@ -279,40 +303,40 @@ export class AdminService {
                                     if (!body?.content) {
                                         throw new Error('Content is required for write operation');
                                     }
-                                    logger.debug(`[AdminService] Attempting to write to file: ${path}`);
-                                    response = await writeFile(path, body.content);
+                                    logger.debug(`[AdminService] Writing to file: ${fullPath}`);
+                                    response = await writeFile(fullPath, body.content);
                                     return new Response(JSON.stringify(response), { headers: corsHeaders });
                                 }
                                 break;
 
                             case 'create':
                                 if (req.method === 'PUT') {
-                                    logger.debug(`[AdminService] Attempting to create path: ${path}`);
-                                    response = await createPath(path, { recursive });
+                                    logger.debug(`[AdminService] Creating path: ${fullPath}`);
+                                    response = await createPath(fullPath, { recursive });
                                     return new Response(JSON.stringify(response), { headers: corsHeaders });
                                 }
                                 break;
 
                             case 'remove':
                                 if (req.method === 'DELETE') {
-                                    logger.debug(`[AdminService] Attempting to remove path: ${path}`);
-                                    response = await removePath(path, { recursive });
+                                    logger.debug(`[AdminService] Removing path: ${fullPath}`);
+                                    response = await removePath(fullPath, { recursive });
                                     return new Response(JSON.stringify(response), { headers: corsHeaders });
                                 }
                                 break;
 
                             case 'exists':
                                 if (req.method === 'GET') {
-                                    logger.debug(`[AdminService] Checking if path exists: ${path}`);
-                                    response = await pathExists(path);
+                                    logger.debug(`[AdminService] Checking if path exists: ${fullPath}`);
+                                    response = await pathExists(fullPath);
                                     return new Response(JSON.stringify(response), { headers: corsHeaders });
                                 }
                                 break;
 
                             case 'list':
                                 if (req.method === 'GET') {
-                                    logger.debug(`[AdminService] Listing directory contents: ${path}`);
-                                    response = await listDirectory(path);
+                                    logger.debug(`[AdminService] Listing directory contents: ${fullPath}`);
+                                    response = await listDirectory(fullPath);
                                     return new Response(JSON.stringify(response), { headers: corsHeaders });
                                 }
                                 break;
