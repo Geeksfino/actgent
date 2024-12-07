@@ -1,6 +1,7 @@
 import dotenv from "dotenv"; 
 import { AgentServiceConfig } from "../core/configs";
 import { createRuntime } from "../runtime";
+import { logger } from "../core";
 
 /**
  * AgentServiceConfigurator is responsible for loading the agent service configuration from the environment file.
@@ -35,7 +36,7 @@ export class AgentServiceConfigurator {
   public static async getAgentConfiguration(basePath?: string, envFile: string = ".agent.env"): Promise<AgentServiceConfig> {
     const runtime = createRuntime();
     const configurator = new AgentServiceConfigurator(basePath || await runtime.process.cwd());
- 
+
     // First read from shell environment variables
     configurator.agentServiceConf = {
       llmConfig: {
@@ -65,7 +66,8 @@ export class AgentServiceConfigurator {
       : undefined;
     
     if (envPath && await configurator.runtime.fs.exists(envPath)) {
-      dotenv.config({ path: envPath });
+      // Force override existing env variables
+      dotenv.config({ path: envPath, override: true });
 
       // Override with values from env file
       configurator.agentServiceConf = {
@@ -85,7 +87,7 @@ export class AgentServiceConfigurator {
         }
       };
     } else {
-      console.warn(`Environment file not found at ${envPath}. Using shell environment variables.`);
+      logger.warning(`Environment file not found at ${envPath}. Using shell environment variables.`);
     }
 
     // Add validation checks after final configuration is set
