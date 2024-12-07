@@ -1,7 +1,7 @@
 import dotenv from "dotenv"; 
 import { AgentServiceConfig } from "../core/configs";
 import { createRuntime } from "../runtime";
-import { logger } from "../core";
+import { logger } from "../core/Logger";
 
 /**
  * AgentServiceConfigurator is responsible for loading the agent service configuration from the environment file.
