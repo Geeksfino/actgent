@@ -56,6 +56,7 @@
  */
 
 import { Server } from "bun";
+import { BaseAgent } from '../../../agent/BaseAgent';
 import { LoggingConfig } from "../../../core/configs";
 import { logger, LogLevel } from '../../../core/Logger';
 import { serializeAgentScaffold } from '../tools/scaffold-serializer';
@@ -79,7 +80,7 @@ interface Instruction {
 }
 
 interface RunningAgent {
-    instance: any;  // The actual agent instance
+    instance: BaseAgent<any, any, any>;
     loggerConfig: LoggingConfig;
 }
 
