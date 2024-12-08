@@ -11,7 +11,7 @@ const configPath = path.join(__dirname, 'brain.md');
 const agentConfig = await AgentCoreConfigurator.loadMarkdownConfig(configPath);
 
 // Load the agent runtime environment from the project root
-const svcConfig = await AgentServiceConfigurator.getAgentConfiguration("./");
+const svcConfig = await AgentServiceConfigurator.getAgentConfiguration(__dirname);
 const promptStrategy = await KeywordBasedStrategyBuilder.buildStrategy();
 const ${agent_name} = new AgentBuilder(agentConfig, svcConfig)
     .withPromptStrategy(promptStrategy)
