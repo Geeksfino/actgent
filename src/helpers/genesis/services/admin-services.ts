@@ -55,7 +55,7 @@
  * - Content-Type: application/json
  */
 
-import { Server } from "bun";
+import { Server, type Subprocess } from "bun";
 import { BaseAgent } from '../../../agent/BaseAgent';
 import { LoggingConfig } from "../../../core/configs";
 import { logger, LogLevel } from '../../../core/Logger';
@@ -80,7 +80,7 @@ interface Instruction {
 }
 
 interface RunningAgent {
-    instance: BaseAgent<any, any, any>;
+    instance: Subprocess;
     loggerConfig: LoggingConfig;
 }
 
@@ -106,35 +106,41 @@ export class AdminService {
 
             const agentDir = path.join(this.agentsDir, agentName);
             const agentPath = path.join(agentDir, `${agentName}.ts`);
+            const runnerPath = path.join(agentDir, 'index.ts');
             
             if (!await pathExists(agentPath)) {
                 return { success: false, error: 'Agent not found' };
             }
 
-            // Dynamic import of the agent
-            const agentModule = await import(agentPath);
-            const agent = agentModule[agentName];
-
-            if (!agent) {
-                return { success: false, error: 'Agent class not found in module' };
-            }
-
-            const loggerConfig: LoggingConfig = {
-                destination: path.join(agentDir, `${agentName}.log`)
-            };
-
-            // Register stream callback for logging
-            agent.registerStreamCallback((delta: string) => {
-                logger.info(`[${agentName}] ${delta}`);
+            logger.debug(`Starting agent ${agentName} with runner at ${runnerPath}`);
+            
+            // Run from project root, just like CLI command
+            const proc = Bun.spawn(['bun', 'run', runnerPath, '--log-level', 'debug'], {
+                // cwd should be project root, not agent directory
+                env: {
+                    // Only pass through essential system vars
+                    PATH: process.env.PATH || '',
+                    HOME: process.env.HOME || '',
+                    TMPDIR: process.env.TMPDIR || '/tmp',
+                },
+                stdio: ['inherit', 'inherit', 'inherit']
             });
 
-            // Run the agent
-            await agent.run(loggerConfig);
+            // Handle process exit
+            proc.exited.then((code) => {
+                logger.info(`Agent ${agentName} exited with code ${code}`);
+                this.runningAgents.delete(agentName);
+            }).catch((error: Error) => {
+                logger.error(`Agent ${agentName} process error:`, error);
+                this.runningAgents.delete(agentName);
+            });
 
             // Store the running instance
             this.runningAgents.set(agentName, {
-                instance: agent,
-                loggerConfig
+                instance: proc,
+                loggerConfig: {
+                    destination: path.join(agentDir, `${agentName}.log`)
+                }
             });
 
             return { success: true };
@@ -151,22 +157,27 @@ export class AdminService {
         try {
             const runningAgent = this.runningAgents.get(agentName);
             if (!runningAgent) {
-                return { success: false, error: 'Agent is not running' };
+                return { success: false, error: 'Agent not running' };
             }
 
-            // Cleanup and stop the agent
-            if (runningAgent.instance && typeof runningAgent.instance.shutdown === 'function') {
-                logger.debug(`[AdminService] Shutting down agent ${agentName}`);
-                await runningAgent.instance.shutdown();
+            // Kill the subprocess with SIGTERM for graceful shutdown
+            logger.debug(`[AdminService] Stopping agent ${agentName}`);
+            runningAgent.instance.kill(2); // SIGTERM
+            
+            // Give it a moment to clean up
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // Force kill if still running
+            if (this.runningAgents.has(agentName)) {
+                runningAgent.instance.kill(9); // SIGKILL
+                this.runningAgents.delete(agentName);
             }
 
-            this.runningAgents.delete(agentName);
-            logger.debug(`[AdminService] Agent ${agentName} stopped and removed from running agents`);
             return { success: true };
         } catch (error) {
             logger.error(`Error stopping agent ${agentName}:`, error);
-            return { 
-                success: false, 
+            return {
+                success: false,
                 error: error instanceof Error ? error.message : String(error)
             };
         }
