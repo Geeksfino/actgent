@@ -162,7 +162,9 @@ export class NodeRuntime implements Runtime {
   };
 
   process: Process = {
-    env: process.env as Record<string, string>,
+    get env() {
+      return process.env as Record<string, string>;
+    },
     cwd: async () => process.cwd(),
     exit: (code?: number) => process.exit(code),
     pid: process.pid,
