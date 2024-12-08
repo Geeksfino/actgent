@@ -154,11 +154,13 @@ export class AdminService {
             }
 
             // Cleanup and stop the agent
-            if (runningAgent.instance && typeof runningAgent.instance.stop === 'function') {
-                await runningAgent.instance.stop();
+            if (runningAgent.instance && typeof runningAgent.instance.shutdown === 'function') {
+                logger.debug(`[AdminService] Shutting down agent ${agentName}`);
+                await runningAgent.instance.shutdown();
             }
 
             this.runningAgents.delete(agentName);
+            logger.debug(`[AdminService] Agent ${agentName} stopped and removed from running agents`);
             return { success: true };
         } catch (error) {
             logger.error(`Error stopping agent ${agentName}:`, error);
