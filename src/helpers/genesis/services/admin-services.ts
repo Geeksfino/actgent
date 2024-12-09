@@ -384,13 +384,39 @@ export class AdminService {
                         logger.debug('[AdminService] Matched manifest endpoint');
                         const parts = url.pathname.split('/').filter(p => p); // Remove empty parts
                         const agentName = parts[3] || '';
+                        const shouldReindex = url.searchParams.get('reindex') === 'true';
 
                         if (req.method === 'GET') {
-                            const instances = await this.manifestManager.getAgentInstances(agentName);
-                            return new Response(JSON.stringify({
-                                success: true,
-                                data: instances
-                            }), { headers: corsHeaders });
+                            try {
+                                if (shouldReindex) {
+                                    logger.info('[AdminService] Reindexing agent manifest...');
+                                    const manifest = await this.manifestManager.reindexAgents();
+                                    return new Response(JSON.stringify({
+                                        success: true,
+                                        data: manifest
+                                    }), { headers: corsHeaders });
+                                }
+
+                                if (agentName) {
+                                    const instances = await this.manifestManager.getAgentInstances(agentName);
+                                    return new Response(JSON.stringify({
+                                        success: true,
+                                        data: instances
+                                    }), { headers: corsHeaders });
+                                } else {
+                                    const manifest = await this.manifestManager.getManifest();
+                                    return new Response(JSON.stringify({
+                                        success: true,
+                                        data: manifest
+                                    }), { headers: corsHeaders });
+                                }
+                            } catch (error) {
+                                logger.error('[AdminService] Error handling manifest request:', error);
+                                return new Response(JSON.stringify({
+                                    success: false,
+                                    error: error instanceof Error ? error.message : String(error)
+                                }), { status: 500, headers: corsHeaders });
+                            }
                         }
                         return new Response(JSON.stringify({
                             success: false,

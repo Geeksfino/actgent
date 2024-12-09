@@ -55,7 +55,7 @@ async function generateAgentScaffold({ agent_name, role, goal, capabilities, ins
 
     // Get unique folder name
     const manifestManager = new AgentManifestManager(outputDir);
-    const uniqueFolderName = await manifestManager.generateUniqueName(agent_name);
+    const uniqueFolderName = await manifestManager.generateUniqueName(agent_name, role, goal);
     const agentDir = runtime.path.join(outputDir, uniqueFolderName);
 
     // Create the agent directory
