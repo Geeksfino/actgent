@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import { createRuntime } from '../../../runtime';
 import { Instruction } from '../../../core/configs';
+import { AgentManifestManager } from './agent-manifest';
 
 const runtime = createRuntime();
 
@@ -52,8 +53,12 @@ async function generateAgentScaffold({ agent_name, role, goal, capabilities, ins
     console.log(`Scaffold output directory: ${outputDir}`);
     console.log(`Scaffold agent name: ${agent_name}`);
 
+    // Get unique folder name
+    const manifestManager = new AgentManifestManager(outputDir);
+    const uniqueFolderName = await manifestManager.generateUniqueName(agent_name);
+    const agentDir = runtime.path.join(outputDir, uniqueFolderName);
+
     // Create the agent directory
-    const agentDir = runtime.path.join(outputDir, agent_name);
     await fs.mkdir(agentDir, { recursive: true });
 
     // Create main directory and instructions subdirectory
