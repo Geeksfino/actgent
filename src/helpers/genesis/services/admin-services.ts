@@ -60,6 +60,7 @@ import { BaseAgent } from '../../../agent/BaseAgent';
 import { LoggingConfig } from "../../../core/configs";
 import { logger, LogLevel } from '../../../core/Logger';
 import { serializeAgentScaffold } from '../tools/scaffold-serializer';
+import { AgentManifestManager } from '../tools/agent-manifest';
 import {
     readFile,
     writeFile,
@@ -90,12 +91,34 @@ export class AdminService {
     private host: string;
     private agentsDir: string;
     private runningAgents: Map<string, RunningAgent> = new Map();
+    private manifestManager: AgentManifestManager;
 
     constructor(port: number = 11370, host: string = 'localhost', agentsDir: string) {
         this.port = port;
         this.host = host;
         this.agentsDir = agentsDir;
+        this.manifestManager = new AgentManifestManager(agentsDir);
         logger.trace(`AdminService initialized with port ${port}, host ${host}, and agents directory ${agentsDir}`);
+    }
+
+    /**
+     * Resolves an agent name to its actual directory using the manifest.
+     * If no specific instance is found, falls back to the original name for backward compatibility.
+     */
+    private async resolveAgentDirectory(agentName: string): Promise<string> {
+        try {
+            const latestInstance = await this.manifestManager.getLatestInstance(agentName);
+            if (latestInstance) {
+                return path.join(this.agentsDir, latestInstance.directory);
+            }
+            // Fallback to original behavior for backward compatibility
+            logger.warning(`No manifest entry found for agent ${agentName}, falling back to direct name`);
+            return path.join(this.agentsDir, agentName);
+        } catch (error) {
+            logger.error(`Error resolving agent directory for ${agentName}:`, error);
+            // Fallback to original behavior
+            return path.join(this.agentsDir, agentName);
+        }
     }
 
     async startAgent(agentName: string): Promise<FSOperationResult> {
@@ -104,7 +127,7 @@ export class AdminService {
                 return { success: false, error: 'Agent is already running' };
             }
 
-            const agentDir = path.join(this.agentsDir, agentName);
+            const agentDir = await this.resolveAgentDirectory(agentName);
             const agentPath = path.join(agentDir, `${agentName}.ts`);
             const runnerPath = path.join(agentDir, 'index.ts');
             
@@ -234,7 +257,7 @@ export class AdminService {
                         }
                         
                         // Handle agent serialization (GET request)
-                        const agentDir = path.join(this.agentsDir, agentName);
+                        const agentDir = await this.resolveAgentDirectory(agentName);
                         logger.debug(`[AdminService] Full agent directory path: ${agentDir}`);
                         
                         try {
@@ -285,7 +308,7 @@ export class AdminService {
                         const recursive = url.searchParams.get('recursive') === 'true';
 
                         // Construct the full path relative to the agent's directory
-                        const agentDir = path.join(this.agentsDir, agentName);
+                        const agentDir = await this.resolveAgentDirectory(agentName);
                         const fullPath = path.join(agentDir, resourcePath);
 
                         // Verify the path is within the agent's directory
@@ -355,6 +378,24 @@ export class AdminService {
                                 }
                                 break;
                         }
+                    }
+
+                    else if (url.pathname.startsWith('/api/v1/manifest/')) {
+                        logger.debug('[AdminService] Matched manifest endpoint');
+                        const parts = url.pathname.split('/').filter(p => p); // Remove empty parts
+                        const agentName = parts[3] || '';
+
+                        if (req.method === 'GET') {
+                            const instances = await this.manifestManager.getAgentInstances(agentName);
+                            return new Response(JSON.stringify({
+                                success: true,
+                                data: instances
+                            }), { headers: corsHeaders });
+                        }
+                        return new Response(JSON.stringify({
+                            success: false,
+                            error: 'Method not allowed'
+                        }), { status: 405, headers: corsHeaders });
                     }
 
                     return new Response('Not found', { status: 404, headers: corsHeaders });
