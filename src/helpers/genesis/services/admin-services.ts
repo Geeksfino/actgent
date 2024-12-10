@@ -61,16 +61,10 @@ import { LoggingConfig } from "../../../core/configs";
 import { logger, LogLevel } from '../../../core/Logger';
 import { serializeAgentScaffold } from '../tools/scaffold-serializer';
 import { AgentManifestManager } from '../tools/agent-manifest';
-import {
-    readFile,
-    writeFile,
-    createPath,
-    removePath,
-    pathExists,
-    listDirectory,
-    FSOperationResult
-} from '../tools/fs-operations';
+import { createRuntime } from '../../../runtime';
 import path from 'path';
+
+const runtime = createRuntime();
 
 interface WriteRequestBody {
     content: string;
@@ -121,7 +115,7 @@ export class AdminService {
         }
     }
 
-    async startAgent(agentName: string): Promise<FSOperationResult> {
+    async startAgent(agentName: string): Promise<any> {
         try {
             if (this.runningAgents.has(agentName)) {
                 return { success: false, error: 'Agent is already running' };
@@ -131,7 +125,7 @@ export class AdminService {
             const agentPath = path.join(agentDir, `${agentName}.ts`);
             const runnerPath = path.join(agentDir, 'index.ts');
             
-            if (!await pathExists(agentPath)) {
+            if (!await runtime.fs.exists(agentPath)) {
                 return { success: false, error: 'Agent not found' };
             }
 
@@ -176,7 +170,7 @@ export class AdminService {
         }
     }
 
-    async stopAgent(agentName: string): Promise<FSOperationResult> {
+    async stopAgent(agentName: string): Promise<any> {
         try {
             const runningAgent = this.runningAgents.get(agentName);
             if (!runningAgent) {
@@ -234,13 +228,93 @@ export class AdminService {
                     if (url.pathname.startsWith('/api/v1/agents/')) {
                         logger.debug('[AdminService] Matched agents endpoint');
                         const parts = url.pathname.split('/').filter(p => p); // Remove empty parts
-                        
+                        const agentName = parts[3];
+
+                        if (!agentName) {
+                            return new Response(JSON.stringify({
+                                success: false,
+                                error: 'Agent name is required'
+                            }), { status: 400, headers: corsHeaders });
+                        }
+
+                        if (req.method === 'DELETE') {
+                            try {
+                                const agentDir = await this.resolveAgentDirectory(agentName);
+                                if (!agentDir) {
+                                    return new Response(JSON.stringify({
+                                        success: false,
+                                        error: 'Agent not found'
+                                    }), { status: 404, headers: corsHeaders });
+                                }
+
+                                // Delete the agent directory using the resolved path directly
+                                await runtime.fs.rm(agentDir, { recursive: true });
+
+                                // Reindex to update manifest
+                                await this.manifestManager.reindexAgents();
+
+                                return new Response(JSON.stringify({
+                                    success: true
+                                }), { headers: corsHeaders });
+                            } catch (error) {
+                                logger.error('[AdminService] Error deleting agent:', error);
+                                return new Response(JSON.stringify({
+                                    success: false,
+                                    error: error instanceof Error ? error.message : String(error)
+                                }), { status: 500, headers: corsHeaders });
+                            }
+                        } else if (req.method === 'PATCH' && parts[4] === 'rename') {
+                            try {
+                                const body = await req.json();
+                                const { newName } = body as { newName: string };
+
+                                if (!newName) {
+                                    return new Response(JSON.stringify({
+                                        success: false,
+                                        error: 'New name is required'
+                                    }), { status: 400, headers: corsHeaders });
+                                }
+
+                                const agentDir = await this.resolveAgentDirectory(agentName);
+                                if (!agentDir) {
+                                    return new Response(JSON.stringify({
+                                        success: false,
+                                        error: 'Agent not found'
+                                    }), { status: 404, headers: corsHeaders });
+                                }
+
+                                const oldPath = runtime.path.join(this.agentsDir, agentDir);
+                                const brainPath = runtime.path.join(oldPath, 'brain.md');
+
+                                // Read brain.md
+                                const brainContent = await runtime.fs.readFile(brainPath);
+
+                                // Update content
+                                const updatedContent = brainContent.replace(/^name:.*$/m, `name: ${newName}`);
+
+                                // Write back to brain.md
+                                await runtime.fs.writeFile(brainPath, updatedContent);
+
+                                // Reindex to update manifest
+                                await this.manifestManager.reindexAgents();
+
+                                return new Response(JSON.stringify({
+                                    success: true
+                                }), { headers: corsHeaders });
+                            } catch (error) {
+                                logger.error('[AdminService] Error renaming agent:', error);
+                                return new Response(JSON.stringify({
+                                    success: false,
+                                    error: error instanceof Error ? error.message : String(error)
+                                }), { status: 500, headers: corsHeaders });
+                            }
+                        }
+
                         // Check if this is an operation or direct agent access
-                        const isOperation = ['start', 'stop'].includes(parts[3]);
-                        const agentName = isOperation 
-                            ? parts.slice(4).join('/') // Skip ['api', 'v1', 'agents', 'operation']
-                            : parts.slice(3).join('/'); // Skip ['api', 'v1', 'agents']
-                        const operation = isOperation ? parts[3] : null;
+                        const isOperation = ['start', 'stop'].includes(parts[4]);
+                        const operation = isOperation 
+                            ? parts[4] // Skip ['api', 'v1', 'agents', 'agentName']
+                            : null;
                         
                         logger.debug(`[AdminService] Parsed path - operation: ${operation}, agent: ${agentName}`);
                         
@@ -323,13 +397,13 @@ export class AdminService {
                             fullPath
                         });
 
-                        let response: FSOperationResult;
+                        let response: any;
 
                         switch (operation) {
                             case 'read':
                                 if (req.method === 'GET') {
                                     logger.debug(`[AdminService] Reading file: ${fullPath}`);
-                                    response = await readFile(fullPath);
+                                    response = await runtime.fs.readFile(fullPath);
                                     return new Response(JSON.stringify(response), { headers: corsHeaders });
                                 }
                                 break;
@@ -341,7 +415,7 @@ export class AdminService {
                                         throw new Error('Content is required for write operation');
                                     }
                                     logger.debug(`[AdminService] Writing to file: ${fullPath}`);
-                                    response = await writeFile(fullPath, body.content);
+                                    response = await runtime.fs.writeFile(fullPath, body.content);
                                     return new Response(JSON.stringify(response), { headers: corsHeaders });
                                 }
                                 break;
@@ -349,7 +423,7 @@ export class AdminService {
                             case 'create':
                                 if (req.method === 'PUT') {
                                     logger.debug(`[AdminService] Creating path: ${fullPath}`);
-                                    response = await createPath(fullPath, { recursive });
+                                    response = await runtime.fs.mkdir(fullPath, { recursive });
                                     return new Response(JSON.stringify(response), { headers: corsHeaders });
                                 }
                                 break;
@@ -357,7 +431,7 @@ export class AdminService {
                             case 'remove':
                                 if (req.method === 'DELETE') {
                                     logger.debug(`[AdminService] Removing path: ${fullPath}`);
-                                    response = await removePath(fullPath, { recursive });
+                                    response = await runtime.fs.rm(fullPath, { recursive });
                                     return new Response(JSON.stringify(response), { headers: corsHeaders });
                                 }
                                 break;
@@ -365,7 +439,7 @@ export class AdminService {
                             case 'exists':
                                 if (req.method === 'GET') {
                                     logger.debug(`[AdminService] Checking if path exists: ${fullPath}`);
-                                    response = await pathExists(fullPath);
+                                    response = await runtime.fs.exists(fullPath);
                                     return new Response(JSON.stringify(response), { headers: corsHeaders });
                                 }
                                 break;
@@ -373,7 +447,7 @@ export class AdminService {
                             case 'list':
                                 if (req.method === 'GET') {
                                     logger.debug(`[AdminService] Listing directory contents: ${fullPath}`);
-                                    response = await listDirectory(fullPath);
+                                    response = await runtime.fs.readDir(fullPath);
                                     return new Response(JSON.stringify(response), { headers: corsHeaders });
                                 }
                                 break;
