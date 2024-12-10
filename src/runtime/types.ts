@@ -48,6 +48,7 @@ export interface FileSystem {
   rm(path: string, options?: { recursive?: boolean }): Promise<void>;
   stat(path: string): Promise<FileStat>;
   watch(path: string, callback: (event: string, filename: string | null) => void): void;
+  rename(oldPath: string, newPath: string): Promise<void>;
 }
 
 export interface Path {

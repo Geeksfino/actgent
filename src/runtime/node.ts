@@ -93,6 +93,14 @@ export class NodeFileSystem implements FileSystem {
     }
   }
 
+  async rename(oldPath: string, newPath: string): Promise<void> {
+    try {
+      await fs.rename(oldPath, newPath);
+    } catch (e) {
+      throw new RuntimeError('Failed to rename file or directory', 'ERENAME', e);
+    }
+  }
+
   watch(path: string, callback: (event: string, filename: string) => void): void {
     fsCallback.watch(path, (event, filename) => callback(event, filename ?? ''));
   }

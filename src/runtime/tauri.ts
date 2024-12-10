@@ -1,5 +1,5 @@
 import { platform, arch, type as osType, version, hostname } from '@tauri-apps/plugin-os';
-import { exists, readTextFile, writeTextFile, mkdir, readDir, create, remove } from '@tauri-apps/plugin-fs';
+import { exists, readTextFile, writeTextFile, mkdir, readDir, create, remove, rename } from '@tauri-apps/plugin-fs';
 import { join, dirname, basename, extname, resolve, normalize, isAbsolute } from '@tauri-apps/api/path';
 import { Command } from '@tauri-apps/plugin-shell';
 import { exit } from '@tauri-apps/plugin-process';
@@ -43,6 +43,15 @@ export class TauriRuntime implements Runtime {
 
     async rm(path: string, options?: { recursive?: boolean }): Promise<void> {
       await remove(path, options);
+    },
+
+    async rename(oldPath: string, newPath: string): Promise<void> {
+      try {
+        // Use Tauri's fs API to rename
+        await rename(oldPath, newPath);
+      } catch (e) {
+        throw new Error('Failed to rename file or directory');
+      }
     },
 
     async stat(path: string): Promise<FileStat> {
