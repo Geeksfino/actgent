@@ -41,14 +41,14 @@
     "watch": "bun concurrently \"bun run watch:ts\" \"bun run watch:resources\""
   },
   "dependencies": {
-    "@grpc/grpc-js": "^1.11.3",
+    "@grpc/grpc-js": "^1.12.4",
     "@tauri-apps/api": "^2.1.1",
-    "@tauri-apps/plugin-fs": "^2.0.2",
-    "@tauri-apps/plugin-log": "^2.0.0",
-    "@tauri-apps/plugin-os": "^2.0.0",
-    "@tauri-apps/plugin-process": "^2.0.0",
-    "@tauri-apps/plugin-shell": "^2.0.1",
-    "@types/bun": "^1.1.13",
+    "@tauri-apps/plugin-fs": "^2.2.0",
+    "@tauri-apps/plugin-log": "^2.2.0",
+    "@tauri-apps/plugin-os": "^2.2.0",
+    "@tauri-apps/plugin-process": "^2.2.0",
+    "@tauri-apps/plugin-shell": "^2.2.0",
+    "@types/bun": "^1.1.14",
     "@types/eventsource": "^1.1.15",
     "@types/js-yaml": "^4.0.9",
     "@types/minimist": "^1.2.5",
@@ -60,19 +60,19 @@
     "cld3": "^2.0.6",
     "cld3-asm": "^4.0.0",
     "commander": "^12.1.0",
-    "dotenv": "^16.4.5",
+    "dotenv": "^16.4.7",
     "eventsource": "^2.0.2",
     "gray-matter": "^4.0.3",
     "header-generator": "^2.1.57",
     "js-yaml": "^4.1.0",
-    "lru-cache": "^11.0.1",
-    "mathjs": "^13.2.0",
+    "lru-cache": "^11.0.2",
+    "mathjs": "^13.2.3",
     "nats": "^2.28.2",
-    "openai": "^4.63.0",
+    "openai": "^4.76.1",
     "picocolors": "^1.1.1",
     "pino": "^9.5.0",
     "pino-pretty": "^11.3.0",
-    "proxy-agent": "^6.4.0",
+    "proxy-agent": "^6.5.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "sequelize": "^6.37.5",
@@ -80,17 +80,17 @@
     "turndown": "^7.2.0",
     "uuidv4": "^6.2.13",
     "wikipedia": "^2.1.2",
-    "zod": "^3.23.8"
+    "zod": "^3.24.1"
   },
   "devDependencies": {
-    "bun-types": "^1.1.29",
+    "bun-types": "^1.1.38",
     "concurrently": "^9.1.0",
     "cpx2": "^8.0.0",
     "sqlite3": "^5.1.7",
     "tsc-watch": "^6.2.1",
-    "vitest": "^2.1.4"
+    "vitest": "^2.1.8"
   },
   "peerDependencies": {
-    "typescript": "^5.0.0"
+    "typescript": "^5.6.3"
   }
 }
