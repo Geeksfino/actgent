@@ -13,7 +13,7 @@ interface AgentManifestEntry {
 }
 
 interface AgentManifest {
-    agents: Record<string, AgentManifestEntry[]>;
+    agents: Record<string, AgentManifestEntry>;
 }
 
 export class AgentManifestManager {
@@ -54,19 +54,13 @@ export class AgentManifestManager {
 
         // Update manifest
         const manifest = await this.loadManifest();
-        if (!manifest.agents[agentName]) {
-            manifest.agents[agentName] = [];
-        }
-
-        const entry: AgentManifestEntry = {
+        manifest.agents[uniqueName] = {
             name: agentName,
             directory: uniqueName,
             createdAt: new Date().toISOString(),
             role,
             goal
         };
-
-        manifest.agents[agentName].push(entry);
         await this.saveManifest(manifest);
 
         return uniqueName;
@@ -74,20 +68,12 @@ export class AgentManifestManager {
 
     /**
      * Gets all instances of an agent by name
-     * @param agentName The agent name to look up
+     * @param name The agent name to look up
      * @returns Array of agent instances, ordered by creation time
      */
-    public async getAgentInstances(agentName: string): Promise<AgentManifestEntry[]> {
+    public async getAgentInstances(name: string): Promise<AgentManifestEntry[]> {
         const manifest = await this.loadManifest();
-        return manifest.agents[agentName] || [];
-    }
-
-    /**
-     * Gets the entire manifest
-     * @returns The complete agent manifest
-     */
-    public async getManifest(): Promise<AgentManifest> {
-        return await this.loadManifest();
+        return Object.values(manifest.agents).filter(agent => agent.name === name);
     }
 
     /**
@@ -97,7 +83,19 @@ export class AgentManifestManager {
      */
     public async getLatestInstance(agentName: string): Promise<AgentManifestEntry | null> {
         const instances = await this.getAgentInstances(agentName);
-        return instances.length > 0 ? instances[instances.length - 1] : null;
+        if (instances.length === 0) return null;
+        
+        // Sort by creation time, newest first
+        instances.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        return instances[0];
+    }
+
+    /**
+     * Gets the entire manifest
+     * @returns The complete agent manifest
+     */
+    public async getManifest(): Promise<AgentManifest> {
+        return await this.loadManifest();
     }
 
     /**
@@ -140,27 +138,17 @@ export class AgentManifestManager {
                     const agentName = metadata.name;
                     if (!agentName) continue;
                     
-                    if (!manifest.agents[agentName]) {
-                        manifest.agents[agentName] = [];
-                    }
-                    
-                    // Add entry to manifest using modification time as creation time
-                    manifest.agents[agentName].push({
+                    manifest.agents[entryName] = {
                         name: agentName,
                         directory: entryName,
                         createdAt: new Date(stats.modifiedAt).toISOString(),
                         role: metadata.role || '',
                         goal: metadata.goal || ''
-                    });
+                    };
                 } catch (error) {
                     console.error(`Error processing agent directory ${entryName}:`, error);
                     continue;
                 }
-            }
-            
-            // Sort each agent's instances by creation time
-            for (const instances of Object.values(manifest.agents)) {
-                instances.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
             }
             
             // Save the rebuilt manifest
