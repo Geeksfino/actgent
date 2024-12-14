@@ -7,12 +7,14 @@ import { logger } from '../../../core/Logger';
 const runtime = createRuntime();
 
 export interface AgentSerializeResult {
+    agent_dir: string;
     agent_name: string;
     role: string;
     goal: string;
     capabilities: string;
     instructions: Instruction[];
     tools: string[];
+    agent_id: string;
 }
 
 async function extractTools(indexPath: string): Promise<string[]> {
@@ -106,12 +108,14 @@ export async function serializeAgentScaffold(agentDir: string): Promise<AgentSer
             }) || [];
 
             return {
+                agent_dir: agentDir,
                 agent_name: markerContent.agent_name,
                 role: markerContent.role,
                 goal: markerContent.goal,
                 capabilities: config.capabilities || '',
                 instructions,
-                tools
+                tools,
+                agent_id: markerContent.agent_id
             };
         }
         

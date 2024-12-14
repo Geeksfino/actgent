@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs/promises';
 import { createRuntime } from '../../../runtime';
 import { Instruction } from '../../../core/configs';
@@ -13,6 +14,7 @@ export interface AgentScaffoldOptions {
     instructions: Instruction[];
     tools?: string[];
     outputDir: string;
+    agent_id?: string; // Optional: allow passing in a specific ID if needed
 }
 
 async function loadTemplate(templatePath: string, replacements: Record<string, string>): Promise<string> {
@@ -46,7 +48,10 @@ async function copyDirectory(src: string, dest: string) {
     }
 }
 
-async function generateAgentScaffold({ agent_name, role, goal, capabilities, instructions, tools = [], outputDir }: AgentScaffoldOptions) {
+async function generateAgentScaffold({ agent_name, role, goal, capabilities, instructions, tools = [], outputDir, agent_id }: AgentScaffoldOptions) {
+    // Generate a unique ID for the agent if not provided
+    const agentUniqueId = agent_id || uuidv4();
+    
     // Handle tilde expansion
     const homeDir = await runtime.os.homedir();
     outputDir = outputDir.replace(/^~/, homeDir);
@@ -55,7 +60,7 @@ async function generateAgentScaffold({ agent_name, role, goal, capabilities, ins
 
     // Get unique folder name
     const manifestManager = new AgentManifestManager(outputDir);
-    const uniqueFolderName = await manifestManager.generateUniqueName(agent_name, role, goal);
+    const uniqueFolderName = await manifestManager.generateUniqueName(agent_name, role, goal, agentUniqueId);
     const agentDir = runtime.path.join(outputDir, uniqueFolderName);
 
     // Create the agent directory
@@ -183,7 +188,8 @@ ${description}`;
         files: generatedFiles,
         agent_name,
         role,
-        goal
+        goal,
+        agent_id: agentUniqueId  // Include agent ID in completion marker for reference
     };
 
     await fs.writeFile(

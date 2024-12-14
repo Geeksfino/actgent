@@ -7,7 +7,7 @@
  * 
  * 1. Agent Operations
  * ------------------
- * GET /api/v1/agents/{agentName}
+ * GET /api/v1/agents/{agentIdOrName}
  *   Serializes an agent scaffold back into its original configuration
  *   Returns: AgentGeneratorInput object
  *   Example: GET /api/v1/agents/myAgent
@@ -16,35 +16,35 @@
  * ------------------------
  * All FS operations return: { success: boolean, data?: string | string[] | boolean, error?: string }
  * 
- * GET /api/v1/fs/{agentName}/read/{path}
+ * GET /api/v1/fs/{agentIdOrName}/read/{path}
  *   Reads file content
  *   Returns: { success: true, data: "file content" }
  *   Example: GET /api/v1/fs/myAgent/read/path/to/file.txt
  * 
- * POST /api/v1/fs/{agentName}/write/{path}
+ * POST /api/v1/fs/{agentIdOrName}/write/{path}
  *   Writes content to file
  *   Body: { "content": "file content" }
  *   Returns: { success: true }
  *   Example: POST /api/v1/fs/myAgent/write/path/to/file.txt
  * 
- * PUT /api/v1/fs/{agentName}/create/{path}
+ * PUT /api/v1/fs/{agentIdOrName}/create/{path}
  *   Creates file or directory
  *   Query params: ?recursive=true (optional, for directories)
  *   Returns: { success: true }
  *   Example: PUT /api/v1/fs/myAgent/create/path/to/dir?recursive=true
  * 
- * DELETE /api/v1/fs/{agentName}/remove/{path}
+ * DELETE /api/v1/fs/{agentIdOrName}/remove/{path}
  *   Removes file or directory
  *   Query params: ?recursive=true (optional, for directories)
  *   Returns: { success: true }
  *   Example: DELETE /api/v1/fs/myAgent/remove/path/to/file.txt
  * 
- * GET /api/v1/fs/{agentName}/exists/{path}
+ * GET /api/v1/fs/{agentIdOrName}/exists/{path}
  *   Checks if path exists
  *   Returns: { success: true, data: true|false }
  *   Example: GET /api/v1/fs/myAgent/exists/path/to/check
  * 
- * GET /api/v1/fs/{agentName}/list/{path}
+ * GET /api/v1/fs/{agentIdOrName}/list/{path}
  *   Lists directory contents
  *   Returns: { success: true, data: string[] }
  *   Example: GET /api/v1/fs/myAgent/list/path/to/dir
@@ -96,40 +96,43 @@ export class AdminService {
     }
 
     /**
-     * Resolves an agent name to its actual directory using the manifest.
-     * If no specific instance is found, falls back to the original name for backward compatibility.
+     * Resolves an agent directory using either agent ID or name.
+     * Prioritizes ID lookup, falls back to name lookup for backward compatibility.
      */
-    private async resolveAgentDirectory(agentName: string): Promise<string> {
+    private async resolveAgentDirectory(agentIdOrName: string): Promise<string> {
         try {
-            const latestInstance = await this.manifestManager.getLatestInstance(agentName);
+            // Try to find by ID first
+            const agentById = await this.manifestManager.getAgentById(agentIdOrName);
+            if (agentById) {
+                return path.join(this.agentsDir, agentById.directory);
+            }
+
+            // Fall back to name lookup
+            const latestInstance = await this.manifestManager.getLatestInstance(agentIdOrName);
             if (latestInstance) {
                 return path.join(this.agentsDir, latestInstance.directory);
             }
-            // Fallback to original behavior for backward compatibility
-            logger.warning(`No manifest entry found for agent ${agentName}, falling back to direct name`);
-            return path.join(this.agentsDir, agentName);
+
+            // Last resort fallback for backward compatibility
+            logger.warning(`No manifest entry found for agent ${agentIdOrName}, falling back to direct name`);
+            return path.join(this.agentsDir, agentIdOrName);
         } catch (error) {
-            logger.error(`Error resolving agent directory for ${agentName}:`, error);
+            logger.error(`Error resolving agent directory for ${agentIdOrName}:`, error);
             // Fallback to original behavior
-            return path.join(this.agentsDir, agentName);
+            return path.join(this.agentsDir, agentIdOrName);
         }
     }
 
-    async startAgent(agentName: string): Promise<any> {
+    async startAgent(agentIdOrName: string): Promise<any> {
         try {
-            if (this.runningAgents.has(agentName)) {
+            if (this.runningAgents.has(agentIdOrName)) {
                 return { success: false, error: 'Agent is already running' };
             }
 
-            const agentDir = await this.resolveAgentDirectory(agentName);
-            const agentPath = path.join(agentDir, `${agentName}.ts`);
+            const agentDir = await this.resolveAgentDirectory(agentIdOrName);
             const runnerPath = path.join(agentDir, 'index.ts');
             
-            if (!await runtime.fs.exists(agentPath)) {
-                return { success: false, error: 'Agent not found' };
-            }
-
-            logger.debug(`Starting agent ${agentName} with runner at ${runnerPath}`);
+            logger.debug(`Starting agent ${agentIdOrName} with runner at ${runnerPath}`);
             
             // Run from project root, just like CLI command
             const proc = Bun.spawn(['bun', 'run', runnerPath, '--log-level', 'debug'], {
@@ -145,24 +148,24 @@ export class AdminService {
 
             // Handle process exit
             proc.exited.then((code) => {
-                logger.info(`Agent ${agentName} exited with code ${code}`);
-                this.runningAgents.delete(agentName);
+                logger.info(`Agent ${agentIdOrName} exited with code ${code}`);
+                this.runningAgents.delete(agentIdOrName);
             }).catch((error: Error) => {
-                logger.error(`Agent ${agentName} process error:`, error);
-                this.runningAgents.delete(agentName);
+                logger.error(`Agent ${agentIdOrName} process error:`, error);
+                this.runningAgents.delete(agentIdOrName);
             });
 
             // Store the running instance
-            this.runningAgents.set(agentName, {
+            this.runningAgents.set(agentIdOrName, {
                 instance: proc,
                 loggerConfig: {
-                    destination: path.join(agentDir, `${agentName}.log`)
+                    destination: path.join(agentDir, `${agentIdOrName}.log`)
                 }
             });
 
             return { success: true };
         } catch (error) {
-            logger.error(`Error starting agent ${agentName}:`, error);
+            logger.error(`Error starting agent ${agentIdOrName}:`, error);
             return { 
                 success: false, 
                 error: error instanceof Error ? error.message : String(error)
@@ -170,29 +173,31 @@ export class AdminService {
         }
     }
 
-    async stopAgent(agentName: string): Promise<any> {
+    async stopAgent(agentIdOrName: string): Promise<any> {
         try {
-            const runningAgent = this.runningAgents.get(agentName);
+            const runningAgent = this.runningAgents.get(agentIdOrName);
             if (!runningAgent) {
                 return { success: false, error: 'Agent not running' };
             }
 
-            // Kill the subprocess with SIGTERM for graceful shutdown
-            logger.debug(`[AdminService] Stopping agent ${agentName}`);
+            logger.debug(`[AdminService] Stopping agent ${agentIdOrName}`);
+            
+            // Send SIGTERM first
             runningAgent.instance.kill(2); // SIGTERM
             
             // Give it a moment to clean up
             await new Promise(resolve => setTimeout(resolve, 100));
             
             // Force kill if still running
-            if (this.runningAgents.has(agentName)) {
+            if (this.runningAgents.has(agentIdOrName)) {
+                logger.warning(`[AdminService] Agent ${agentIdOrName} did not respond to SIGTERM, using SIGKILL`);
                 runningAgent.instance.kill(9); // SIGKILL
-                this.runningAgents.delete(agentName);
+                this.runningAgents.delete(agentIdOrName);
             }
 
             return { success: true };
         } catch (error) {
-            logger.error(`Error stopping agent ${agentName}:`, error);
+            logger.error(`[AdminService] Error stopping agent ${agentIdOrName}:`, error);
             return {
                 success: false,
                 error: error instanceof Error ? error.message : String(error)
@@ -228,18 +233,18 @@ export class AdminService {
                     if (url.pathname.startsWith('/api/v1/agents/')) {
                         logger.debug('[AdminService] Matched agents endpoint');
                         const parts = url.pathname.split('/').filter(p => p); // Remove empty parts
-                        const agentName = parts[3];
+                        const agentIdOrName = parts[3];
 
-                        if (!agentName) {
+                        if (!agentIdOrName) {
                             return new Response(JSON.stringify({
                                 success: false,
-                                error: 'Agent name is required'
+                                error: 'Agent ID or name is required'
                             }), { status: 400, headers: corsHeaders });
                         }
 
                         if (req.method === 'DELETE') {
                             try {
-                                const agentDir = await this.resolveAgentDirectory(agentName);
+                                const agentDir = await this.resolveAgentDirectory(agentIdOrName);
                                 if (!agentDir) {
                                     return new Response(JSON.stringify({
                                         success: false,
@@ -275,7 +280,7 @@ export class AdminService {
                                     }), { status: 400, headers: corsHeaders });
                                 }
 
-                                const agentDir = await this.resolveAgentDirectory(agentName);
+                                const agentDir = await this.resolveAgentDirectory(agentIdOrName);
                                 if (!agentDir) {
                                     return new Response(JSON.stringify({
                                         success: false,
@@ -313,25 +318,25 @@ export class AdminService {
                         // Check if this is an operation or direct agent access
                         const isOperation = ['start', 'stop'].includes(parts[4]);
                         const operation = isOperation 
-                            ? parts[4] // Skip ['api', 'v1', 'agents', 'agentName']
+                            ? parts[4] // Skip ['api', 'v1', 'agents', 'agentIdOrName']
                             : null;
                         
-                        logger.debug(`[AdminService] Parsed path - operation: ${operation}, agent: ${agentName}`);
+                        logger.debug(`[AdminService] Parsed path - operation: ${operation}, agent: ${agentIdOrName}`);
                         
                         if (operation === 'start' && req.method === 'POST') {
-                            logger.debug(`[AdminService] Starting agent: ${agentName}`);
-                            const result = await this.startAgent(agentName);
+                            logger.debug(`[AdminService] Starting agent: ${agentIdOrName}`);
+                            const result = await this.startAgent(agentIdOrName);
                             return new Response(JSON.stringify(result), { headers: corsHeaders });
                         }
                         
                         if (operation === 'stop' && req.method === 'POST') {
-                            logger.debug(`[AdminService] Stopping agent: ${agentName}`);
-                            const result = await this.stopAgent(agentName);
+                            logger.debug(`[AdminService] Stopping agent: ${agentIdOrName}`);
+                            const result = await this.stopAgent(agentIdOrName);
                             return new Response(JSON.stringify(result), { headers: corsHeaders });
                         }
                         
                         // Handle agent serialization (GET request)
-                        const agentDir = await this.resolveAgentDirectory(agentName);
+                        const agentDir = await this.resolveAgentDirectory(agentIdOrName);
                         logger.debug(`[AdminService] Full agent directory path: ${agentDir}`);
                         
                         try {
@@ -370,19 +375,19 @@ export class AdminService {
                     else if (url.pathname.startsWith('/api/v1/fs/')) {
                         logger.debug('[AdminService] Matched fs endpoint');
                         const parts = url.pathname.split('/').filter(p => p); // Remove empty parts
-                        // parts should be ['api', 'v1', 'fs', '{agent_name}', '{operation}', ...rest]
+                        // parts should be ['api', 'v1', 'fs', '{agentIdOrName}', '{operation}', ...rest]
                         
                         if (parts.length < 5) {
                             throw new Error('Invalid file system endpoint path');
                         }
 
-                        const agentName = parts[3];  // Get agent name after /api/v1/fs/
-                        const operation = parts[4];  // Get operation after agent name
+                        const agentIdOrName = parts[3];  // Get agent ID or name after /api/v1/fs/
+                        const operation = parts[4];  // Get operation after agent ID or name
                         const resourcePath = parts.slice(5).join('/');  // Get remaining path after operation
                         const recursive = url.searchParams.get('recursive') === 'true';
 
                         // Construct the full path relative to the agent's directory
-                        const agentDir = await this.resolveAgentDirectory(agentName);
+                        const agentDir = await this.resolveAgentDirectory(agentIdOrName);
                         const fullPath = path.join(agentDir, resourcePath);
 
                         // Verify the path is within the agent's directory
@@ -391,7 +396,7 @@ export class AdminService {
                         }
 
                         logger.debug(`[AdminService] File operation:`, {
-                            agentName,
+                            agentIdOrName,
                             operation,
                             resourcePath,
                             fullPath
@@ -457,8 +462,9 @@ export class AdminService {
                     else if (url.pathname.startsWith('/api/v1/manifest/')) {
                         logger.debug('[AdminService] Matched manifest endpoint');
                         const parts = url.pathname.split('/').filter(p => p); // Remove empty parts
-                        const agentName = parts[3] || '';
+                        const agentIdOrName = parts[3] || '';
                         const shouldReindex = url.searchParams.get('reindex') === 'true';
+                        const lookupById = url.searchParams.get('by') === 'id';
 
                         if (req.method === 'GET') {
                             try {
@@ -471,11 +477,16 @@ export class AdminService {
                                     }), { headers: corsHeaders });
                                 }
 
-                                if (agentName) {
-                                    const instances = await this.manifestManager.getAgentInstances(agentName);
+                                if (agentIdOrName) {
+                                    let data;
+                                    if (lookupById) {
+                                        data = await this.manifestManager.getAgentById(agentIdOrName);
+                                    } else {
+                                        data = await this.manifestManager.getAgentInstances(agentIdOrName);
+                                    }
                                     return new Response(JSON.stringify({
                                         success: true,
-                                        data: instances
+                                        data
                                     }), { headers: corsHeaders });
                                 } else {
                                     const manifest = await this.manifestManager.getManifest();

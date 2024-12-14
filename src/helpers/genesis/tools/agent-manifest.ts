@@ -1,6 +1,7 @@
 // agent-manifest.ts
 
 import { createRuntime } from '../../../runtime';
+import { v4 as uuidv4 } from 'uuid';
 
 const runtime = createRuntime();
 
@@ -10,10 +11,11 @@ interface AgentManifestEntry {
     createdAt: string;
     role: string;
     goal: string;
+    agent_id: string;
 }
 
 interface AgentManifest {
-    agents: Record<string, AgentManifestEntry>;
+    agents: Record<string, AgentManifestEntry>;  // Directory name -> Single entry
 }
 
 export class AgentManifestManager {
@@ -43,26 +45,28 @@ export class AgentManifestManager {
      * @param agentName The original agent name
      * @param role The agent's role
      * @param goal The agent's goal
+     * @param agent_id The agent's ID
      * @returns A unique directory name for the agent
      */
-    public async generateUniqueName(agentName: string, role: string = '', goal: string = ''): Promise<string> {
+    public async generateUniqueName(agentName: string, role: string = '', goal: string = '', agent_id: string): Promise<string> {
+        const sanitizedName = agentName.toLowerCase().replace(/[^a-z0-9]/g, '-');
         const timestamp = Date.now();
-        const random = Math.floor(Math.random() * 1000000).toString().padStart(6, '0');
-        // Sanitize agent name to be filesystem-friendly
-        const sanitizedName = agentName.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+        const random = Math.random().toString(36).substring(2, 8);
         const uniqueName = `${sanitizedName}-${timestamp}-${random}`;
 
-        // Update manifest
         const manifest = await this.loadManifest();
+        
+        // Create new entry
         manifest.agents[uniqueName] = {
             name: agentName,
             directory: uniqueName,
             createdAt: new Date().toISOString(),
             role,
-            goal
+            goal,
+            agent_id: agent_id || uuidv4()
         };
-        await this.saveManifest(manifest);
 
+        await this.saveManifest(manifest);
         return uniqueName;
     }
 
@@ -73,7 +77,8 @@ export class AgentManifestManager {
      */
     public async getAgentInstances(name: string): Promise<AgentManifestEntry[]> {
         const manifest = await this.loadManifest();
-        return Object.values(manifest.agents).filter(agent => agent.name === name);
+        const instances = Object.values(manifest.agents).filter(agent => agent.name === name);
+        return instances.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     }
 
     /**
@@ -84,10 +89,18 @@ export class AgentManifestManager {
     public async getLatestInstance(agentName: string): Promise<AgentManifestEntry | null> {
         const instances = await this.getAgentInstances(agentName);
         if (instances.length === 0) return null;
-        
-        // Sort by creation time, newest first
-        instances.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         return instances[0];
+    }
+
+    /**
+     * Gets an agent by its ID
+     * @param agent_id The agent ID to look up
+     * @returns The agent entry, or null if not found
+     */
+    public async getAgentById(agent_id: string): Promise<AgentManifestEntry | null> {
+        const manifest = await this.loadManifest();
+        const entries = Object.values(manifest.agents);
+        return entries.find(entry => entry.agent_id === agent_id) || null;
     }
 
     /**
@@ -103,61 +116,36 @@ export class AgentManifestManager {
      * @returns The updated manifest
      */
     public async reindexAgents(): Promise<AgentManifest> {
-        const manifest: AgentManifest = { agents: {} };
-        
-        try {
-            // Read all entries in the agents dir
-            const entries = await runtime.fs.readDir(this.baseDir);
-            
-            for (const entryName of entries) {
-                if (entryName.startsWith('.')) continue;
-                
-                const agentDir = runtime.path.join(this.baseDir, entryName);
-                try {
-                    // Check if it's a directory
-                    const stats = await runtime.fs.stat(agentDir);
-                    if (!stats.isDirectory) continue;
+        const manifest = await this.loadManifest();
+        const newManifest: AgentManifest = { agents: {} };
 
-                    // Try to read and parse brain.md for agent info
-                    const brainPath = runtime.path.join(agentDir, 'brain.md');
-                    const brainContent = await runtime.fs.readFile(brainPath, 'utf-8');
-                    
-                    // Extract metadata section between --- markers
-                    const metadataMatch = brainContent.match(/^---\n([\s\S]*?)\n---/);
-                    if (!metadataMatch) continue;
-                    
-                    const metadata = metadataMatch[1].split('\n').reduce((acc, line) => {
-                        const [key, value] = line.split(':').map(s => s.trim());
-                        if (key && value) {
-                            // Remove quotes if present
-                            acc[key] = value.replace(/^"(.*)"$/, '$1');
-                        }
-                        return acc;
-                    }, {} as Record<string, string>);
-                    
-                    const agentName = metadata.name;
-                    if (!agentName) continue;
-                    
-                    manifest.agents[entryName] = {
-                        name: agentName,
-                        directory: entryName,
-                        createdAt: new Date(stats.modifiedAt).toISOString(),
-                        role: metadata.role || '',
-                        goal: metadata.goal || ''
-                    };
-                } catch (error) {
-                    console.error(`Error processing agent directory ${entryName}:`, error);
-                    continue;
-                }
+        // Read all agent directories
+        const entries = await runtime.fs.readDir(this.baseDir);
+        
+        for (const entry of entries) {
+            const stats = await runtime.fs.stat(runtime.path.join(this.baseDir, entry));
+            if (!stats.isDirectory) continue;
+
+            // Check if this directory already exists in the current manifest
+            const existingEntry = manifest.agents[entry];
+            
+            if (existingEntry) {
+                // Keep existing entry
+                newManifest.agents[entry] = existingEntry;
+            } else {
+                // Create new entry for unknown directory
+                newManifest.agents[entry] = {
+                    name: entry,
+                    directory: entry,
+                    createdAt: new Date(stats.modifiedAt).toISOString(),
+                    role: '',
+                    goal: '',
+                    agent_id: uuidv4()
+                };
             }
-            
-            // Save the rebuilt manifest
-            await this.saveManifest(manifest);
-            return manifest;
-            
-        } catch (error) {
-            console.error('Error reindexing agents:', error);
-            throw error;
         }
+
+        await this.saveManifest(newManifest);
+        return newManifest;  // Return the new manifest
     }
 }
