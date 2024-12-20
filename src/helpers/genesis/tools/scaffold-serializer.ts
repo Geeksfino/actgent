@@ -50,6 +50,20 @@ async function checkScaffoldComplete(agentDir: string): Promise<boolean> {
     }
 }
 
+async function loadSchemaTemplate(templatePath: string): Promise<any | undefined> {
+    try {
+        const schemaContent = await fs.readFile(templatePath, 'utf-8');
+        return JSON.parse(schemaContent);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+            logger.warning(`Schema template file not found: ${templatePath}`);
+        } else {
+            logger.warning(`Error loading schema template ${templatePath}:`, error);
+        }
+        return undefined;
+    }
+}
+
 export async function serializeAgentScaffold(agentDir: string): Promise<AgentSerializeResult> {
     // Wait for scaffold completion with timeout
     const maxAttempts = 10;
@@ -70,7 +84,7 @@ export async function serializeAgentScaffold(agentDir: string): Promise<AgentSer
             const tools = await extractTools(indexPath);
             
             // Process instructions to parse schema templates
-            const instructions = config.instructions?.map(instruction => {
+            const instructions = await Promise.all((config.instructions?.map(async instruction => {
                 try {
                     // Ensure we have the basic instruction fields
                     const processedInstruction = {
@@ -79,20 +93,20 @@ export async function serializeAgentScaffold(agentDir: string): Promise<AgentSer
                         schemaTemplate: undefined
                     };
 
-                    // Parse schemaTemplate if it exists as a string
+                    // Handle schema template if specified
                     if (instruction.schemaTemplate) {
-                        try {
-                            // The schema template from loadMarkdownConfig is always a string
-                            // that needs to be parsed into JSON
-                            processedInstruction.schemaTemplate = JSON.parse(instruction.schemaTemplate);
-                        } catch (parseError) {
-                            logger.warning(
-                                `Failed to parse schema template for instruction ${instruction.name}:`, 
-                                parseError,
-                                '\nSchema template content:', 
-                                instruction.schemaTemplate
-                            );
-                            processedInstruction.schemaTemplate = undefined;
+                        if (typeof instruction.schemaTemplate === 'string') {
+                            try {
+                                // First try parsing it as JSON string
+                                processedInstruction.schemaTemplate = JSON.parse(instruction.schemaTemplate);
+                            } catch (parseError) {
+                                // If parsing fails, treat it as a file path
+                                const templatePath = runtime.path.join(agentDir, instruction.schemaTemplate);
+                                processedInstruction.schemaTemplate = await loadSchemaTemplate(templatePath);
+                            }
+                        } else {
+                            // If it's already an object, use it directly
+                            processedInstruction.schemaTemplate = instruction.schemaTemplate;
                         }
                     }
 
@@ -105,7 +119,7 @@ export async function serializeAgentScaffold(agentDir: string): Promise<AgentSer
                         schemaTemplate: undefined
                     };
                 }
-            }) || [];
+            })) || []);
 
             return {
                 agent_dir: agentDir,

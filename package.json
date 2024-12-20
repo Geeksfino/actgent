@@ -35,7 +35,9 @@
     "dist/**/*"
   ],
   "scripts": {
-    "build": "bun tsc && bun cpx \"src/helpers/genesis/**/*.{md,json,yaml}\" dist/helpers/genesis/",
+    "build": "BUN_MAX_MEMORY=16GB bun build ./src/index.ts ./src/**/*.ts --target=node --outdir=dist && bun run build:assets",
+    "build:assets": "bun cpx \"src/helpers/genesis/**/*.{md,json,yaml}\" dist/helpers/genesis/ --clean",
+    "build:node": "NODE_OPTIONS=\"--max-old-space-size=8192\" bun tsc && bun cpx \"src/helpers/genesis/**/*.{md,json,yaml}\" dist/helpers/genesis/",
     "watch:ts": "bun tsc-watch",
     "watch:resources": "bun cpx \"src/helpers/genesis/**/*.{md,json,yaml}\" dist/helpers/genesis/ --watch",
     "watch": "bun concurrently \"bun run watch:ts\" \"bun run watch:resources\""
