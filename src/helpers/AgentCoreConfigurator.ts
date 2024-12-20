@@ -34,18 +34,27 @@ export class AgentCoreConfigurator {
         const instructionContent = await this.runtime.fs.readFile(fullPath, 'utf-8');
         const { data: instructionData, content } = matter(instructionContent);
 
-        let schemaTemplate: string | null = null;
+        let schemaTemplate: string | undefined = undefined;
         const schemaTemplatePath = instructionData.schemaTemplate;
         if (schemaTemplatePath) {
-          const fullSchemaTemplatePath = this.runtime.path.join(this.runtime.path.dirname(fullPath), schemaTemplatePath as string);
-
-          schemaTemplate = await this.runtime.fs.readFile(fullSchemaTemplatePath, 'utf-8');
-          if (!schemaTemplate) {
-            throw new Error(`Schema template file ${schemaTemplatePath} not found`);
-          } else {
-            schemaTemplate = schemaTemplate.trim();
-            if (!JSON.parse(schemaTemplate)) {
-              throw new Error(`Schema template file ${schemaTemplatePath} is not a valid JSON`);
+          try {
+            const fullSchemaTemplatePath = this.runtime.path.join(this.runtime.path.dirname(fullPath), schemaTemplatePath as string);
+            const rawSchema = await this.runtime.fs.readFile(fullSchemaTemplatePath, 'utf-8');
+            
+            if (rawSchema) {
+              const trimmedSchema = rawSchema.trim();
+              try {
+                JSON.parse(trimmedSchema); // Validate JSON
+                schemaTemplate = trimmedSchema; // Only set if valid
+              } catch (e) {
+                logger.warning(`[AgentCoreConfigurator] Schema template ${schemaTemplatePath} is not valid JSON, treating instruction as schemaless`);
+              }
+            }
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+              logger.debug(`[AgentCoreConfigurator] Schema template file not found (this is OK): ${schemaTemplatePath}`);
+            } else {
+              logger.warning(`[AgentCoreConfigurator] Error loading schema template ${schemaTemplatePath}, treating instruction as schemaless`);
             }
           }
         }
@@ -53,7 +62,7 @@ export class AgentCoreConfigurator {
         const instruction: Instruction = schemaTemplate ? {
           name,
           description: content.trim(),
-          schemaTemplate: schemaTemplate
+          schemaTemplate
         } : {
           name,
           description: content.trim(),

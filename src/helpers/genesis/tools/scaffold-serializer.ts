@@ -56,9 +56,11 @@ async function loadSchemaTemplate(templatePath: string): Promise<any | undefined
         return JSON.parse(schemaContent);
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-            logger.warning(`Schema template file not found: ${templatePath}`);
+            // Missing schema file is expected and not an error
+            logger.debug(`[ScaffoldSerializer] Schema template file not found (this is OK): ${templatePath}`);
         } else {
-            logger.warning(`Error loading schema template ${templatePath}:`, error);
+            // Other errors (like JSON parse errors) should be warned
+            logger.warning(`[ScaffoldSerializer] Error loading schema template ${templatePath}: ${error}`);
         }
         return undefined;
     }
