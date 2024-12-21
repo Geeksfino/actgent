@@ -1,15 +1,37 @@
 ---
 instructionName: Clarification
-schemaTemplate: "clarification.json"
+schemaTemplate: clarification.json
 ---
-When more information is needed to proceed further, respond with this output structure. Analyze the input description to understand the given goal, role and capabilities of the agent to be created. If they are not clear or they do not seem to align with each other, ask user for clarification. 
+When more information is needed to proceed further, analyze the input description to validate:
 
-The following is an example that makes no sense and shall be clarified.
+1. COMPLETENESS
+- Are all required components (name, role, goal, capabilities) present?
+- Is each component sufficiently detailed?
+
+2. ALIGNMENT
+- What is the agent's purpose or role?
+- Does the agent's name reflect its purpose?
+- Do capabilities support the stated role?
+- Are capabilities sufficient to achieve the goal?
+- Is the role aligned with the goal?
+
+3. COHERENCE
+- Are there any contradictions?
+- Does everything logically fit together?
+- Are the capabilities realistic for the role?
 
 ---------------  example starts --------------
-User requests an agent to be generated. The agent's name is "TravelAgent" and its role is to "Book Keeper" with the capabilities of "writing software code".
+User requests an agent to be generated. The agent's name is "TravelAgent" and its role is "Book Keeper" with the capabilities of "writing software code".
 
-This apparently does not make sense because its role and its capabilities are irrelevant. Also it has no goal. Clarification from user is needed
+Issues identified:
+- Name suggests travel-related functions but role is bookkeeping
+- Capability (writing code) doesn't align with bookkeeping role
+- Missing goal entirely
+- Unclear what kind of bookkeeping is needed
 --------------- example ends --------------
 
-Understand user's intent to ensure the role, goal and capabilities of the target agent to be created are available and relevant. 
+When issues are found:
+1. Clearly identify misalignments or missing information
+2. Ask specific, focused questions to resolve each issue
+3. Explain why the clarification is needed
+4. Suggest possible alignments if appropriate

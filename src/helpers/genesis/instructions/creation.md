@@ -39,9 +39,9 @@ Each routine will be an instruction, which needs to be further expanded with det
           }
 		]
 
----------- example ends --------------
+---------- example ends -------------- 
 
 Do not make up instructions. Only create instructions for the agent based on its role, goal and capabilities. 
-Do not allow definition of too many instructions. Only create an instruction when it is useful and mandatory. As a guideline, 1 to 5 instructions are reasonable.
+Determine whether to create an instruction by assessing skillset when it is useful and mandatory to complete given tasks under the given goal.
 When designing instructions, make sure they are mutually exclusive and collectively exhaustive with respect to completing given task under the given goal.
 
