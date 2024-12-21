@@ -9,6 +9,8 @@ import { KeywordBasedStrategy } from './ReActModeStrategy';
 import { InferStrategy } from '../core/InferContext';
 import { ReActLLMResponseStreamParser } from './ReActLLMResponseStreamParser';
 import { getEventEmitter } from '../core/observability/AgentEventEmitter';
+import { AbstractClassifier } from '../core/AbstractClassifier';
+import { IAgentPromptTemplate } from '../core/IPromptTemplate';
 
 export class AgentBuilder {
   private coreConfig: AgentCoreConfig;
@@ -53,19 +55,32 @@ export class AgentBuilder {
   public create(): BaseAgent<Readonly<ClassificationTypeConfig[]>, ReActClassifier<Readonly<ClassificationTypeConfig[]>>, ReActPromptTemplate<Readonly<ClassificationTypeConfig[]>>> {
     const schemaBuilder = new SchemaBuilder(this.coreConfig.instructions || []);
     const schemaTypes = schemaBuilder.build();
-    return this.build(this.coreConfig.name, schemaTypes);
+    return this.buildWithDefaults(schemaTypes);
   }
 
-  public build<T extends ClassificationTypeConfig[]>(
-    className: string,
+  public buildWithDefaults<T extends ClassificationTypeConfig[]>(
     schemaTypes: T
   ): BaseAgent<Readonly<T>, ReActClassifier<Readonly<T>>, ReActPromptTemplate<Readonly<T>>> {
+    return this.build(
+      this.coreConfig.name, 
+      schemaTypes,
+      ReActClassifier,
+      ReActPromptTemplate
+    );
+  }
+
+  public build<T extends ClassificationTypeConfig[], C extends AbstractClassifier<Readonly<T>>, P extends IAgentPromptTemplate>(
+    className: string,
+    schemaTypes: T,
+    ClassifierClass: new (classificationTypes: Readonly<T>) => C,
+    PromptTemplateClass: new (classificationTypes: Readonly<T>, strategy: InferStrategy) => P
+  ): BaseAgent<Readonly<T>, C, P> {
     type SchemaTypes = Readonly<T>;
 
     const builderStrategy = this.promptStrategy;
     const streamParser = this.streamParser;
 
-    class DynamicAgent extends BaseAgent<SchemaTypes, ReActClassifier<SchemaTypes>, ReActPromptTemplate<SchemaTypes>> {
+    class DynamicAgent extends BaseAgent<SchemaTypes, C, P> {
       private readonly promptStrategy: InferStrategy;
 
       constructor(
@@ -78,7 +93,6 @@ export class AgentBuilder {
         this.setExecutionContext(context);
         this.promptStrategy = promptStrategy;
 
-        // Set up stream callback if stream parser exists
         if (streamParser) {
           const callback = (chunk: string) => {
             streamParser.processChunk(chunk);
@@ -87,21 +101,19 @@ export class AgentBuilder {
         }
       }
 
-      protected useClassifierClass(): new () => ReActClassifier<SchemaTypes> {
-        return class extends ReActClassifier<SchemaTypes> {
-          constructor() {
-            super(schemaTypes);
-          }
+      protected useClassifierClass(): new () => C {
+        const boundClass = function(this: any) {
+          return new ClassifierClass(schemaTypes);
         };
+        return boundClass as unknown as new () => C;
       }
 
-      protected usePromptTemplateClass(): new (classificationTypes: SchemaTypes) => ReActPromptTemplate<SchemaTypes> {
+      protected usePromptTemplateClass(): new (classificationTypes: SchemaTypes) => P {
         const strategy = builderStrategy;
-        return class extends ReActPromptTemplate<SchemaTypes> {
-          constructor(classificationTypes: SchemaTypes) {
-            super(classificationTypes, strategy);
-          }
+        const boundClass = function(this: any, classificationTypes: SchemaTypes) {
+          return new PromptTemplateClass(classificationTypes, strategy);
         };
+        return boundClass as unknown as new (classificationTypes: SchemaTypes) => P;
       }
     }
 

@@ -4,6 +4,8 @@ export { AgentBuilder } from './AgentBuilder';
 export { Communication } from './Communication';
 export { ReActClassifier } from './ReActClassifier';
 export { ReActPromptTemplate as DefaultPromptTemplate } from './ReActPromptTemplate';
+export { SimpleClassifier } from './SimpleClassifier';
+export { SimplePromptTemplate } from './SimplePromptTemplate';
 export { ReActModeStrategy,  
         AutoSwitchingStrategy, 
         KeywordBasedStrategy, 

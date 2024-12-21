@@ -3,6 +3,60 @@ import { AgentServiceConfigurator } from '@finogeeks/actgent';
 import { AgentBuilder } from '@finogeeks/actgent';
 import { program } from 'commander';
 import { logger, LogLevel } from '@finogeeks/actgent';
+import { 
+  ReActClassifier, 
+  DefaultPromptTemplate,
+  SimpleClassifier,
+  SimplePromptTemplate 
+} from '@finogeeks/actgent';
+
+// Performance measurement class
+class PerformanceMetrics {
+  private startTime: number = 0;
+  private checkpoints: Map<string, number> = new Map();
+  private implementation: string;
+  private tokenCount: number = 0;
+
+  constructor(implementation: string) {
+    this.implementation = implementation;
+  }
+
+  start() {
+    this.startTime = performance.now();
+    this.checkpoint('start');
+  }
+
+  checkpoint(name: string) {
+    this.checkpoints.set(name, performance.now());
+  }
+
+  incrementTokenCount(count: number = 1) {
+    this.tokenCount += count;
+  }
+
+  end() {
+    this.checkpoint('end');
+    this.printMetrics();
+  }
+
+  private printMetrics() {
+    console.log('\nPerformance Metrics for', this.implementation);
+    console.log('----------------------------------------');
+    console.log(`Total Tokens: ${this.tokenCount}`);
+    
+    let previousTime = this.startTime;
+    for (const [name, time] of this.checkpoints) {
+      if (name === 'start') continue;
+      
+      const duration = time - previousTime;
+      const totalDuration = time - this.startTime;
+      console.log(`${name}:`);
+      console.log(`  Step Duration: ${duration.toFixed(2)}ms`);
+      console.log(`  Total Time: ${totalDuration.toFixed(2)}ms`);
+      previousTime = time;
+    }
+  }
+}
 
 // Configure command line options
 program
@@ -12,7 +66,8 @@ program
   .option('--http-port <port>', 'HTTP server port (network mode only)', '5678')
   .option('--stream-port <port>', 'streaming server port (network mode only)', '5679')
   .option('--description <text>', 'Input description for local mode')
-  .option('--event-source', 'Use EventSource-based implementation for streaming');
+  .option('--event-source', 'Use EventSource-based implementation for streaming')
+  .option('--use-simple', 'Use Simple implementation instead of ReAct', false);
 
 // Show help if no arguments
 if (process.argv.length === 2) {
@@ -26,7 +81,7 @@ const options = program.opts();
 logger.setLevel(options.logLevel?.toLowerCase() as LogLevel || 'info');
 
 const coreConfig: AgentCoreConfig = {
-  name: "BaseAgent",
+  name: "TestAgent",
   role: "Software Product Manager",
   goal: 'Create software specification',
   capabilities: 'assist in testing',
@@ -116,7 +171,27 @@ async function main() {
   try {
     // Use AgentBuilder to create the agent
     const agentBuilder = new AgentBuilder(coreConfig, svcConfig);
-    const testAgent = agentBuilder.build("TestAgent", [...schemaTypes]);
+
+    // Initialize performance metrics
+    const metrics = new PerformanceMetrics(options.useSimple ? 'Simple' : 'ReAct');
+    metrics.start();
+
+    // Create agent based on implementation choice
+    const testAgent = options.useSimple 
+      ? agentBuilder.build(
+          "TestAgent", 
+          [...schemaTypes], 
+          SimpleClassifier,
+          SimplePromptTemplate
+        )
+      : agentBuilder.build(
+          "TestAgent", 
+          [...schemaTypes], 
+          ReActClassifier,
+          DefaultPromptTemplate
+        );
+
+    metrics.checkpoint('agent_created');
 
     // Set up logging configuration for console output with debug level
     const loggingConfig: LoggingConfig = {
@@ -126,18 +201,52 @@ async function main() {
 
     // Register stream callback in local mode
     if (!options.network) {
-      testAgent.registerStreamCallback((delta: string) => {
+      let responseStarted = false;
+      let lastResponseTime = 0;
+      let responseEndTimeout: ReturnType<typeof setTimeout>;
+
+      testAgent.registerStreamCallback((delta: string, control?: { type: 'completion', reason: string }) => {
+        if (!responseStarted) {
+          metrics.checkpoint('first_token');
+          responseStarted = true;
+        }
+
+        // Increment token count
+        metrics.incrementTokenCount(delta.split(' ').length);
+
+        // Update last response time
+        lastResponseTime = Date.now();
+
+        // Clear existing timeout if any
+        if (responseEndTimeout) {
+          clearTimeout(responseEndTimeout);
+        }
+
+        // Set a new timeout to detect end of stream
+        responseEndTimeout = setTimeout(() => {
+          metrics.checkpoint('stream_completed');
+          metrics.end();
+        }, 1000); // Wait 1 second after last token to consider stream complete
+
         process.stdout.write(delta);
+
+        // If we receive a completion control message, mark stream as completed
+        if (control?.type === 'completion') {
+          metrics.checkpoint('stream_completed');
+          metrics.end();
+        }
       });
     }
 
     // Start the agent with the logging config
     await testAgent.run(loggingConfig);
+    metrics.checkpoint('agent_started');
 
     // Handle local mode
     if (!options.network) {
       // Create session with command line description
-      await testAgent.createSession("test", options.description);
+      const session = await testAgent.createSession("test", options.description);
+      metrics.checkpoint('session_created');
     } else {
       // Start monitoring the stream first and keep it alive
       console.log(`Agent started and listening on:`);
@@ -146,12 +255,8 @@ async function main() {
         console.log(`- Streaming: http://localhost:${svcConfig.communicationConfig?.streamPort}`);
       }
 
-      // Then wait for session creation
-      console.log('\nWaiting for session creation via HTTP endpoint...');
-      console.log('Example:');
-      console.log('curl -X POST http://localhost:5678/createSession \\');
-      console.log('  -H "Content-Type: application/json" \\');
-      console.log('  -d \'{"owner":"test", "description":"how to develop a miniprogram"}\'');
+      metrics.checkpoint('server_started');
+      metrics.end();
     }
 
     // Keep the process alive

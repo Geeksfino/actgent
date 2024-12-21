@@ -319,7 +319,7 @@ async function chatLoop(): Promise<void> {
     
     // Create session and set up response handler
     const session = await AgentSmith.createSession("user", description);
-    session.onEvent((response) => {
+    session.onEvent((response: string | object) => {
       if (typeof response === 'string') {
         console.log(`${AgentSmith.getName()}:`, response);
       } else {
