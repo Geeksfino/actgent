@@ -3,22 +3,17 @@ import { ClassificationTypeConfig } from "../core/IClassifier";
 import { Memory } from "../core/Memory";
 import { PromptManager } from "../core/PromptManager";
 import { SessionContext } from "../core/SessionContext";
-import { Message } from "../core/Message";
-
-export interface Tool {
-  name: string;
-  description: string;
-}
+import { InferStrategy } from "../core/InferContext";
 
 interface SchemaFormatting {
   types: string;
   schemas: string;
 }
 
-export class SimplePromptTemplate implements IAgentPromptTemplate {
-  protected classificationTypes: ReadonlyArray<ClassificationTypeConfig>;
+export class SimplePromptTemplate<T extends ReadonlyArray<ClassificationTypeConfig>> implements IAgentPromptTemplate {
+  protected classificationTypes: T;
 
-  constructor(classificationTypes: ReadonlyArray<ClassificationTypeConfig>) {
+  constructor(classificationTypes: T, _strategy?: InferStrategy) {
     this.classificationTypes = classificationTypes;
   }
 
@@ -41,41 +36,38 @@ ${JSON.stringify({ messageType: type.name, ...type.schema }, null, 2)}
   }
 
   async getSystemPrompt(sessionContext: SessionContext, memory: Memory): Promise<string> {
-    const recentMessages = await memory.getRecentMessages();
-    const systemContext = await memory.getSystemContext();
-
     const base_prompt = `
-    You are designated as: {role}
-    Your goal: {goal}
-    Your capabilities: {capabilities}
+You are designated as: {role}
+Your goal: {goal}
+Your capabilities: {capabilities}
     
-    Core Responsibilities:
-    1. Goal Alignment
-       - Every action must support the defined goal
-       - Stay within designated capabilities
-       - Maintain role focus
+Core Responsibilities:
+1. Goal Alignment
+   - Every action must support the defined goal
+   - Stay within designated capabilities
+   - Maintain role focus
     
-    2. Request Processing Framework
-       A. Context Analysis
-          - Extract core concepts and requirements
-          - Consider conversation history
-          - Validate goal alignment
+2. Request Processing Framework
+    A. Context Analysis
+        - Extract core concepts and requirements
+        - Consider conversation history
+        - Validate goal alignment
     
-       B. Clarity Protocol
-          - Request clarification for ambiguous inputs
-          - Explain capability limitations when relevant
-          - Verify understanding for complex requests
+    B. Clarity Protocol
+        - Request clarification for ambiguous inputs
+        - Explain capability limitations when relevant
+        - Verify understanding for complex requests
     
-       C. Response Structure
-          Question Classification:
-          - SIMPLE: Direct, straightforward requests
-          - COMPLEX: Multi-step analysis requirements
+    C. Response Structure
+        Question Classification:
+        - SIMPLE: Direct, straightforward requests
+        - COMPLEX: Multi-step analysis requirements
     
-          Response Types:
-          - DIRECT_RESPONSE: Immediate answer using available information
-          - TOOL_INVOCATION: Requires external data/actions
+        Response Types:
+        - DIRECT_RESPONSE: Immediate answer using available information
+        - TOOL_INVOCATION: Requires external data/actions
     
-    3. Tool Integration
+3. Tool Integration
        - Verify tool availability before requesting information
        - Ensure proper input formatting
        - Validate tool outputs before integration
@@ -103,15 +95,15 @@ ${schemas}`;
   }
 
   getMetaPrompt(): string {
-    return "You are a helpful AI assistant. Please provide clear and concise responses.";
+    return "";
   }
 
-  getClassificationTypes(): ReadonlyArray<ClassificationTypeConfig> {
+  getClassificationTypes(): T {
     return this.classificationTypes;
   }
 
   extractFromLLMResponse(response: string): string {
-    return response.trim();
+    return response;
   }
 
   async debugPrompt(
