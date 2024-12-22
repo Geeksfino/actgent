@@ -174,7 +174,6 @@ async function main() {
 
     // Initialize performance metrics
     const metrics = new PerformanceMetrics(options.useSimple ? 'Simple' : 'ReAct');
-    metrics.start();
 
     // Create agent based on implementation choice
     const testAgent = options.useSimple 
@@ -246,6 +245,7 @@ async function main() {
       // Create session with command line description
       const session = await testAgent.createSession("test", options.description);
       metrics.checkpoint('session_created');
+      metrics.start();
     } else {
       // Start monitoring the stream first and keep it alive
       console.log(`Agent started and listening on:`);
