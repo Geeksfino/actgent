@@ -7,7 +7,9 @@ import {
   ReActClassifier,
   DefaultPromptTemplate,
   SimpleClassifier,
-  SimplePromptTemplate 
+  SimplePromptTemplate,
+  BareClassifier,
+  BarePromptTemplate
 } from '../../src/agent';
 
 // Performance measurement class
@@ -67,7 +69,8 @@ program
   .option('--stream-port <port>', 'streaming server port (network mode only)', '5679')
   .option('--description <text>', 'Input description for local mode')
   .option('--event-source', 'Use EventSource-based implementation for streaming')
-  .option('--use-simple', 'Use Simple implementation instead of ReAct', false);
+  .option('--use-simple', 'Use Simple implementation instead of ReAct', false)
+  .option('--use-bare', 'Use Bare implementation instead of ReAct', false);
 
 // Show help if no arguments
 if (process.argv.length === 2) {
@@ -173,22 +176,29 @@ async function main() {
     const agentBuilder = new AgentBuilder(coreConfig, svcConfig);
 
     // Initialize performance metrics
-    const metrics = new PerformanceMetrics(options.useSimple ? 'Simple' : 'ReAct');
+    const metrics = new PerformanceMetrics(options.useBare ? 'Bare' : (options.useSimple ? 'Simple' : 'ReAct'));
 
     // Create agent based on implementation choice
-    const testAgent = options.useSimple 
+    const testAgent = options.useBare 
       ? agentBuilder.build(
           "TestAgent", 
           [...schemaTypes], 
-          SimpleClassifier,
-          SimplePromptTemplate
+          BareClassifier,
+          BarePromptTemplate
         )
-      : agentBuilder.build(
-          "TestAgent", 
-          [...schemaTypes], 
-          ReActClassifier,
-          DefaultPromptTemplate
-        );
+      : options.useSimple 
+        ? agentBuilder.build(
+            "TestAgent", 
+            [...schemaTypes], 
+            SimpleClassifier,
+            SimplePromptTemplate
+          )
+        : agentBuilder.build(
+            "TestAgent", 
+            [...schemaTypes], 
+            ReActClassifier,
+            DefaultPromptTemplate
+          );
 
     metrics.checkpoint('agent_created');
 
@@ -243,8 +253,19 @@ async function main() {
     // Handle local mode
     if (!options.network) {
       // Create session with command line description
+      const startTime = Date.now();
       const session = await testAgent.createSession("test", options.description);
       metrics.checkpoint('session_created');
+
+      // Listen for the first token
+      session.onConversation((message) => {
+        const firstTokenTime = Date.now();
+        const duration = firstTokenTime - startTime;
+        console.log(`Time to first token: ${duration} ms`);
+        // Unregister the handler after the first token is received
+        session.onConversation(() => {});
+      });
+
       metrics.start();
     } else {
       // Start monitoring the stream first and keep it alive

@@ -10,3 +10,5 @@ export { ReActModeStrategy,
         AutoSwitchingStrategy, 
         KeywordBasedStrategy, 
         UserPreferenceStrategy  } from './ReActModeStrategy';
+export { BarePromptTemplate } from './BarePromptTemplate';
+export { BareClassifier } from './BareClassifier';
