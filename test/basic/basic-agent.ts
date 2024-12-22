@@ -1,14 +1,14 @@
-import { AgentCoreConfig, LoggingConfig } from '@finogeeks/actgent';
-import { AgentServiceConfigurator } from '@finogeeks/actgent';
-import { AgentBuilder } from '@finogeeks/actgent';
+import { AgentCoreConfig, LoggingConfig } from '../../src/core/configs';
+import { AgentServiceConfigurator } from '../../src/helpers/AgentServiceConfigurator';
+import { AgentBuilder } from '../../src/agent/AgentBuilder';
 import { program } from 'commander';
-import { logger, LogLevel } from '@finogeeks/actgent';
+import { logger, LogLevel } from '../../src/core/Logger';
 import { 
-  ReActClassifier, 
+  ReActClassifier,
   DefaultPromptTemplate,
   SimpleClassifier,
   SimplePromptTemplate 
-} from '@finogeeks/actgent';
+} from '../../src/agent';
 
 // Performance measurement class
 class PerformanceMetrics {
@@ -196,7 +196,6 @@ async function main() {
     // Set up logging configuration for console output with debug level
     const loggingConfig: LoggingConfig = {
       type: 'console',
-      level: 'debug'
     };
 
     // Register stream callback in local mode
