@@ -112,9 +112,9 @@ ${schemas}`;
     sessionContext: SessionContext,
     memory: Memory
   ): Promise<string> {
-    if (type === "system") {
-      return this.getSystemPrompt(sessionContext, memory);
-    }
-    return this.getAssistantPrompt(sessionContext, memory);
+    const prompt = type === "system" 
+      ? await promptManager.getSystemPrompt(sessionContext, memory) 
+      : await promptManager.getAssistantPrompt(sessionContext, memory);
+    return prompt;
   }
 }
