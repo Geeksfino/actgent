@@ -432,6 +432,16 @@ export class AgentCore {
       try {
         const parsed = JSON.parse(responseContent);
 
+        // POTENTIALLY DEAD CODE:
+        // This code path attempts to handle OpenAI's native function calling format (tool_calls),
+        // but likely never executes because:
+        // 1. Our prompt templates format LLM responses in our custom format (primary_action, etc.)
+        // 2. Tool execution is handled by the classifier chain:
+        //    LLM Response -> ReActClassifier.parseLLMResponse -> Session.triggerToolCallsHandlers
+        // 3. The classifier looks for primary_action.response_purpose === 'TOOL_INVOCATION'
+        //    not the OpenAI native tool_calls format
+        // TODO: Verify if this code path is ever taken. If not, consider removing it
+        //       to avoid potential double tool execution.
         if (parsed.tool_calls) {
           const tool = this.getTool(parsed.tool_calls[0].name);
           if (tool) {
