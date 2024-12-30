@@ -4,31 +4,55 @@ This document explains the internal workings of the Actgent framework, focusing 
 
 ## Message Flow Overview
 
-The framework operates on a message-based architecture where all interactions are handled through messages. There are two primary message flows:
+The framework operates on a message-based architecture where all interactions are handled through messages. The framework distinguishes between session ownership and message senders:
 
-### Inbound Messages
-Messages coming into an agent can originate from:
-1. **User/Application Input**
-   - Via `session.chat()` or `createSession()`
-   - Messages are wrapped in a Message object with session context
-   - Enqueued into PriorityInbox for processing
+### Session Ownership and Message Senders
 
-2. **LLM Responses**
-   - Generated after LLM processes a prompt
-   - Classified and handled based on response type
-   - May trigger tool executions or direct responses
+1. **Session Owner**
+   - Each session has an owner (typically a user)
+   - Owner is set when creating a session via `createSession(owner, description)`
+   - Represents the entity that initiated and owns the conversation
+   - Used as default sender when no explicit sender is specified
 
-### Outbound Messages
-Messages going out from an agent can be directed to:
-1. **User/Application**
-   - Via session conversation handlers
-   - Via session event handlers
-   - Contains processed results or direct responses
+2. **Message Senders**
+   - Each message has a sender specified in its metadata
+   - Senders can be:
+     - User (typically the session owner)
+     - Assistant (LLM responses)
+     - Agent (tool execution results)
+     - System (system messages)
+   - When sending to LLM, senders are mapped to OpenAI roles:
+     - "agent" and "assistant" → "assistant" role
+     - "system" → "system" role
+     - All others → "user" role
 
-2. **LLM**
-   - Constructed prompts for new inference
-   - Tool execution results for further processing
-   - Context and history for maintaining conversation flow
+### Message Flows
+
+There are two primary message flows:
+
+1. **Inbound Messages**
+   Messages coming into an agent can originate from:
+   - **User/Application Input**
+     - Via `session.chat()` or `createSession()`
+     - Messages are wrapped in a Message object with session context
+     - Enqueued into PriorityInbox for processing
+
+   - **LLM Responses**
+     - Generated after LLM processes a prompt
+     - Classified and handled based on response type
+     - May trigger tool executions or direct responses
+
+2. **Outbound Messages**
+   Messages going out from an agent can be directed to:
+   1. **User/Application**
+     - Via session conversation handlers
+     - Via session event handlers
+     - Contains processed results or direct responses
+
+   2. **LLM**
+     - Constructed prompts for new inference
+     - Tool execution results for further processing
+     - Context and history for maintaining conversation flow
 
 ## Core Components and Their Roles
 
@@ -100,6 +124,44 @@ handleLLMResponse(): Main response processing
 parseLLMResponse(): Structures raw responses
 validateResponse(): Ensures response format compliance
 ```
+
+## Implementation Details
+
+### Message Handling
+
+1. **Message Creation**
+   ```typescript
+   // Create message with default sender (session owner)
+   session.createMessage("Hello");
+   
+   // Create message with explicit sender
+   session.createMessage("Tool result", "assistant");
+   ```
+
+2. **Role Determination**
+   ```typescript
+   // In SessionContext
+   private determineMessageRole(message: Message): "system" | "user" | "assistant" {
+     const sender = message.metadata?.sender.toLowerCase();
+     if (sender.includes('agent') || sender.includes('assistant')) {
+       return "assistant";  // Both agent and assistant map to assistant
+     } else if (sender === 'system') {
+       return "system";
+     }
+     return "user";  // Default role
+   }
+   ```
+
+3. **Common Message Types**
+   - User Messages: Created with session owner as sender
+   - LLM Responses: Created with "assistant" as sender
+   - Tool Results: Created with "assistant" as sender
+   - System Messages: Created with "system" as sender
+
+4. **OpenAI Compatibility**
+   - Internal sender metadata preserved for framework use
+   - Automatically mapped to OpenAI-compatible roles when sending to LLM
+   - Maintains semantic clarity while ensuring API compatibility
 
 ## Prompt Construction and LLM Interaction
 

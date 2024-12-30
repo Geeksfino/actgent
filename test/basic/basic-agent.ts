@@ -38,7 +38,7 @@ class PerformanceMetrics {
 
   end() {
     this.checkpoint('end');
-    this.printMetrics();
+    //this.printMetrics();
   }
 
   private printMetrics() {

@@ -15,10 +15,12 @@ export class BareClassifier<T extends readonly ClassificationTypeConfig[]> exten
     this.promptTemplate = new BarePromptTemplate(schemaTypes, strategy);
   }
 
+  /*
   async classify(message: Message): Promise<string> {
     // Always return the first classification type
     return this.schemaTypes[0].name;
   }
+    */
 
   protected parseLLMResponse(
     response: string,
