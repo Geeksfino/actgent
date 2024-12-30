@@ -26,6 +26,9 @@ export class Session {
     // this is to handle responses as results of anything exceptional
     private exceptionHandlers: Array<(obj: any) => void> = []; 
 
+    // New routing handler
+    private routingHandlers: Array<(message: any, session: Session) => void> = [];
+
     constructor(core: AgentCore, owner: string, sessionId: string, description: string, parentSessionId?: string) {
         this.core = core;
         this.owner = owner;
@@ -68,6 +71,10 @@ export class Session {
 
     public onException(handler: (obj: any) => void): void {
         this.exceptionHandlers.push(handler);
+    }
+
+    public onRouting(handler: (message: any, session: Session) => void): void {
+        this.routingHandlers.push(handler);
     }
 
     // Updated triggerEventHandlers method with proper generic typing
@@ -165,5 +172,16 @@ export class Session {
                 handler(obj);
             }
         });
+    }
+
+    public async triggerRoutingHandlers(message: any): Promise<void> {
+        logger.debug(`Session: Triggering routing handlers for message:`, message);
+        for (const handler of this.routingHandlers) {
+            try {
+                await handler(message, this);
+            } catch (error) {
+                logger.error("Error in routing handler:", error);
+            }
+        }
     }
 }
