@@ -64,7 +64,7 @@ export class Logger {
     private static instance: Logger;
     private logger: pino.Logger;
     private currentOptions: pinoPretty.PrettyOptions;
-    private currentLevel: LogLevel = LogLevel.WARNING;
+    private currentLevel: LogLevel = LogLevel.INFO;
     private runtime = createRuntime();
 
     private constructor() {
@@ -222,6 +222,10 @@ export class Logger {
 
     public warning(message: string, ...args: any[]) {
         this.logger.warn(this.formatMessage(message, args));
+    }
+
+    public warn(message: string, ...args: any[]) {
+        this.warning(message, ...args);
     }
 
     public error(message: string, ...args: any[]) {
