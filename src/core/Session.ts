@@ -15,16 +15,16 @@ export class Session {
     subtasks?: Session[];  
 
     // this is to handle responses as structured results of LLM inference with instructions and matching handlers
-    private eventHandlers: Array<(obj: any) => void> = []; 
+    private eventHandlers: Array<(obj: any, session: Session) => void> = []; 
 
     // this is to handle responses as results of tool calls
     private toolResultHandlers: Array<(result: any, session: Session) => void> = []; 
 
     // this is to handle responses as non-structured results of LLM inference with instructions but without registered handlers
-    private conversationHandlers: Array<(obj: any) => void> = []; 
+    private conversationHandlers: Array<(obj: any, session: Session) => void> = []; 
 
     // this is to handle responses as results of anything exceptional
-    private exceptionHandlers: Array<(obj: any) => void> = []; 
+    private exceptionHandlers: Array<(obj: any, session: Session) => void> = []; 
 
     // New routing handler
     private routingHandlers: Array<(message: any, session: Session) => void> = [];
@@ -54,7 +54,7 @@ export class Session {
         InstructionType extends InferClassificationUnion<T>,
         ToolOutputType extends ToolOutput,
         T extends readonly ClassificationTypeConfig[]
-    >(handler: (result: ToolOutputType | InstructionType) => void): void {
+    >(handler: (result: ToolOutputType | InstructionType, session: Session) => void): void {
         this.eventHandlers.push(handler);
     }
 
@@ -65,11 +65,11 @@ export class Session {
         this.toolResultHandlers.push(handler);
     }
 
-    public onConversation(handler: (obj: any) => void): void {
+    public onConversation(handler: (obj: any, session: Session) => void): void {
         this.conversationHandlers.push(handler);
     }
 
-    public onException(handler: (obj: any) => void): void {
+    public onException(handler: (obj: any, session: Session) => void): void {
         this.exceptionHandlers.push(handler);
     }
 
@@ -94,14 +94,14 @@ export class Session {
                 const result = await tool.run(obj, {});
                 this.eventHandlers.forEach(handler => {
                     if (typeof handler === 'function') {  
-                        handler(result);
+                        handler(result, this);
                     }
                 });
             } else {
                 // If no tool found, pass through the original object
                 this.eventHandlers.forEach(handler => {
                     if (typeof handler === 'function') {  
-                        handler(obj);
+                        handler(obj, this);
                     }
                 });
             }
@@ -109,7 +109,7 @@ export class Session {
             // Handle direct messages or responses without tools
             this.eventHandlers.forEach(handler => {
                 if (typeof handler === 'function') {  
-                    handler(obj);
+                    handler(obj, this);
                 }
             });
         }
@@ -160,7 +160,7 @@ export class Session {
         logger.debug(`Session: Triggering conversation handlers for object:`, obj);
         this.conversationHandlers.forEach(handler => {
             if (typeof handler === 'function') {
-                handler(obj);
+                handler(obj, this);
             }
         });
     }
@@ -169,7 +169,7 @@ export class Session {
         logger.debug(`Session: Triggering exception handlers for object:`, obj);
         this.exceptionHandlers.forEach(handler => {
             if (typeof handler === 'function') {
-                handler(obj);
+                handler(obj, this);
             }
         });
     }

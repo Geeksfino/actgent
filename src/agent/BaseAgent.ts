@@ -156,6 +156,12 @@ export abstract class BaseAgent<
     session.onToolResult((result: any, session: Session) => {
       this.defaultToolResultHandler(result, session);
     });
+    session.onEvent((event: any, session: Session) => {
+      this.defaultEventHandler(event, session);
+    });
+    session.onRouting((message: any, session: Session) => {
+      this.defaultRoutingHandler(message, session);
+    });
 
     return session;
   }
@@ -185,6 +191,44 @@ export abstract class BaseAgent<
       const message = `Tool execution failed: ${result.error}. Please determine the next action to take or respond to the user with explanation.`;
       session.chat(message, "agent").catch(error => {
         logger.error("Error sending tool result back to LLM:", error);
+      });
+    }
+  }
+
+  private defaultEventHandler(event: any, session: Session): void {
+    logger.debug("Event received:", event);
+    
+    try {
+      // Format event content
+      const content = typeof event === 'object' ? JSON.stringify(event) : String(event);
+      const msg = `[Agent ${this.core.name}] processed event: ${content}. Please continue with the next step.`;
+      
+      session.chat(msg, "agent").catch(error => {
+        logger.error("Error sending event result back to LLM:", error);
+      });
+    } catch (error) {
+      const errorMsg = `Event processing failed: ${error instanceof Error ? error.message : String(error)}. Please handle this error appropriately.`;
+      session.chat(errorMsg, "agent").catch(err => {
+        logger.error("Error sending event error back to LLM:", err);
+      });
+    }
+  }
+
+  private defaultRoutingHandler(message: any, session: Session): void {
+    logger.debug("Routing message received:", message);
+    
+    try {
+      // Format message content
+      const content = typeof message === 'object' ? JSON.stringify(message) : String(message);
+      const msg = `[Agent ${this.core.name}] received routed message: ${content}. Please process this information.`;
+      
+      session.chat(msg, "agent").catch(error => {
+        logger.error("Error sending routing message back to LLM:", error);
+      });
+    } catch (error) {
+      const errorMsg = `Message routing failed: ${error instanceof Error ? error.message : String(error)}. Please handle this error appropriately.`;
+      session.chat(errorMsg, "agent").catch(err => {
+        logger.error("Error sending routing error back to LLM:", err);
       });
     }
   }
