@@ -177,13 +177,13 @@ export abstract class BaseAgent<
       const formattedResponse = `[${result.toolName || 'Tool'} Result]: ${content}`;
 
       const msg = `[Agent ${this.core.name}] got back ${formattedResponse}. Use this result to infer response to the user.`;
-      session.chat(msg, "assistant").catch(error => {
+      session.chat(msg, "agent").catch(error => {
         logger.error("Error sending tool result back to LLM:", error);
       });
     }
     else {
       const message = `Tool execution failed: ${result.error}. Please determine the next action to take or respond to the user with explanation.`;
-      session.chat(message, "assistant").catch(error => {
+      session.chat(message, "agent").catch(error => {
         logger.error("Error sending tool result back to LLM:", error);
       });
     }
