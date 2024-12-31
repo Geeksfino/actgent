@@ -14,17 +14,26 @@ export class MultiLevelPromptTemplate<T extends ReadonlyArray<ClassificationType
   }
 
   private topLevelPrompt(): string {
+    // Extract instruction names from classification types
+    const instructionNames = this.classificationTypes
+      .map(type => type.name)
+      .filter(name => name !== 'CONVERSATION' && name !== 'ACTION')
+      .join('\n- ');
+
     return `
-Classify user query into one of these categories: CONVERSATION or ACTION. If the category is ACTION, also provide a second-level intent in the format "ACTION:OBJECT".
+Classify user query into one of these categories: CONVERSATION or ACTION. If the category is ACTION, also provide a second-level intent.
 
 Categories:
 CONVERSATION: General chit-chat, greetings, small talk, off-topic questions, expressions of thanks or appreciation. These do not require any specific action or tool invocation.
-ACTION: Requests that require the agent to perform an action using a tool or service. This includes requests for information that require data retrieval.
+ACTION: Specific intents that require the agent to perform an action using a tool or service. This includes requests for information that require data retrieval.
+
+Legitimate second-level intents include: 
+- ${instructionNames}
 
 Output format:
 {
   "top_level_intent": "[Top-level intent: CONVERSATION or ACTION]",
-  "second_level_intent": "[Second-level intent (if applicable), in ACTION:OBJECT format]",
+  "second_level_intent": "[Second-level intent (if applicable)]",
   "response": "[A natural language response if top_level_intent is CONVERSATION]"
 }
 
@@ -44,11 +53,13 @@ Your capabilities: {capabilities}
       return base_prompt + "\n" + this.topLevelPrompt();
     }
     else if (msg.metadata?.sender === "assistant") {
-      const data = JSON.parse(msg.payload.input);
-      if (data.top_level_intent === "ACTION") {
-        const second_level_intent = data.second_level_intent;
+      const m = JSON.parse(msg.payload.input);
+      logger.debug(`From LLM: Top-level intent is: ${msg.payload.input}`);
+      if (m.data.top_level_intent === "ACTION") {
+        const second_level_intent = m.data.second_level_intent;
         if (second_level_intent) {
           const instruction = sessionContext.getSession().core.getInstructionByName(second_level_intent);
+          logger.debug(`Instruction found: ${JSON.stringify(instruction)} for ${second_level_intent}`);
           if (instruction) {
             return base_prompt + "\n" + instruction.description;
           }
@@ -59,18 +70,19 @@ Your capabilities: {capabilities}
           }
         } else {
           // this should not happen
-          logger.warning(`Second-level intent not found: ${data.second_level_intent}`);
+          logger.warning(`Second-level intent not found: ${m.data.second_level_intent}`);
           return base_prompt;
         }
       } else {    
         // this should not happen 
-        logger.warning(`Top-level intent should be ACTION but found: ${data.top_level_intent}`);
+        logger.warning(`Top-level intent should be ACTION but found: ${m.data.top_level_intent}`);
         return base_prompt;
       }
     }
     else if (msg.metadata?.sender === "agent") {
       const data = JSON.parse(msg.payload.input);
       const instructionName = data.instructionName;
+      logger.debug(`Instruction name found: ${instructionName}`);
       if (instructionName) {
         return base_prompt + "\n" + `[Agent] has executed ${instructionName} with results: ${msg.payload.input}`;
       }
@@ -88,13 +100,14 @@ Your capabilities: {capabilities}
   async getAssistantPrompt(sessionContext: SessionContext, memory: Memory): Promise<string> {
     const msg = sessionContext.getLatestMessage();
     if (msg.metadata?.sender === "assistant") {
-      const data = JSON.parse(msg.payload.input);
-      if (data.top_level_intent === "ACTION") {
-        const second_level_intent = data.second_level_intent;
+      const m = JSON.parse(msg.payload.input);
+      if (m.data.top_level_intent === "ACTION") {
+        const second_level_intent = m.data.second_level_intent;
         if (second_level_intent) {
           const instruction = sessionContext.getSession().core.getInstructionByName(second_level_intent);
           if (instruction) {
-            return instruction.schemaTemplate || "";
+            const prompt = "Respond in the following JSON format:\n" + instruction.schemaTemplate;
+            return prompt;
           }
           else {
             // this should not happen
@@ -103,12 +116,12 @@ Your capabilities: {capabilities}
           }
         } else {
           // this should not happen
-          logger.warning(`Second-level intent not found: ${data.second_level_intent}. Assistant prompt set to empty.`);
+          logger.warning(`Second-level intent not found: ${m.data.second_level_intent}. Assistant prompt set to empty.`);
           return "";
         }
       } else {    
         // this should not happen 
-        logger.warning(`Top-level intent should be ACTION but found: ${data.top_level_intent}. Assistant prompt set to empty.`);
+        logger.warning(`Top-level intent should be ACTION but found: ${m.data.top_level_intent}. Assistant prompt set to empty.`);
         return "";
       }
     }

@@ -43,7 +43,7 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
   protected categorizeLLMResponse(
     response: string,
     validationOptions: ValidationOptions
-  ): ParsedLLMResponse<T> {
+  ): ParsedLLMResponse<T> | null {
     try {
       const parsed = JSON.parse(response);
 
@@ -101,24 +101,27 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
       }
 
       // Case 2: OpenAI function calling format
-      if (parsed.tool_name || parsed.function_name) {
-        const toolName = parsed.tool_name || parsed.function_name;
-        const args = parsed.arguments || parsed.params || {};
+      if (parsed.tool_calls) {
+        // OpenAI returns tool_calls array, we handle the first one for now
+        const toolCall = parsed.tool_calls[0];
+        if (!toolCall || !toolCall.function) {
+          throw new Error("Invalid tool_calls format: missing function data");
+        }
 
         return {
           type: ResponseType.TOOL_CALL,
           content: {
             messageType: 'TOOL_INVOCATION',
-            toolName: toolName,
-            arguments: args
+            toolName: toolCall.function.name,
+            arguments: JSON.parse(toolCall.function.arguments)
           } as InferClassificationUnion<T>,
           answer: parsed.response_description,
           validationResult: { 
             isValid: true, 
             data: {
               messageType: 'TOOL_INVOCATION',
-              toolName: toolName,
-              arguments: args
+              toolName: toolCall.function.name,
+              arguments: JSON.parse(toolCall.function.arguments)
             } as InferClassificationUnion<T>
           }
         };
@@ -126,7 +129,12 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
 
       // Case 3: Direct schema-conforming response
       if (parsed.messageType) {
-        // This is already in our expected format with messageType and corresponding schema
+        // If it's not a conventional tool call (handled in case 2),
+        // treat it as instruction-to-tool mapping for event handling
+        const matchingSchema = this.schemaTypes.find(
+          (type: ClassificationTypeConfig) => type.name === parsed.messageType
+        );
+        // No need to throw error if no matching schema - just return EVENT type
         return {
           type: ResponseType.EVENT,
           content: parsed as InferClassificationUnion<T>,

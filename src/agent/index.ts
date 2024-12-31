@@ -12,3 +12,5 @@ export { ReActModeStrategy,
         UserPreferenceStrategy  } from './ReActModeStrategy';
 export { BarePromptTemplate } from './BarePromptTemplate';
 export { BareClassifier } from './BareClassifier';
+export { MultiLevelClassifier } from './MultiLevelClassifier';
+export { MultiLevelPromptTemplate } from './MultiLevelPromptTemplate';
