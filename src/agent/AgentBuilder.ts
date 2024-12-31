@@ -52,35 +52,55 @@ export class AgentBuilder {
     return this;
   }
 
-  public create(): BaseAgent<Readonly<ClassificationTypeConfig[]>, ReActClassifier<Readonly<ClassificationTypeConfig[]>>, ReActPromptTemplate<Readonly<ClassificationTypeConfig[]>>> {
+  public create(): BaseAgent<ClassificationTypeConfig[], ReActClassifier<ClassificationTypeConfig[]>, ReActPromptTemplate<ClassificationTypeConfig[]>>;
+  public create<
+    C extends AbstractClassifier<any>,
+    P extends IAgentPromptTemplate
+  >(
+    ClassifierClass: new (...args: any[]) => C,
+    PromptTemplateClass: new (...args: any[]) => P
+  ): BaseAgent<any, C, P>;
+  public create<
+    C extends AbstractClassifier<any>,
+    P extends IAgentPromptTemplate
+  >(
+    ClassifierClass?: new (...args: any[]) => C,
+    PromptTemplateClass?: new (...args: any[]) => P
+  ): BaseAgent<any, C | ReActClassifier<any>, P | ReActPromptTemplate<any>> {
     const schemaBuilder = new SchemaBuilder(this.coreConfig.instructions || []);
     const schemaTypes = schemaBuilder.build();
-    return this.buildWithDefaults(schemaTypes);
-  }
 
-  public buildWithDefaults<T extends ClassificationTypeConfig[]>(
-    schemaTypes: T
-  ): BaseAgent<Readonly<T>, ReActClassifier<Readonly<T>>, ReActPromptTemplate<Readonly<T>>> {
+    if (!ClassifierClass || !PromptTemplateClass) {
+      return this.build(
+        this.coreConfig.name,
+        schemaTypes,
+        ReActClassifier,
+        ReActPromptTemplate
+      ) as BaseAgent<any, ReActClassifier<any>, ReActPromptTemplate<any>>;
+    }
+
     return this.build(
-      this.coreConfig.name, 
+      this.coreConfig.name,
       schemaTypes,
-      ReActClassifier,
-      ReActPromptTemplate
+      ClassifierClass,
+      PromptTemplateClass
     );
   }
 
-  public build<T extends ClassificationTypeConfig[], C extends AbstractClassifier<Readonly<T>>, P extends IAgentPromptTemplate>(
+  private build<
+    T extends readonly ClassificationTypeConfig[],
+    C extends AbstractClassifier<T>,
+    P extends IAgentPromptTemplate
+  >(
     className: string,
     schemaTypes: T,
-    ClassifierClass: new (classificationTypes: Readonly<T>) => C,
-    PromptTemplateClass: new (classificationTypes: Readonly<T>, strategy: InferStrategy) => P
-  ): BaseAgent<Readonly<T>, C, P> {
-    type SchemaTypes = Readonly<T>;
-
+    ClassifierClass: new (types: T) => C,
+    PromptTemplateClass: new (types: T, strategy: InferStrategy) => P
+  ): BaseAgent<T, C, P> {
     const builderStrategy = this.promptStrategy;
     const streamParser = this.streamParser;
 
-    class DynamicAgent extends BaseAgent<SchemaTypes, C, P> {
+    class DynamicAgent extends BaseAgent<T, C, P> {
       private readonly promptStrategy: InferStrategy;
 
       constructor(
@@ -108,12 +128,12 @@ export class AgentBuilder {
         return boundClass as unknown as new () => C;
       }
 
-      protected usePromptTemplateClass(): new (classificationTypes: SchemaTypes) => P {
+      protected usePromptTemplateClass(): new (types: T) => P {
         const strategy = builderStrategy;
-        const boundClass = function(this: any, classificationTypes: SchemaTypes) {
-          return new PromptTemplateClass(classificationTypes, strategy);
+        const boundClass = function(this: any, types: T) {
+          return new PromptTemplateClass(types, strategy);
         };
-        return boundClass as unknown as new (classificationTypes: SchemaTypes) => P;
+        return boundClass as unknown as new (types: T) => P;
       }
     }
 
