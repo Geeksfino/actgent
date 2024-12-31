@@ -199,18 +199,11 @@ export abstract class BaseAgent<
     logger.debug("Event received:", event);
     
     try {
-      // Format event content
+      // Format event content for logging
       const content = typeof event === 'object' ? JSON.stringify(event) : String(event);
-      const msg = `[Agent ${this.core.name}] processed event: ${content}. Please continue with the next step.`;
-      
-      session.chat(msg, "agent").catch(error => {
-        logger.error("Error sending event result back to LLM:", error);
-      });
+      logger.debug(`[Agent ${this.core.name}] processed event: ${content}`);
     } catch (error) {
-      const errorMsg = `Event processing failed: ${error instanceof Error ? error.message : String(error)}. Please handle this error appropriately.`;
-      session.chat(errorMsg, "agent").catch(err => {
-        logger.error("Error sending event error back to LLM:", err);
-      });
+      logger.error(`Event processing failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -218,11 +211,9 @@ export abstract class BaseAgent<
     logger.debug("Routing message received:", message);
     
     try {
-      // Format message content
-      const content = typeof message === 'object' ? JSON.stringify(message) : String(message);
-      const msg = `[Agent ${this.core.name}] received routed message: ${content}. Please process this information.`;
-      
-      session.chat(msg, "agent").catch(error => {
+      // Pass through the content.data without assuming its structure
+      const routedData = message.content?.data || message;
+      session.chat(JSON.stringify(routedData), "assistant").catch(error => {
         logger.error("Error sending routing message back to LLM:", error);
       });
     } catch (error) {
