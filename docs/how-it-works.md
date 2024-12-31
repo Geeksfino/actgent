@@ -1,6 +1,17 @@
-# How It Works: Actgent Framework Internals
+# How It Works: Actgent Framework
 
-This document explains the internal workings of the Actgent framework, focusing on message flows, component interactions, and core mechanisms.
+## Introduction
+
+The Actgent framework is designed for creating sophisticated AI agents that can handle complex tasks through structured interactions with large language models. This document explains the internal workings of the framework, focusing on its architecture, message flows, and core mechanisms.
+
+### Key Concepts
+
+- **Agent**: An AI entity that processes messages and performs actions using LLMs
+- **Instruction**: A structured directive that guides agent behavior
+- **Tool**: A function that agents can use to perform specific actions
+- **Classification**: The process of categorizing LLM responses for proper handling
+- **Prompt Template**: A structured format for communicating with LLMs
+
 
 ## Message Flow Overview
 
@@ -54,9 +65,11 @@ There are two primary message flows:
      - Tool execution results for further processing
      - Context and history for maintaining conversation flow
 
-## Core Components and Their Roles
+## Core Architecture
 
-### AgentCore
+### Core Components and Their Roles
+
+#### AgentCore
 Central coordinator of the agent system:
 - Manages message processing through PriorityInbox
 - Coordinates between components (PromptManager, Classifier, etc.)
@@ -71,7 +84,7 @@ promptLLM(message): Constructs and sends prompts to LLM
 handleLLMResponse(response): Processes LLM responses
 ```
 
-### Session
+#### Session
 Manages individual conversation contexts:
 - Creates and tracks messages within a session
 - Handles different types of responses through handlers
@@ -85,7 +98,7 @@ toolResultHandlers: For tool execution results
 exceptionHandlers: For error conditions
 ```
 
-### PromptManager
+#### PromptManager
 Manages prompt construction and rendering:
 - Works with PromptTemplates to generate prompts
 - Maintains agent role, goal, and capabilities
@@ -98,7 +111,7 @@ getAssistantPrompt(): Generates assistant-level prompts
 getUserPrompt(): Formats user messages
 ```
 
-### PromptTemplate (e.g., ReActPromptTemplate)
+#### PromptTemplate (e.g., ReActPromptTemplate)
 Defines the structure and format of prompts:
 - Provides templates for different message types
 - Handles response formatting instructions
@@ -112,7 +125,7 @@ Key aspects:
 - Tool invocation formats
 ```
 
-### Classifier (e.g., ReActClassifier)
+#### Classifier (e.g., ReActClassifier)
 Processes and categorizes LLM responses:
 - Parses LLM responses into structured formats
 - Determines response types (DIRECT_RESPONSE/TOOL_INVOCATION)
@@ -124,6 +137,190 @@ handleLLMResponse(): Main response processing
 parseLLMResponse(): Structures raw responses
 validateResponse(): Ensures response format compliance
 ```
+
+## Tool Registration and Instruction Mapping
+
+The framework provides two distinct ways for tools to be used by an agent:
+
+### 1. Direct Tool Access
+- Tools registered via `agent.registerTool()` are exposed as OpenAI functions by default
+- LLM can make direct function calls to these tools
+- Suitable for general-purpose tools that can be used anytime
+- Example:
+  ```typescript
+  // Register a utility tool
+  agent.registerTool(new FileSearchTool());
+  ```
+
+### 2. Instruction-Mapped Tools
+- Tools can be mapped to specific instructions in agent configuration
+- When mapped, the tool is removed from OpenAI function list
+- Can only be triggered through the mapped instruction
+- Enforces proper validation through instruction's schema template
+- Example:
+  ```yaml
+  # In brain.md
+  instructions:
+      creation: "instructions/creation.md"
+  
+  # In creation.md
+  instructionName: Creation
+  schemaTemplate: "creation.json"
+  tool: "AgentGenerator"  # Maps tool to instruction
+  ```
+
+### How Tool Mapping Works
+
+1. **Tool Registration**:
+   ```typescript
+   // Register the AgentGenerator tool
+   AgentSmith.registerTool(new AgentGenerator());
+   ```
+
+2. **Function List Filtering**:
+   ```typescript
+   // In AgentCore.promptLLM()
+   const unmappedTools = Array.from(this.toolRegistry.values())
+     .filter(
+       (tool) => !Object.values(this.instructionToolMap).includes(tool.name)
+     )
+     .map((tool) => tool.getFunctionDescription());
+
+   const baseConfig = {
+     model: this.llmConfig?.model || "gpt-4",
+     messages,
+     tools: unmappedTools.length > 0 ? unmappedTools : undefined,
+   };
+   ```
+
+### Design Rationale
+
+This dual approach to tool usage serves several purposes:
+
+1. **Control Flow**:
+   - Direct tools: For simple, stateless operations
+   - Mapped tools: For complex operations requiring validation
+
+2. **Schema Validation**:
+   - Instruction mapping enforces schema validation
+   - Ensures complex operations follow proper protocols
+   - Example: AgentGenerator must follow Creation instruction schema
+
+3. **Architectural Benefits**:
+   - Clean separation of concerns
+   - Proper validation for complex operations
+   - Flexibility for simple utility tools
+   - Better control over LLM's tool access
+
+For example, the AgentGenerator tool is mapped to the Creation instruction because:
+1. Agent creation is a complex operation needing validation
+2. The Creation instruction's schema ensures proper parameters
+3. The mapping prevents direct, unvalidated agent creation
+4. Results are properly handled through instruction flow
+
+## Instructions and Classification Types
+
+### Instructions Flow Overview
+
+Instructions in the Actgent framework follow a specific flow from configuration to prompt templates:
+
+1. **Initial Configuration**
+   - Instructions are defined in markdown files with front matter
+   - Loaded by AgentCoreConfigurator into AgentCoreConfig
+   - Each instruction can have:
+     - name: Identifier for the instruction
+     - description: Human-readable description
+     - schemaTemplate: Optional JSON schema defining response format
+     - tool: Optional tool name to handle instruction output (see Tool Registration and Instruction Mapping section)
+
+2. **AgentCore Integration**
+   ```typescript
+   class AgentCore {
+     public instructions: Instruction[] = [];
+     constructor(config: AgentCoreConfig, ...) {
+       this.instructions = config.instructions || [];
+       // Instructions are also mapped to tools
+       if (config.instructionToolMap) {
+         this.instructionToolMap = config.instructionToolMap;
+       }
+     }
+   }
+   ```
+
+3. **Conversion to Classification Types**
+   The framework provides two paths for converting instructions to classification types:
+
+   a. **Using SchemaBuilder (Recommended)**
+   ```typescript
+   const schemaBuilder = new SchemaBuilder(instructions);
+   const classificationTypes = schemaBuilder.build();
+   ```
+   SchemaBuilder maps each instruction to a ClassificationTypeConfig:
+   - instruction.name → type.name
+   - instruction.description → type.description
+   - instruction.schemaTemplate → type.schema (parsed JSON)
+
+   b. **Direct Classification Types**
+   ```typescript
+   // Example from basic-agent.ts
+   const classificationTypes = [
+     {
+       name: "greeting",
+       description: "General greetings and pleasantries",
+       schema: { messageType: "greeting", content: "string" }
+     },
+     // ... other types
+   ] as const;
+   ```
+
+4. **Usage in Prompt Templates**
+   Classification types are used by prompt templates (like ReActPromptTemplate) to:
+   - Define valid response formats
+   - Generate schema documentation in prompts
+   - Validate LLM responses
+
+   ```typescript
+   class ReActPromptTemplate {
+     private getFormattedSchemas(): SchemaFormatting {
+       // Convert classification types to prompt format
+       const types = this.classificationTypes
+         .map((type) => `- ${type.name}: ${type.description}`)
+         .join("\n");
+
+       const schemas = this.classificationTypes
+         .map((type) => 
+           `${type.name}:\n\`\`\`json\n${JSON.stringify(type.schema)}\n\`\`\``)
+         .join("\n\n");
+
+       return { types, schemas };
+     }
+   }
+   ```
+
+### Helper Classes (Optional)
+
+While the framework provides helper classes like SchemaBuilder and AgentBuilder to streamline the process of converting instructions to classification types, they are not mandatory:
+
+1. **SchemaBuilder**
+   - Convenient utility for mapping instructions to classification types
+   - Handles JSON schema parsing and validation
+   - Provides methods for dynamic instruction management
+
+2. **AgentBuilder**
+   - Uses SchemaBuilder internally
+   - Provides a fluent API for agent construction
+   - Handles configuration loading and component wiring
+
+3. **Direct Implementation**
+   As shown in basic-agent.ts, you can directly:
+   - Define classification types without SchemaBuilder
+   - Create prompt templates with those types
+   - Initialize AgentCore with manual configuration
+
+The choice between using helper classes or direct implementation depends on your needs:
+- Use helpers for complex agents with many instructions
+- Use direct implementation for simple agents or custom logic
+- Mix approaches as needed - the framework is flexible
 
 ## Implementation Details
 
@@ -300,109 +497,6 @@ This design philosophy allows for:
 - Compile-time verification of classifier-template compatibility
 - Proper generic type propagation through the system
 - Clean integration with the existing agent framework
-
-## Instructions and Classification Types
-
-### Instructions Flow Overview
-
-Instructions in the Actgent framework follow a specific flow from configuration to prompt templates:
-
-1. **Initial Configuration**
-   - Instructions are defined in markdown files with front matter
-   - Loaded by AgentCoreConfigurator into AgentCoreConfig
-   - Each instruction can have:
-     - name: Identifier for the instruction
-     - description: Human-readable description
-     - schemaTemplate: Optional JSON schema defining response format
-
-2. **AgentCore Integration**
-   ```typescript
-   class AgentCore {
-     public instructions: Instruction[] = [];
-     constructor(config: AgentCoreConfig, ...) {
-       this.instructions = config.instructions || [];
-       // Instructions are also mapped to tools
-       if (config.instructionToolMap) {
-         this.instructionToolMap = config.instructionToolMap;
-       }
-     }
-   }
-   ```
-
-3. **Conversion to Classification Types**
-   The framework provides two paths for converting instructions to classification types:
-
-   a. **Using SchemaBuilder (Recommended)**
-   ```typescript
-   const schemaBuilder = new SchemaBuilder(instructions);
-   const classificationTypes = schemaBuilder.build();
-   ```
-   SchemaBuilder maps each instruction to a ClassificationTypeConfig:
-   - instruction.name → type.name
-   - instruction.description → type.description
-   - instruction.schemaTemplate → type.schema (parsed JSON)
-
-   b. **Direct Classification Types**
-   ```typescript
-   // Example from basic-agent.ts
-   const classificationTypes = [
-     {
-       name: "greeting",
-       description: "General greetings and pleasantries",
-       schema: { messageType: "greeting", content: "string" }
-     },
-     // ... other types
-   ] as const;
-   ```
-
-4. **Usage in Prompt Templates**
-   Classification types are used by prompt templates (like ReActPromptTemplate) to:
-   - Define valid response formats
-   - Generate schema documentation in prompts
-   - Validate LLM responses
-
-   ```typescript
-   class ReActPromptTemplate {
-     private getFormattedSchemas(): SchemaFormatting {
-       // Convert classification types to prompt format
-       const types = this.classificationTypes
-         .map((type) => `- ${type.name}: ${type.description}`)
-         .join("\n");
-
-       const schemas = this.classificationTypes
-         .map((type) => 
-           `${type.name}:\n\`\`\`json\n${JSON.stringify(type.schema)}\n\`\`\``)
-         .join("\n\n");
-
-       return { types, schemas };
-     }
-   }
-   ```
-
-### Helper Classes (Optional)
-
-While the framework provides helper classes like SchemaBuilder and AgentBuilder to streamline the process of converting instructions to classification types, they are not mandatory:
-
-1. **SchemaBuilder**
-   - Convenient utility for mapping instructions to classification types
-   - Handles JSON schema parsing and validation
-   - Provides methods for dynamic instruction management
-
-2. **AgentBuilder**
-   - Uses SchemaBuilder internally
-   - Provides a fluent API for agent construction
-   - Handles configuration loading and component wiring
-
-3. **Direct Implementation**
-   As shown in basic-agent.ts, you can directly:
-   - Define classification types without SchemaBuilder
-   - Create prompt templates with those types
-   - Initialize AgentCore with manual configuration
-
-The choice between using helper classes or direct implementation depends on your needs:
-- Use helpers for complex agents with many instructions
-- Use direct implementation for simple agents or custom logic
-- Mix approaches as needed - the framework is flexible
 
 ## Encapsulated Protocol Pattern in Classifier-Template Pairs
 
@@ -1030,3 +1124,49 @@ The framework can be extended through:
    - Implement proper error recovery
    - Maintain system stability
    - Provide meaningful error messages
+
+## Appendix: Implementation Examples
+
+Here are some common patterns and examples for implementing agents:
+
+### Basic Agent Implementation
+```typescript
+// Example of creating a basic agent with direct responses
+const basicAgent = new BareAgent({
+    instructions: ["greeting", "farewell"],
+    tools: [new SimpleTool()]
+});
+```
+
+### ReAct Agent Implementation
+```typescript
+// Example of creating a ReAct agent with reasoning capabilities
+const reactAgent = new ReActAgent({
+    instructions: loadInstructions("brain.md"),
+    tools: [new FileSearchTool(), new AgentGenerator()]
+});
+```
+
+### Common Use Cases
+1. **Simple Chat Agent**
+   - Use BareAgent for direct conversations
+   - Minimal configuration needed
+
+2. **Tool-Using Agent**
+   - Use SimpleAgent for basic tool integration
+   - Register tools directly
+
+3. **Complex Reasoning Agent**
+   - Use ReActAgent for multi-step tasks
+   - Configure with instructions and tools
+   - Enable full reasoning capabilities
+
+## Glossary
+
+- **Agent**: An AI entity that processes messages and performs actions
+- **Instruction**: A structured directive defining expected behavior
+- **Tool**: A function that can be called by the agent
+- **Classification Type**: A category for LLM responses
+- **Prompt Template**: A structured format for LLM communication
+- **Protocol**: A pattern for agent-LLM interaction
+- **Session**: A conversation context between user and agent
