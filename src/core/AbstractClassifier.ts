@@ -64,9 +64,17 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
             break;
 
           case ResponseType.EVENT:
-            session.triggerEventHandlers(categorizedResponse.content);
-            if (categorizedResponse.answer) {
-              session.triggerConversationHandlers(categorizedResponse.answer);
+            if (session.core.hasToolForCurrentInstruction(categorizedResponse.content.messageType)) {
+              session.triggerEventHandlers(categorizedResponse.content);
+              if (categorizedResponse.answer) {
+                session.triggerConversationHandlers(categorizedResponse.answer);
+              }
+            } else {
+              // If no tool exists, treat both content and answer as conversation
+              session.triggerConversationHandlers(categorizedResponse.content);
+              if (categorizedResponse.answer) {
+                session.triggerConversationHandlers(categorizedResponse.answer);
+              }
             }
             break;
 
