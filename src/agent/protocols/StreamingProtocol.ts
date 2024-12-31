@@ -256,7 +256,7 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
   }
 
   public broadcast(data: string): void {
-    logger.trace(`[StreamingProtocol] Broadcasting to raw streams`);
+    //logger.trace(`[StreamingProtocol] Broadcasting to raw streams`);
     for (const stream of this.streams) {
       if (stream.type === StreamType.RAW) {
         stream.enqueue(data);

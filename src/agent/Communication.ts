@@ -84,13 +84,13 @@ export class Communication {
   }
 
   public broadcastStreamData(sessionId: string, data: string): void {
-    logger.trace('[Communication] Broadcasting stream data');
+    //logger.trace('[Communication] Broadcasting stream data');
     try {
       if (this._streamingProtocol && this.config.enableStreaming) {
         this._streamingProtocol.broadcast(data);
-        logger.trace('[Communication] Stream data broadcast successful');
+        //logger.trace('[Communication] Stream data broadcast successful');
       } else {
-        logger.trace('[Communication] No streaming protocol available for broadcast');
+        //logger.trace('[Communication] No streaming protocol available for broadcast');
       }
     } catch (error) {
       logger.error('[Communication] Error broadcasting stream data:', error);
