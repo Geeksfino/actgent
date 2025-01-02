@@ -1,7 +1,6 @@
 // IClassifier.ts
 import { Session } from './Session';
 import { InferClassificationUnion } from './TypeInference';  
-import { ResponseType } from './ResponseTypes';
 
 export interface ClassificationTypeConfig {
     name: string;
@@ -18,5 +17,6 @@ export type ClassifiedTypeHandlers<T extends readonly ClassificationTypeConfig[]
 
 export interface IClassifier<T extends readonly ClassificationTypeConfig[]> {
     getClassificationTypeDefinition(): Readonly<T>;
-    handleLLMResponse(response: string, session: Session): ResponseType;
+    handleLLMResponse(response: string, session: Session): void;
 }
+
