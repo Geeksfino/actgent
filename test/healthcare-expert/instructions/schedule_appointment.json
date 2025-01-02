@@ -1,0 +1,5 @@
+{
+  "appointment_date": "<YYYY-MM-DD>",
+  "appointment_time": "<HH:MM>",
+  "provider_name": "<provider_name>"
+}
