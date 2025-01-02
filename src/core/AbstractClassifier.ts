@@ -44,7 +44,7 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
   public handleLLMResponse(
     response: string,
     session: Session
-  ): void {
+  ): ResponseType {
     try {
       // Try the new categorization first
       const categorizedResponse = this.categorizeLLMResponse(response, {
@@ -61,7 +61,7 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
             if (categorizedResponse.answer) {
               session.triggerConversationHandlers(categorizedResponse.answer);
             }
-            break;
+            return ResponseType.TOOL_CALL;
 
           case ResponseType.EVENT:
             if (session.core.hasToolForCurrentInstruction(categorizedResponse.content.messageType)) {
@@ -69,36 +69,28 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
               if (categorizedResponse.answer) {
                 session.triggerConversationHandlers(categorizedResponse.answer);
               }
+              return ResponseType.EVENT;
             } else {
               // If no tool exists, treat both content and answer as conversation
               session.triggerConversationHandlers(categorizedResponse.content);
               if (categorizedResponse.answer) {
                 session.triggerConversationHandlers(categorizedResponse.answer);
               }
+              return ResponseType.CONVERSATION;
             }
-            break;
 
           case ResponseType.CONVERSATION:
             session.triggerConversationHandlers(categorizedResponse.content);
-            break;
+            return ResponseType.CONVERSATION;
 
           case ResponseType.ROUTING:
             session.triggerRoutingHandlers(categorizedResponse.content);
-            if (categorizedResponse.answer) {
-              session.triggerConversationHandlers(categorizedResponse.answer);
-            }
-            break;
-
-          case ResponseType.EXCEPTION:
-            session.triggerExceptionHandlers(categorizedResponse.content);
-            break;
+            return ResponseType.ROUTING;
 
           default:
-            logger.warn(`Unhandled response type: ${categorizedResponse.type}`);
-            // Fall through to legacy parsing
-            break;
+            logger.warning(`Unknown response type: ${categorizedResponse.type}, treating as conversation`);
+            return ResponseType.CONVERSATION;
         }
-        return;
       }
 
       // Fall back to legacy parsing if categorization returns null
@@ -107,19 +99,28 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
           level: 'lenient',
           allowPartialMatch: true,
           requireMessageType: true
-      });
+        });
             
       if (isToolCall) {
         session.triggerToolCallsHandlers(parsedLLMResponse);
+        return ResponseType.TOOL_CALL;
       } else if (session.core.hasToolForCurrentInstruction(instruction)) {
         session.triggerEventHandlers(parsedLLMResponse);
-        session.triggerConversationHandlers(answer);
+        if (answer) {
+          session.triggerConversationHandlers(answer);
+        }
+        return ResponseType.EVENT;
       } else {
         session.triggerConversationHandlers(parsedLLMResponse);
-        session.triggerConversationHandlers(answer);
+        if (answer) {
+          session.triggerConversationHandlers(answer);
+        }
+        return ResponseType.CONVERSATION;
       }
+
     } catch (error) {
       this.handleParsingError(error, response, session);
+      return ResponseType.EXCEPTION;
     }
   }
 

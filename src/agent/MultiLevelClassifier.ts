@@ -6,6 +6,7 @@ import { logger } from "../core/Logger";
 import { MultiLevelPromptTemplate } from "./MultiLevelPromptTemplate";
 import { ResponseType, ParsedLLMResponse } from "../core/ResponseTypes";
 import { Message } from "../core/Message";
+import { Session } from "../core/Session";
 
 export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]> extends AbstractClassifier<T> {
   protected promptTemplate: MultiLevelPromptTemplate<T>;
@@ -13,6 +14,13 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
   constructor(schemaTypes: T) {
     super(schemaTypes);
     this.promptTemplate = new MultiLevelPromptTemplate(schemaTypes);
+  }
+
+  public handleLLMResponse(
+    response: string,
+    session: Session
+  ): ResponseType {
+    return super.handleLLMResponse(response, session);
   }
 
   protected parseLLMResponse(
@@ -45,7 +53,9 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
     validationOptions: ValidationOptions
   ): ParsedLLMResponse<T> | null {
     try {
+      logger.debug("Categorizing LLM raw response:", response);
       const parsed = JSON.parse(response);
+      logger.debug("Categorizing LLM response:", parsed);
 
       // Case 1: Multi-level intent format
       if (parsed.top_level_intent) {
@@ -57,6 +67,7 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
             throw new Error("Invalid CONVERSATION response: response field is missing");
           }
 
+          logger.debug("Categorized LLM response as CONVERSATION");
           return {
             type: ResponseType.CONVERSATION,
             content: {
@@ -80,6 +91,7 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
             throw new Error("Invalid ACTION response: second_level_intent is missing");
           }
 
+          logger.debug("Categorized LLM response as ACTION");
           return {
             type: ResponseType.ROUTING,
             content: {
@@ -108,6 +120,7 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
           throw new Error("Invalid tool_calls format: missing function data");
         }
 
+        logger.debug("Categorized LLM response as TOOL_CALL");
         return {
           type: ResponseType.TOOL_CALL,
           content: {
@@ -134,7 +147,8 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
         const matchingSchema = this.schemaTypes.find(
           (type: ClassificationTypeConfig) => type.name === parsed.messageType
         );
-        // No need to throw error if no matching schema - just return EVENT type
+
+        logger.debug("Categorized LLM response as structured output");
         return {
           type: ResponseType.EVENT,
           content: parsed as InferClassificationUnion<T>,
@@ -147,7 +161,19 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
       }
 
       // If we reach here, the response format is unrecognized
-      throw new Error("Unrecognized response format");
+      logger.error("Unrecognized LLM response format:", response);
+      return {
+        type: ResponseType.EXCEPTION,
+        content: {
+          messageType: 'LLM_RESPONSE_PARSE_ERROR',
+          error: "Unrecognized response format"
+        } as InferClassificationUnion<T>,
+        validationResult: {
+          isValid: false,
+          error: "Unrecognized response format",
+          data: null
+        }
+      };
 
     } catch (error) {
       logger.error("Error parsing LLM response:", error);

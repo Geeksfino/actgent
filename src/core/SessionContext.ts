@@ -20,8 +20,10 @@ export class SessionContext {
       this.state = {};
     }
   
-    public addMessage(message: Message): void {  // Add message to history
-      this.messages.push(message);
+    public addMessage(message: Message): void {  
+      if (message.metadata?.sender !== "agent") {
+        this.messages.push(message);
+      }
     }
 
     public getMessages(): Message[] {  // Retrieve all messages
@@ -69,11 +71,15 @@ export class SessionContext {
       }
 
       public getMessageRecords(limit: number = 10): MessageRecord[] {
-        return this.messages.slice(-limit).map(message => ({
-          role: this.determineMessageRole(message),
-          content: message.payload.input,
-          timestamp: message.metadata?.timestamp
-        }));
+        // Filter out agent messages before applying limit and mapping
+        return this.messages
+          .filter(message => message.metadata?.sender !== "agent")
+          .slice(-limit)
+          .map(message => ({
+            role: this.determineMessageRole(message),
+            content: message.payload.input,
+            timestamp: message.metadata?.timestamp
+          }));
       }
 
       public getLatestMessage(): Message {
@@ -81,9 +87,8 @@ export class SessionContext {
       }
 
       private determineMessageRole(message: Message): "system" | "user" | "assistant" {
-        // Assuming messages from the agent/AI will have "agent" or "assistant" in the sender field
-        const sender = message.metadata?.sender.toLowerCase() || '';
-        if (sender.includes('agent') || sender.includes('assistant')) {
+        const sender = message.metadata?.sender?.toLowerCase() || '';
+        if (sender === 'assistant') {
           return "assistant";
         } else if (sender === 'system') {
           return "system";

@@ -106,8 +106,24 @@ Your capabilities: {capabilities}
         if (second_level_intent) {
           const instruction = sessionContext.getSession().core.getInstructionByName(second_level_intent);
           if (instruction) {
-            const prompt = "Respond in the following JSON format:\n" + instruction.schemaTemplate;
-            return prompt;
+            let schema;
+            if (instruction.schemaTemplate) {
+              try {
+                schema = JSON.parse(instruction.schemaTemplate);
+              } catch (error) {
+                console.warn(`Failed to parse schema for ${instruction.name}: ${error}`);
+              }
+            }
+            else 
+              schema = null;
+
+            if (schema) {
+              return "Respond in the following JSON format:\n" + 
+              JSON.stringify({ messageType: instruction.name, data: schema }, null, 2) + "\n";
+            }
+            else {
+              return "";
+            }
           }
           else {
             // this should not happen
