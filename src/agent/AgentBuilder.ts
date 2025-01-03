@@ -52,36 +52,36 @@ export class AgentBuilder {
     return this;
   }
 
-  public create(): BaseAgent<ClassificationTypeConfig[], ReActClassifier<ClassificationTypeConfig[]>, ReActPromptTemplate<ClassificationTypeConfig[]>>;
-  public create<
-    C extends AbstractClassifier<any>,
-    P extends IAgentPromptTemplate
-  >(
-    ClassifierClass: new (...args: any[]) => C,
-    PromptTemplateClass: new (...args: any[]) => P
-  ): BaseAgent<any, C, P>;
-  public create<
-    C extends AbstractClassifier<any>,
-    P extends IAgentPromptTemplate
-  >(
-    ClassifierClass?: new (...args: any[]) => C,
-    PromptTemplateClass?: new (...args: any[]) => P
-  ): BaseAgent<any, C | ReActClassifier<any>, P | ReActPromptTemplate<any>> {
+  // Default ReAct implementation
+  public create(): BaseAgent<readonly ClassificationTypeConfig[], ReActClassifier<readonly ClassificationTypeConfig[]>, ReActPromptTemplate<readonly ClassificationTypeConfig[]>>;
+  
+  // Custom implementation with type inference
+  public create<T extends readonly ClassificationTypeConfig[]>(
+    ClassifierClass: new (types: T) => AbstractClassifier<T>,
+    PromptTemplateClass: new (types: T, strategy: InferStrategy) => IAgentPromptTemplate
+  ): BaseAgent<T, AbstractClassifier<T>, IAgentPromptTemplate>;
+  
+  // Implementation
+  public create<T extends readonly ClassificationTypeConfig[]>(
+    ClassifierClass?: new (types: T) => AbstractClassifier<T>,
+    PromptTemplateClass?: new (types: T, strategy: InferStrategy) => IAgentPromptTemplate
+  ) {
     const schemaBuilder = new SchemaBuilder(this.coreConfig.instructions || []);
     const schemaTypes = schemaBuilder.build();
 
     if (!ClassifierClass || !PromptTemplateClass) {
-      return this.build(
+      const agent = this.build(
         this.coreConfig.name,
         schemaTypes,
         ReActClassifier,
         ReActPromptTemplate
-      ) as BaseAgent<any, ReActClassifier<any>, ReActPromptTemplate<any>>;
+      );
+      return agent as unknown as BaseAgent<readonly ClassificationTypeConfig[], ReActClassifier<readonly ClassificationTypeConfig[]>, ReActPromptTemplate<readonly ClassificationTypeConfig[]>>;
     }
 
     return this.build(
       this.coreConfig.name,
-      schemaTypes,
+      schemaTypes as unknown as T,  // Safe because T extends readonly ClassificationTypeConfig[]
       ClassifierClass,
       PromptTemplateClass
     );
