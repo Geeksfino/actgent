@@ -67,21 +67,20 @@ export class AgentBuilder {
     PromptTemplateClass?: new (types: T, strategy: InferStrategy) => IAgentPromptTemplate
   ) {
     const schemaBuilder = new SchemaBuilder(this.coreConfig.instructions || []);
-    const schemaTypes = schemaBuilder.build();
+    const schemaTypes = schemaBuilder.build();  // Returns readonly ClassificationTypeConfig[]
 
     if (!ClassifierClass || !PromptTemplateClass) {
-      const agent = this.build(
+      return this.build(
         this.coreConfig.name,
         schemaTypes,
         ReActClassifier,
         ReActPromptTemplate
       );
-      return agent as unknown as BaseAgent<readonly ClassificationTypeConfig[], ReActClassifier<readonly ClassificationTypeConfig[]>, ReActPromptTemplate<readonly ClassificationTypeConfig[]>>;
     }
 
     return this.build(
       this.coreConfig.name,
-      schemaTypes as unknown as T,  // Safe because T extends readonly ClassificationTypeConfig[]
+      schemaTypes as T,  // Safe assertion since T extends readonly ClassificationTypeConfig[]
       ClassifierClass,
       PromptTemplateClass
     );
