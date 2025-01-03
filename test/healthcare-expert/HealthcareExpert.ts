@@ -14,13 +14,7 @@ const agentConfig = await AgentCoreConfigurator.loadMarkdownConfig(configPath);
 // Load the agent runtime environment from the project root
 const svcConfig = await AgentServiceConfigurator.getAgentConfiguration(__dirname);
 const HealthcareExpert = new AgentBuilder(agentConfig, svcConfig)
-    .create<
-        MultiLevelClassifier<ClassificationTypeConfig[]>,
-        MultiLevelPromptTemplate<ClassificationTypeConfig[]>
-    >(
-        MultiLevelClassifier,
-        MultiLevelPromptTemplate
-    );
+    .create(MultiLevelClassifier, MultiLevelPromptTemplate);
 
 // Register tools
 
