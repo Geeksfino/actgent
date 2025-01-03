@@ -31,13 +31,7 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
       throw new Error("Failed to categorize response");
     }
 
-    return {
-      isToolCall: categorized.type === ResponseType.TOOL_CALL,
-      instruction: this.tryExtractMessageType(JSON.stringify(categorized.content)),
-      parsedLLMResponse: categorized.content,
-      answer: categorized.answer,
-      validationResult: categorized.validationResult
-    };
+    return null as any;
   }
 
   protected categorizeLLMResponse(
