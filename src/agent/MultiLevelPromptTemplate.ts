@@ -54,7 +54,7 @@ Your capabilities: {capabilities}
     }
     else if (msg.metadata?.sender === "assistant") {
       const m = JSON.parse(msg.payload.input);
-      logger.debug(`From LLM: Top-level intent is: ${msg.payload.input}`);
+      logger.debug(`From assistant: Top-level intent is: ${msg.payload.input}`);
       if (m.data.top_level_intent === "ACTION") {
         const second_level_intent = m.data.second_level_intent;
         if (second_level_intent) {
@@ -80,15 +80,16 @@ Your capabilities: {capabilities}
       }
     }
     else if (msg.metadata?.sender === "agent") {
-      const data = JSON.parse(msg.payload.input);
-      const instructionName = data.instructionName;
+      const m = JSON.parse(msg.payload.input);
+      logger.debug(`From agent: Top-level intent is: ${msg.payload.input}`);
+      const instructionName = m.data.second_level_intent;
       logger.debug(`Instruction name found: ${instructionName}`);
       if (instructionName) {
         return base_prompt + "\n" + `[Agent] has executed ${instructionName} with results: ${msg.payload.input}`;
       }
       else {
         // this should not happen
-        logger.warning(`Instruction not found: ${data.instruction}`);
+        logger.warning(`Instruction not found: ${m.data.second_level_intent}`);
         return base_prompt;
       }
     }
@@ -99,7 +100,7 @@ Your capabilities: {capabilities}
 
   async getAssistantPrompt(sessionContext: SessionContext, memory: Memory): Promise<string> {
     const msg = sessionContext.getLatestMessage();
-    if (msg.metadata?.sender === "assistant") {
+    if (msg.metadata?.sender === "agent") {
       const m = JSON.parse(msg.payload.input);
       if (m.data.top_level_intent === "ACTION") {
         const second_level_intent = m.data.second_level_intent;
