@@ -44,7 +44,7 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
   public handleLLMResponse(
     response: string,
     session: Session
-  ): void {
+  ): ResponseType {
     try {
       // Try the new categorization first
       const categorizedResponse = this.categorizeLLMResponse(response, {
@@ -98,7 +98,7 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
             // Fall through to legacy parsing
             break;
         }
-        return;
+        return categorizedResponse.type;
       }
 
       // Fall back to legacy parsing if categorization returns null
@@ -111,15 +111,19 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
             
       if (isToolCall) {
         session.triggerToolCallsHandlers(parsedLLMResponse);
+        return ResponseType.TOOL_CALL;
       } else if (session.core.hasToolForCurrentInstruction(instruction)) {
         session.triggerEventHandlers(parsedLLMResponse);
         session.triggerConversationHandlers(answer);
+        return ResponseType.EVENT;
       } else {
         session.triggerConversationHandlers(parsedLLMResponse);
         session.triggerConversationHandlers(answer);
+        return ResponseType.CONVERSATION;
       }
     } catch (error) {
       this.handleParsingError(error, response, session);
+      return ResponseType.EXCEPTION;
     }
   }
 
