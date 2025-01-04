@@ -213,7 +213,7 @@ export abstract class BaseAgent<
     try {
       // Pass through the content.data without assuming its structure
       const routedData = message.content?.data || message;
-      session.chat(JSON.stringify(routedData), "assistant").catch(error => {
+      session.chat(JSON.stringify(routedData), "agent").catch(error => {
         logger.error("Error sending routing message back to LLM:", error);
       });
     } catch (error) {
