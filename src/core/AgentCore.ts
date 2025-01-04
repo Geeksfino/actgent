@@ -11,13 +11,11 @@ import { OpenAI } from "openai";
 import { IAgentPromptTemplate } from "./IPromptTemplate";
 import { Session } from "./Session";
 import { SessionContext } from "./SessionContext";
-import fs from "fs";
-import path from "path";
 import { Subject } from "rxjs";
 import { IClassifier } from "./IClassifier";
 import { logger, LogLevel } from './Logger';
-import { InferContextBuilder } from "./InferContextBuilder";
 import { getEventEmitter } from "./observability/AgentEventEmitter";
+import { ResponseType } from "./ResponseTypes";
 
 interface StorageConfig {
   shortTerm?: MemoryStorage<any>;
@@ -258,10 +256,13 @@ export class AgentCore {
     emitter.setCurrentSession(message.sessionId);
 
     // Log the input message
-    logger.debug(`Input: ${message.payload.input}`);
+    logger.debug(`Fetched from inbox: ${message.payload.input}`);
 
+    logger.debug(`Sender: ${message.metadata?.sender}`);
     sessionContext.addMessage(message);
+
     await this.memory.processMessage(message, sessionContext);
+
 
     const response = await this.promptLLM(message);
 
@@ -270,14 +271,19 @@ export class AgentCore {
     logger.debug(`Cleaned response: ${cleanedResponse}`);
     const extractedResponse = this.promptTemplate.extractFromLLMResponse(cleanedResponse);
     const session = sessionContext.getSession();
-    const responseMessage = session.createMessage(extractedResponse, "assistant");
-    sessionContext.addMessage(responseMessage);
+    //const responseMessage = session.createMessage(extractedResponse, "assistant");
+    //sessionContext.addMessage(responseMessage);
 
-    this.handleLLMResponse(cleanedResponse, session);
+    const responseType =this.classifier.handleLLMResponse(cleanedResponse, session);
+    logger.debug(`Response classified as: ${responseType}`);
 
-    // Clear session context from event emitter after processing
-    // maybe not needed
-    // emitter.setCurrentSession(undefined);
+    if (responseType === ResponseType.CONVERSATION || responseType === ResponseType.EVENT) {
+      const conversationMessage = session.createMessage(extractedResponse, "assistant");
+      sessionContext.addMessage(conversationMessage);
+      await this.memory.processMessage(conversationMessage, sessionContext);
+    } else if (responseType === ResponseType.TOOL_CALL) {
+      // not sure what to do here yet
+    }
   }
 
   public async getOrCreateSessionContext(message: Message): Promise<Session> {
@@ -326,8 +332,9 @@ export class AgentCore {
         )
         .map((tool) => tool.getFunctionDescription());
 
+      const messageRecords = await this.memory.getMessageRecords();
       const history: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-        ...sessionContext.getMessageRecords().map(({ role, content }) => ({ role, content })),
+        ...messageRecords.map(({ role, content }) => ({ role, content })),
       ];
   
       // Pretty print the history
