@@ -39,7 +39,9 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
     validationOptions: ValidationOptions
   ): ParsedLLMResponse<T> | null {
     try {
+      logger.debug("Categorizing LLM raw response===>");
       const parsed = JSON.parse(response);
+      logger.debug("Categorizing LLM response:", parsed);
 
       // Case 1: Multi-level intent format
       if (parsed.top_level_intent) {
@@ -51,6 +53,7 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
             throw new Error("Invalid CONVERSATION response: response field is missing");
           }
 
+          logger.debug("Categorized LLM response as CONVERSATION");
           return {
             type: ResponseType.CONVERSATION,
             content: {
@@ -74,6 +77,7 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
             throw new Error("Invalid ACTION response: second_level_intent is missing");
           }
 
+          logger.debug("Categorized LLM response as ACTION");
           return {
             type: ResponseType.ROUTING,
             content: {
@@ -102,6 +106,7 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
           throw new Error("Invalid tool_calls format: missing function data");
         }
 
+        logger.debug("Categorized LLM response as TOOL_CALL");
         return {
           type: ResponseType.TOOL_CALL,
           content: {
@@ -129,6 +134,7 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
           (type: ClassificationTypeConfig) => type.name === parsed.messageType
         );
         // No need to throw error if no matching schema - just return EVENT type
+        logger.debug("Categorized LLM response as structured output");
         return {
           type: ResponseType.EVENT,
           content: parsed as InferClassificationUnion<T>,
@@ -141,23 +147,24 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
       }
 
       // If we reach here, the response format is unrecognized
-      throw new Error("Unrecognized response format");
-
-    } catch (error) {
-      logger.error("Error parsing LLM response:", error);
+      logger.error("Unrecognized LLM response format:", response);
       return {
         type: ResponseType.EXCEPTION,
         content: {
           messageType: 'LLM_RESPONSE_PARSE_ERROR',
-          error: error instanceof Error ? error.message : String(error)
+          error: "Unrecognized response format"
         } as InferClassificationUnion<T>,
         validationResult: {
           isValid: false,
-          error: error instanceof Error ? error.message : String(error),
+          error: "Unrecognized response format",
           originalContent: response,
           data: null
         }
       };
+
+    } catch (error) {
+      logger.error("Error parsing LLM response:", error);
+      return null;
     }
   }
 }
