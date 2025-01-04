@@ -4,6 +4,9 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "workspaces": [
+    "."
+  ],
   "exports": {
     ".": {
       "import": "./dist/index.js",
@@ -40,11 +43,9 @@
     "dist/**/*"
   ],
   "scripts": {
-    "build": "BUN_MAX_MEMORY=16GB bun build ./src/index.ts ./src/**/*.ts --target=node --outdir=dist --sourcemap=external && bun run build:assets && bun run build:test",
+    "build": "NODE_OPTIONS=\"--max-old-space-size=8192\" bun tsc && bun run build:assets",
     "build:assets": "bun cpx \"src/helpers/genesis/**/*.{md,json,yaml}\" dist/helpers/genesis/ --clean && bun cpx \"src/**/*.json\" dist/",
-    "build:test": "BUN_MAX_MEMORY=16GB bun build ./test/**/*.ts --target=node --outdir=dist/test --sourcemap=external --external '*' && bun run build:copy-modules",
-    "build:copy-modules": "bun cpx \"src/**/*.{ts,js,json}\" dist/",
-    "build:node": "NODE_OPTIONS=\"--max-old-space-size=8192\" bun tsc && bun cpx \"src/helpers/genesis/**/*.{md,json,yaml}\" dist/helpers/genesis/",
+    "build:test": "NODE_OPTIONS=\"--max-old-space-size=8192\" bun tsc -p test/tsconfig.json",
     "watch:ts": "bun tsc-watch",
     "watch:resources": "bun cpx \"src/helpers/genesis/**/*.{md,json,yaml}\" dist/helpers/genesis/ --watch",
     "watch": "bun concurrently \"bun run watch:ts\" \"bun run watch:resources\"",
@@ -52,7 +53,6 @@
     "rebuild": "bun run clean && bun run build && bun link @finogeeks/actgent"
   },
   "dependencies": {
-    "@finogeeks/actgent": "workspace:*",
     "@grpc/grpc-js": "^1.12.4",
     "@tauri-apps/api": "^2.1.1",
     "@tauri-apps/plugin-fs": "^2.2.0",
