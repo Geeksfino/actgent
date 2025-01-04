@@ -2,6 +2,13 @@ import { SessionContext } from "./SessionContext";
 import { Message } from "./Message";
 import { MemoryManager } from "./MemoryManager";
 
+// Define interface for message records (moved from SessionContext)
+export interface MessageRecord {
+  role: "system" | "user" | "assistant";
+  content: string;
+  timestamp?: string;
+}
+
 // Define an interface for memory storage
 export interface MemoryStorage<T> {
   add(key: string, value: T): Promise<void>;
@@ -18,6 +25,7 @@ export interface Memory {
   getRecentMessages(): Promise<Message[]>;
   getSystemContext(): Promise<Record<string, any>>;
   getConversationHistory(): Promise<Message[]>;
+  getMessageRecords(limit?: number): Promise<MessageRecord[]>;  // New method
 }
 
 // Default implementation of AgentMemory
@@ -73,6 +81,8 @@ export class DefaultAgentMemory implements Memory {
     const longTermMemory = this.memoryManager.getLongTermMemory();
     return longTermMemory.search('conversation_history');
   }
-}
 
-// MemoryManager and other components will be implemented in separate files
+  async getMessageRecords(limit: number = 10): Promise<MessageRecord[]> {
+    return this.memoryManager.getShortTermMemory().getMessageRecords(limit);
+  }
+}
