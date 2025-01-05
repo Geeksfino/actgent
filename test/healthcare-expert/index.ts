@@ -23,11 +23,11 @@ const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout
 });
-
+HealthcareExpert.run(loggerConfig);
 HealthcareExpert.registerStreamCallback((delta: string) => {
     logger.info(delta);
 });
-HealthcareExpert.run(loggerConfig);
+
 
 // Add prompt configuration
 const defaultPrompt = "You: ";
@@ -63,7 +63,7 @@ async function handleInitialInput(): Promise<string> {
 function setupResponseHandler(session: any) {
     session.onEvent((response: any) => {
         if (typeof response === 'string') {
-            console.log(`${HealthcareExpert.getName()}:`, response);
+            console.log(`\n${HealthcareExpert.getName()}:`, response);
         } else if (typeof response === 'object') {
             if ('clarification' in response) {
                 const { questions } = response.clarification;
@@ -97,7 +97,9 @@ function setupResponseHandler(session: any) {
     });
 
     session.onConversation((response: any) => {
-        console.log(`${HealthcareExpert.getName()}:`, JSON.stringify(response, null, 2));
+        process.stdout.write(`\n${HealthcareExpert.getName()}:`);
+        process.stdout.write(JSON.stringify(response, null, 2));
+        process.stdout.write("\n\nYou: ");
     });
 }
 
