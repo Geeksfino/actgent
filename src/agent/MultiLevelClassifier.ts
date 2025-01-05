@@ -56,11 +56,11 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
           logger.debug("Categorized LLM response as CONVERSATION");
           return {
             type: ResponseType.CONVERSATION,
-            content: {
+            structuredData: {
               messageType: 'CONVERSATION',
               response: parsed.response
             } as InferClassificationUnion<T>,
-            answer: parsed.response,
+            textData: parsed.response,
             validationResult: { 
               isValid: true, 
               data: {
@@ -80,12 +80,12 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
           logger.debug("Categorized LLM response as ACTION");
           return {
             type: ResponseType.ROUTING,
-            content: {
+            structuredData: {
               messageType: 'ROUTE',
               action: parsed.second_level_intent,
               data: parsed
             } as InferClassificationUnion<T>,
-            answer: parsed.response,
+            textData: parsed.response,
             validationResult: { 
               isValid: true, 
               data: {
@@ -109,12 +109,12 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
         logger.debug("Categorized LLM response as TOOL_CALL");
         return {
           type: ResponseType.TOOL_CALL,
-          content: {
+          structuredData: {
             messageType: 'TOOL_INVOCATION',
             toolName: toolCall.function.name,
             arguments: JSON.parse(toolCall.function.arguments)
           } as InferClassificationUnion<T>,
-          answer: parsed.response_description,
+          textData: parsed.response_description,
           validationResult: { 
             isValid: true, 
             data: {
@@ -137,8 +137,8 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
         logger.debug("Categorized LLM response as structured output");
         return {
           type: ResponseType.EVENT,
-          content: parsed as InferClassificationUnion<T>,
-          answer: undefined,
+          structuredData: parsed as InferClassificationUnion<T>,
+          textData: undefined,
           validationResult: {
             isValid: true,
             data: parsed as InferClassificationUnion<T>
@@ -150,7 +150,7 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
       logger.error("Unrecognized LLM response format:", response);
       return {
         type: ResponseType.EXCEPTION,
-        content: {
+        structuredData: {
           messageType: 'LLM_RESPONSE_PARSE_ERROR',
           error: "Unrecognized response format"
         } as InferClassificationUnion<T>,

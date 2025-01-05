@@ -36,7 +36,7 @@ Your capabilities: {capabilities}
     return this.classificationTypes;
   }
 
-  extractFromLLMResponse(response: string): string {
+  extractDataFromLLMResponse(response: string): string {
     return response;
   }
 

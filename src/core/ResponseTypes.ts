@@ -14,8 +14,8 @@ export enum ResponseType {
 export interface ParsedLLMResponse<T extends readonly ClassificationTypeConfig[]> {
   type: ResponseType;
   instruction?: string;
-  content: InferClassificationUnion<T>;
-  answer?: string;
+  structuredData: InferClassificationUnion<T>;
+  textData?: string;
   validationResult: ValidationResult<InferClassificationUnion<T>>;
   metadata?: Record<string, any>;
   

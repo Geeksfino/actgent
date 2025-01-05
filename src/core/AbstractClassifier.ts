@@ -57,40 +57,40 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
         // Route response based on type
         switch (categorizedResponse.type) {
           case ResponseType.TOOL_CALL:
-            session.triggerToolCallsHandlers(categorizedResponse.content);
-            if (categorizedResponse.answer) {
-              session.triggerConversationHandlers(categorizedResponse.answer);
+            session.triggerToolCallsHandlers(categorizedResponse.structuredData);
+            if (categorizedResponse.textData) {
+              session.triggerConversationHandlers(categorizedResponse.textData);
             }
             break;
 
           case ResponseType.EVENT:
-            if (session.core.hasToolForCurrentInstruction(categorizedResponse.content.messageType)) {
-              session.triggerEventHandlers(categorizedResponse.content);
-              if (categorizedResponse.answer) {
-                session.triggerConversationHandlers(categorizedResponse.answer);
+            if (session.core.hasToolForCurrentInstruction(categorizedResponse.structuredData.messageType)) {
+              session.triggerEventHandlers(categorizedResponse.structuredData);
+              if (categorizedResponse.textData) {
+                session.triggerConversationHandlers(categorizedResponse.textData);
               }
             } else {
               // If no tool exists, treat both content and answer as conversation
-              session.triggerConversationHandlers(categorizedResponse.content);
-              if (categorizedResponse.answer) {
-                session.triggerConversationHandlers(categorizedResponse.answer);
+              session.triggerConversationHandlers(categorizedResponse.structuredData);
+              if (categorizedResponse.textData) {
+                session.triggerConversationHandlers(categorizedResponse.textData);
               }
             }
             break;
 
           case ResponseType.CONVERSATION:
-            session.triggerConversationHandlers(categorizedResponse.content);
+            session.triggerConversationHandlers(categorizedResponse.structuredData);
             break;
 
           case ResponseType.ROUTING:
-            session.triggerRoutingHandlers(categorizedResponse.content);
-            if (categorizedResponse.answer) {
-              session.triggerConversationHandlers(categorizedResponse.answer);
+            session.triggerRoutingHandlers(categorizedResponse.structuredData);
+            if (categorizedResponse.textData) {
+              session.triggerConversationHandlers(categorizedResponse.textData);
             }
             break;
 
           case ResponseType.EXCEPTION:
-            session.triggerExceptionHandlers(categorizedResponse.content);
+            session.triggerExceptionHandlers(categorizedResponse.structuredData);
             break;
 
           default:

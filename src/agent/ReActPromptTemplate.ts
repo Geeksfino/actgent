@@ -366,7 +366,7 @@ The final prompt you output should adhere to the following structure below. Do n
 
     return { types, schemas };
   }
-  extractFromLLMResponse(response: string): string {
+  extractDataFromLLMResponse(response: string): string {
     try {
       const parsed = JSON.parse(response);
 

@@ -269,7 +269,7 @@ export class AgentCore {
     // Handle the response based on message type
     const cleanedResponse = this.cleanLLMResponse(response);
     logger.debug(`Cleaned response: ${cleanedResponse}`);
-    const extractedResponse = this.promptTemplate.extractFromLLMResponse(cleanedResponse);
+    const extractedResponse = this.promptTemplate.extractDataFromLLMResponse(cleanedResponse);
     const session = sessionContext.getSession();
     //const responseMessage = session.createMessage(extractedResponse, "assistant");
     //sessionContext.addMessage(responseMessage);

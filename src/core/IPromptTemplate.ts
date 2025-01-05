@@ -9,7 +9,7 @@ export interface IAgentPromptTemplate {
   getMessageClassificationPrompt(message: string): string;
   getMetaPrompt(): string;
   getClassificationTypes(): ReadonlyArray<ClassificationTypeConfig>;
-  extractFromLLMResponse(response: string): string;
+  extractDataFromLLMResponse(response: string): string;
   debugPrompt(
     promptManager: PromptManager,
     type: "system" | "assistant",
