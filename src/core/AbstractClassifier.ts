@@ -79,7 +79,7 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
             break;
 
           case ResponseType.CONVERSATION:
-            session.triggerConversationHandlers(categorizedResponse.structuredData);
+            session.triggerConversationHandlers(categorizedResponse.textData);
             break;
 
           case ResponseType.ROUTING:
