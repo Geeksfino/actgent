@@ -183,13 +183,13 @@ export abstract class BaseAgent<
       const formattedResponse = `[${result.toolName || 'Tool'} Result]: ${content}`;
 
       const msg = `[Agent ${this.core.name}] got back ${formattedResponse}. Use this result to infer response to the user.`;
-      session.chat(msg, "agent").catch(error => {
+      session.chat(msg, "agent", { tool_call: true }).catch(error => {
         logger.error("Error sending tool result back to LLM:", error);
       });
     }
     else {
       const message = `Tool execution failed: ${result.error}. Please determine the next action to take or respond to the user with explanation.`;
-      session.chat(message, "agent").catch(error => {
+      session.chat(message, "agent", { tool_call: true }).catch(error => {
         logger.error("Error sending tool result back to LLM:", error);
       });
     }
@@ -213,12 +213,12 @@ export abstract class BaseAgent<
     try {
       // Pass through the content.data without assuming its structure
       const routedData = message.content?.data || message;
-      session.chat(JSON.stringify(routedData), "agent").catch(error => {
+      session.chat(JSON.stringify(routedData), "agent", { routed: true }).catch(error => {
         logger.error("Error sending routing message back to LLM:", error);
       });
     } catch (error) {
       const errorMsg = `Message routing failed: ${error instanceof Error ? error.message : String(error)}. Please handle this error appropriately.`;
-      session.chat(errorMsg, "agent").catch(err => {
+      session.chat(errorMsg, "agent", { routed: true }).catch(err => {
         logger.error("Error sending routing error back to LLM:", err);
       });
     }
