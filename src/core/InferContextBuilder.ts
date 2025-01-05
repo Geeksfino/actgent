@@ -18,15 +18,6 @@ export class InferContextBuilder {
     return this;
   }
 
-  // TODO: this is not correct. conversation history is not the same as the history in the session context
-  async withConversationHistory(): Promise<InferContextBuilder> {
-    if (!this.context.metadata) {
-      this.context.metadata = {};
-    }
-    this.context.metadata.conversationHistory = this.sessionContext.getHistory();
-    return this;
-  }
-
   async withSystemContext(): Promise<InferContextBuilder> {
     this.context.systemContext = await this.memory.getSystemContext();
     return this;
@@ -51,4 +42,4 @@ export class InferContextBuilder {
   build(): InferContext {
     return this.context as InferContext;
   }
-} 
+}
