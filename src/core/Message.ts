@@ -14,12 +14,12 @@ class Message {
     input: string;
     inputType: PayloadType;
     parameters: Record<string, any>;
-    context: Record<string, any>;
   };
   public metadata?: {
     sender: string;
     timestamp: string;
     priority: string;
+    context: Record<string, any>;
     correlationId: string | null;
   };
 
@@ -41,12 +41,12 @@ class Message {
       input: content,
       inputType: inputType as PayloadType,
       parameters: parameters,
-      context: context,
     };
     this.metadata = {
       sender: sender,
       timestamp: new Date().toISOString(),
       priority: priority,
+      context: context,
       correlationId: correlationId,
     };
   }
