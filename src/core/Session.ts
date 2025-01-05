@@ -39,14 +39,21 @@ export class Session {
         logger.debug('Session created:', this.sessionId);
     }
 
-    public createMessage(message: string, sender: string = this.owner): Message {
-        const msg = new Message(this.sessionId, message, PayloadType.TEXT, {}, {}, sender);
-        //this.core.getSessionContext(this.sessionId).addMessage(msg);  
+    // Overloaded method signatures for createMessage
+    public createMessage(message: string): Message;
+    public createMessage(message: string, sender?: string): Message;
+    public createMessage(message: string, sender?: string, context?: Record<string, any>): Message;
+    public createMessage(message: string, sender: string = this.owner, context: Record<string, any> = {}): Message {
+        const msg = new Message(this.sessionId, message, PayloadType.TEXT, {}, context, sender);
         return msg;
     }
 
-    public async chat(message: string, sender: string = this.owner): Promise<void> {
-        const msg = this.createMessage(message, sender);
+    // Overloaded method signatures for chat
+    public chat(message: string): Promise<void>;
+    public chat(message: string, sender?: string): Promise<void>;
+    public chat(message: string, sender?: string, context?: Record<string, any>): Promise<void>;
+    public async chat(message: string, sender: string = this.owner, context: Record<string, any> = {}): Promise<void> {
+        const msg = this.createMessage(message, sender, context);
         this.core.receive(msg);
     }
 
