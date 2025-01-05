@@ -9,31 +9,10 @@ import { z } from "zod";
 import { createRuntime } from "../../runtime";
 import { RuntimeType } from "../../runtime/types";
 import { UserPreferenceStrategy } from "../../agent/ReActModeStrategy";
+import { BaseAgent } from "../../agent/BaseAgent";
 
-const runtime = createRuntime();
-
-// Load the agent configuration from a markdown file
-let configPath: string;
-if (runtime.runtimeType === RuntimeType.NODE) {
-  const moduleDir = runtime.path.dirname(require.resolve('./AgentSmith'));
-  configPath = runtime.path.join(moduleDir, 'brain.md');
-} else {
-  // Tauri/browser environment
-  const moduleDir = runtime.path.dirname(new URL(import.meta.url).pathname);
-  configPath = runtime.path.join(moduleDir, 'brain.md');
-}
-
-const agentConfig = await AgentCoreConfigurator.loadMarkdownConfig(configPath);
-
-const currentDir = await runtime.process.cwd();
-const svcConfig = await AgentServiceConfigurator.getAgentConfiguration("src/helpers/genesis");
-const AgentSmith = new AgentBuilder(agentConfig, svcConfig)
-  .withPromptStrategy(new UserPreferenceStrategy('react'))
-  .withStreamObservability()
-  .create();
-
-// Register the AgentGenerator tool
-AgentSmith.registerTool(new AgentGenerator()); 
+// Singleton instance for genesis.ts
+let agentSmithInstance: BaseAgent<any, any, any> | null = null;
 
 interface ToolInfo {
     name: string;
@@ -118,12 +97,56 @@ function printToolInfo(tools: ToolInfo[]) {
   });
 }
 
-// Get available tools
-const AvailableTools = Object.entries(BuiltInTools as Record<string, unknown>)
+// Get available tools info without creating instances
+export const AvailableTools = Object.entries(BuiltInTools as Record<string, unknown>)
   .filter(([_, value]) => isToolConstructor(value))
   .map(([name, ToolClass]) => getToolInfo(name, ToolClass as ToolConstructor))
   .filter((info): info is ToolInfo => info !== null);
 
-//printToolInfo(AvailableTools);
+// Function to create AgentSmith instance
+async function createAgentSmithInstance(): Promise<BaseAgent<any, any, any>> {
+  const runtime = createRuntime();
+  
+  // Load the agent configuration from a markdown file
+  let configPath: string;
+  if (runtime.runtimeType === RuntimeType.NODE) {
+    const moduleDir = runtime.path.dirname(require.resolve('./AgentSmith'));
+    configPath = runtime.path.join(moduleDir, 'brain.md');
+  } else {
+    // Tauri/browser environment
+    const moduleDir = runtime.path.dirname(new URL(import.meta.url).pathname);
+    configPath = runtime.path.join(moduleDir, 'brain.md');
+  }
 
-export { AgentSmith, AvailableTools };
+  const agentConfig = await AgentCoreConfigurator.loadMarkdownConfig(configPath);
+  const svcConfig = await AgentServiceConfigurator.getAgentConfiguration("src/helpers/genesis");
+  
+  const agent = new AgentBuilder(agentConfig, svcConfig)
+    .withPromptStrategy(new UserPreferenceStrategy('react'))
+    .withStreamObservability()
+    .create();
+
+  // Register the AgentGenerator tool
+  agent.registerTool(new AgentGenerator());
+  
+  return agent;
+}
+
+// Get or create the AgentSmith instance (singleton pattern)
+export async function getAgentSmith(): Promise<BaseAgent<any, any, any>> {
+  if (!agentSmithInstance) {
+    agentSmithInstance = await createAgentSmithInstance();
+  }
+  return agentSmithInstance;
+}
+
+// Export a proxy object that lazily initializes AgentSmith
+// This maintains compatibility with genesis.ts without initializing at module load
+export const AgentSmith = new Proxy({} as BaseAgent<any, any, any>, {
+  get: (target, prop) => {
+    return async (...args: any[]) => {
+      const instance = await getAgentSmith();
+      return (instance as any)[prop](...args);
+    };
+  }
+});

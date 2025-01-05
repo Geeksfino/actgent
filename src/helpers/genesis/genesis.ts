@@ -1,5 +1,5 @@
 import { LoggingConfig } from "../../core/configs";
-import { AgentSmith, AvailableTools } from './AgentSmith';
+import { AgentSmith, AvailableTools, getAgentSmith } from './AgentSmith';
 import { Logger, logger, LogLevel} from '../../core/Logger';
 import readline from 'readline';
 import { createRuntime } from "../../runtime";
@@ -22,19 +22,23 @@ const rl = readline.createInterface({
   output: process.stdout
 });
 
-AgentSmith.registerStreamCallback((delta: string) => {
-  logger.info(delta);
-});
-
 // Initialize asynchronously
 async function initializeAgent() {
   const cwd = await runtime.process.cwd();
   const tmpdir = await runtime.os.tmpdir();
 
+  // Get AgentSmith instance first
+  const agent = await getAgentSmith();
+  
   const loggerConfig: LoggingConfig = {
-    destination: runtime.path.join(cwd, `${AgentSmith.getName()}.log`)
+    destination: runtime.path.join(cwd, `${agent.getName()}.log`)
   };
   logger.setLevel(options.logLevel.toLowerCase() as LogLevel);
+
+  // Register stream callback
+  agent.registerStreamCallback((delta: string) => {
+    logger.info(delta);
+  });
 
   // Determine agents directory - use command line arg if provided, otherwise default
   const agentsDir = options.agentsDir 
@@ -48,7 +52,7 @@ async function initializeAgent() {
   await adminService.start();
   logger.info('AdminService started successfully');
 
-  const executionContext = AgentSmith.getExecutionContext();
+  const executionContext = agent.getExecutionContext();
   executionContext.environment = {
     outputDirectory: agentsDir,
     tempDirectory: runtime.path.join(tmpdir, "generated-agents-temp")
@@ -56,7 +60,7 @@ async function initializeAgent() {
   executionContext.addToolPreference("AgentGenerator", {
     agentName: ''  
   });
-  AgentSmith.run(loggerConfig);
+  agent.run(loggerConfig);
 
   // Handle cleanup on process exit
   process.on('SIGINT', async () => {
@@ -238,7 +242,8 @@ async function chatLoop(): Promise<void> {
         }
       } while (agentName.trim() === '');
       
-      const executionContext = AgentSmith.getExecutionContext();
+      const agent = await getAgentSmith();
+      const executionContext = agent.getExecutionContext();
       executionContext.addToolPreference("AgentGenerator", {
         agentName: agentName
       });
@@ -260,13 +265,13 @@ async function chatLoop(): Promise<void> {
         }
 
         if (enhanceConfirmation.toLowerCase() === 'yes') {
-          finalPrompt = await AgentSmith.enhancePrompt(agentDescription);
+          finalPrompt = await agent.enhancePrompt(agentDescription);
           console.log(`Enhanced description: ${finalPrompt}`);
         } else {
           console.log('Proceeding with original description.');
         }
       } else {
-        finalPrompt = await AgentSmith.enhancePrompt(agentDescription);
+        finalPrompt = await agent.enhancePrompt(agentDescription);
         console.log(`Enhanced description: ${finalPrompt}`);
       }
       
@@ -318,12 +323,13 @@ async function chatLoop(): Promise<void> {
     }
     
     // Create session and set up response handler
-    const session = await AgentSmith.createSession("user", description);
+    const agent = await getAgentSmith();
+    const session = await agent.createSession("user", description);
     session.onEvent((response: string | object) => {
       if (typeof response === 'string') {
-        console.log(`${AgentSmith.getName()}:`, response);
+        console.log(`${agent.getName()}:`, response);
       } else {
-        console.log(`${AgentSmith.getName()}:`, JSON.stringify(response, null, 2));
+        console.log(`${agent.getName()}:`, JSON.stringify(response, null, 2));
       }
     });
 
@@ -335,7 +341,7 @@ async function chatLoop(): Promise<void> {
       if (userInput.toLowerCase() === '/exit') {
         console.log("Thank you for using AgentSmith. Shutting down...");
         try {
-          await AgentSmith.shutdown();
+          await agent.shutdown();
           rl.close();
         } catch (error) {
           console.error("Error during shutdown:", error);
