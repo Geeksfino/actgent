@@ -269,17 +269,35 @@ export class AgentCore {
     // Handle the response based on message type
     const cleanedResponse = this.cleanLLMResponse(response);
     logger.debug(`Cleaned response: ${cleanedResponse}`);
-    const extractedResponse = this.promptTemplate.extractDataFromLLMResponse(cleanedResponse);
     const session = sessionContext.getSession();
     //const responseMessage = session.createMessage(extractedResponse, "assistant");
     //sessionContext.addMessage(responseMessage);
 
+    /*
+     * Inside the handleLLMResponse call, various handlers are triggered based on the response type.
+     * Among them, toolCallHandlers and routingHandlers could be triggered, in which case intermediate
+     * responses as results of tool execution or message routing are wrapped into new Message objects
+     * and sent back to the inbox for next turn of processing.
+    */
     const responseType =this.classifier.handleLLMResponse(cleanedResponse, session);
     logger.debug(`Response classified as: ${responseType}`);
 
+    /*
+     * Only responses meant to be sent back to the user are added to memory for context.
+     */
     if (responseType === ResponseType.CONVERSATION || responseType === ResponseType.EVENT) {
-      const conversationMessage = session.createMessage(extractedResponse, "assistant");
-      sessionContext.addMessage(conversationMessage);
+      // Extract data from LLM response. A prompt template might be instructing the LLM to
+      // respond with a structured JSON object. But the object could contain various fields
+      // that are for processing support purposes. These fields could be useless or even 
+      // harmful to be used as context to prompt LLM. So before adding them to memory, 
+      // we need to 'unwrap' or extract the data from the LLM response. But the extraction
+      // process is different for each prompt template, so we need to call a method in the
+      // prompt template to do the extraction. A prompt template decides how the LLM
+      // response is structured and so it should also know how to extract the data from it.
+      const extractedData = this.promptTemplate.extractDataFromLLMResponse(cleanedResponse);
+      logger.debug(`AgentCore: extractedDataFromLLMResponse: ${extractedData}`);
+      const conversationMessage = session.createMessage(extractedData, "assistant");
+      //sessionContext.addMessage(conversationMessage);
       await this.memory.processMessage(conversationMessage, sessionContext);
     } else if (responseType === ResponseType.TOOL_CALL) {
       // not sure what to do here yet
