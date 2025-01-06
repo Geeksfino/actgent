@@ -43,9 +43,9 @@
     "dist/**/*"
   ],
   "scripts": {
-    "build": "NODE_OPTIONS=\"--max-old-space-size=8192\" bun tsc && bun run build:assets",
+    "build": "bun tsc && bun run build:assets",
     "build:assets": "bun cpx \"src/helpers/genesis/**/*.{md,json,yaml}\" dist/helpers/genesis/ --clean && bun cpx \"src/**/*.json\" dist/",
-    "build:test": "NODE_OPTIONS=\"--max-old-space-size=8192\" bun tsc -p test/tsconfig.json",
+    "build:test": "bun tsc -p test/tsconfig.json",
     "watch:ts": "bun tsc-watch",
     "watch:resources": "bun cpx \"src/helpers/genesis/**/*.{md,json,yaml}\" dist/helpers/genesis/ --watch",
     "watch": "bun concurrently \"bun run watch:ts\" \"bun run watch:resources\"",
