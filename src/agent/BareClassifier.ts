@@ -23,14 +23,12 @@ export class BareClassifier<T extends readonly ClassificationTypeConfig[]> exten
     */
 
   protected parseLLMResponse(
-    response: string,
-    validationOptions: ValidationOptions
+    response: string
   ): {
     isToolCall: boolean;
     instruction: string | undefined;
     parsedLLMResponse: InferClassificationUnion<T>;
     answer: string | undefined;
-    validationResult: ValidationResult<InferClassificationUnion<T>>;
   } {
     try {
       // For bare classifier, treat all responses as direct answers
@@ -44,11 +42,7 @@ export class BareClassifier<T extends readonly ClassificationTypeConfig[]> exten
         isToolCall: false,
         instruction: firstType.name,
         parsedLLMResponse: parsed,
-        answer: response,
-        validationResult: {
-          isValid: true,
-          data: parsed
-        }
+        answer: response
       };
     } catch (error) {
       logger.error("Error parsing LLM response:", error);

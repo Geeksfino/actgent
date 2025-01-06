@@ -10,14 +10,12 @@ export class ReActClassifier<T extends readonly ClassificationTypeConfig[]> exte
   }
 
   protected parseLLMResponse(
-    response: string,
-    validationOptions: ValidationOptions
+    response: string
   ): {
     isToolCall: boolean;
     instruction: string | undefined;
     parsedLLMResponse: InferClassificationUnion<T>;
     answer: string | undefined;
-    validationResult: ValidationResult<InferClassificationUnion<T>>;
   } {
     try {
       const parsed = JSON.parse(response);
@@ -34,8 +32,7 @@ export class ReActClassifier<T extends readonly ClassificationTypeConfig[]> exte
           isToolCall: true,
           instruction: this.tryExtractMessageType(JSON.stringify(toolResponse)),
           parsedLLMResponse: toolResponse as InferClassificationUnion<T>,
-          answer: undefined,
-          validationResult: { isValid: true, data: toolResponse as InferClassificationUnion<T> } 
+          answer: undefined
         };
       }
 
@@ -65,12 +62,6 @@ export class ReActClassifier<T extends readonly ClassificationTypeConfig[]> exte
           instruction: this.tryExtractMessageType(JSON.stringify(content)),
           parsedLLMResponse: content as InferClassificationUnion<T>,
           answer: parsed.primary_action.response_description,
-          validationResult: {
-            isValid: false,
-            error: `Response content does not match any defined schema types. Expected one of: ${this.schemaTypes.map(t => t.name).join(', ')}`,
-            originalContent: content,
-            data: content as InferClassificationUnion<T>
-          }
         };
       }
 
@@ -84,10 +75,6 @@ export class ReActClassifier<T extends readonly ClassificationTypeConfig[]> exte
         instruction: this.tryExtractMessageType(JSON.stringify(finalResponse)),
         parsedLLMResponse: finalResponse,
         answer: parsed.primary_action.response_description,
-        validationResult: { 
-          isValid: true,
-          data: finalResponse 
-        }
       };
 
     } catch (error) {

@@ -10,14 +10,12 @@ export class SimpleClassifier<T extends readonly ClassificationTypeConfig[]> ext
   }
 
   protected parseLLMResponse(
-    response: string,
-    validationOptions: ValidationOptions
+    response: string
   ): {
     isToolCall: boolean;
     instruction: string | undefined;
     parsedLLMResponse: InferClassificationUnion<T>;
     answer: string | undefined;
-    validationResult: ValidationResult<InferClassificationUnion<T>>;
   } {
     try {
       // Try to parse the response as JSON
@@ -34,18 +32,11 @@ export class SimpleClassifier<T extends readonly ClassificationTypeConfig[]> ext
         throw new Error(`Unknown messageType: ${messageType}`);
       }
 
-      // For simple classification, we'll just validate the basic structure
-      const validationResult = {
-        isValid: true,
-        data: parsed as InferClassificationUnion<T>
-      };
-
       return {
         isToolCall: messageType === "TOOL_INVOCATION",
         instruction: messageType,
         parsedLLMResponse: parsed as InferClassificationUnion<T>,
-        answer: parsed.content,
-        validationResult
+        answer: parsed.content
       };
     } catch (error) {
       logger.error("Error parsing LLM response:", error);

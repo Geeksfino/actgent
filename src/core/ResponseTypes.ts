@@ -16,7 +16,6 @@ export interface ParsedLLMResponse<T extends readonly ClassificationTypeConfig[]
   instruction?: string;
   structuredData: InferClassificationUnion<T>;
   textData?: string;
-  validationResult: ValidationResult<InferClassificationUnion<T>>;
   metadata?: Record<string, any>;
   
   // For backward compatibility

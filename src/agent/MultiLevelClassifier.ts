@@ -5,7 +5,6 @@ import { ValidationResult, ValidationOptions } from "../core/types/ValidationRes
 import { logger } from "../core/Logger";
 import { MultiLevelPromptTemplate } from "./MultiLevelPromptTemplate";
 import { ResponseType, ParsedLLMResponse } from "../core/ResponseTypes";
-import { Message } from "../core/Message";
 
 export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]> extends AbstractClassifier<T> {
   protected promptTemplate: MultiLevelPromptTemplate<T>;
@@ -16,27 +15,19 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
   }
 
   protected parseLLMResponse(
-    response: string,
-    validationOptions: ValidationOptions
+    response: string
   ): {
     isToolCall: boolean;
     instruction: string | undefined;
     parsedLLMResponse: InferClassificationUnion<T>;
     answer: string | undefined;
-    validationResult: ValidationResult<InferClassificationUnion<T>>;
   } {
-    const categorized = this.categorizeLLMResponse(response, validationOptions);
-    
-    if (!categorized) {
-      throw new Error("Failed to categorize response");
-    }
-
+    // not used
     return null as any;
   }
 
   protected categorizeLLMResponse(
-    response: string,
-    validationOptions: ValidationOptions
+    response: string
   ): ParsedLLMResponse<T> | null {
     try {
       logger.debug("Categorizing LLM raw response===>");
@@ -60,14 +51,7 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
               messageType: 'CONVERSATION',
               response: parsed.response
             } as InferClassificationUnion<T>,
-            textData: parsed.response,
-            validationResult: { 
-              isValid: true, 
-              data: {
-                messageType: 'CONVERSATION',
-                response: parsed.response
-              } as InferClassificationUnion<T>
-            }
+            textData: parsed.response
           };
         }
 
@@ -86,14 +70,6 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
               data: parsed
             } as InferClassificationUnion<T>,
             textData: parsed.response,
-            validationResult: { 
-              isValid: true, 
-              data: {
-                messageType: 'ROUTE',
-                action: parsed.second_level_intent,
-                data: parsed
-              } as InferClassificationUnion<T>
-            }
           };
         }
       }
@@ -114,15 +90,7 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
             toolName: toolCall.function.name,
             arguments: JSON.parse(toolCall.function.arguments)
           } as InferClassificationUnion<T>,
-          textData: parsed.response_description,
-          validationResult: { 
-            isValid: true, 
-            data: {
-              messageType: 'TOOL_INVOCATION',
-              toolName: toolCall.function.name,
-              arguments: JSON.parse(toolCall.function.arguments)
-            } as InferClassificationUnion<T>
-          }
+          textData: parsed.response,
         };
       }
 
@@ -138,33 +106,31 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
         return {
           type: ResponseType.EVENT,
           structuredData: parsed as InferClassificationUnion<T>,
-          textData: undefined,
-          validationResult: {
-            isValid: true,
-            data: parsed as InferClassificationUnion<T>
-          }
+          textData: parsed.response,
         };
       }
 
       // If we reach here, the response format is unrecognized
-      logger.error("Unrecognized LLM response format:", response);
+      logger.error("Unrecognized LLM response format: ", response);
       return {
         type: ResponseType.EXCEPTION,
+        instruction: this.tryExtractMessageType(response),
         structuredData: {
-          messageType: 'LLM_RESPONSE_PARSE_ERROR',
-          error: "Unrecognized response format"
+          messageType: 'EXCEPTION',
+          structuredData: parsed
         } as InferClassificationUnion<T>,
-        validationResult: {
-          isValid: false,
-          error: "Unrecognized response format",
-          originalContent: response,
-          data: null
-        }
       };
 
     } catch (error) {
       logger.error("Error parsing LLM response:", error);
-      return null;
+      return {
+        type: ResponseType.EXCEPTION,
+        structuredData: {
+          messageType: 'EXCEPTION',
+          error: error instanceof Error ? error.message : String(error)
+        } as InferClassificationUnion<T>,
+        textData: response,
+      };
     }
   }
 }

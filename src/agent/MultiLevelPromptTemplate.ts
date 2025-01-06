@@ -52,7 +52,7 @@ Your capabilities: {capabilities}
     if (msg.metadata?.sender === "user") {
       return base_prompt + "\n" + this.topLevelPrompt();
     }
-    else if (msg.metadata?.sender === "assistant") {
+    else if (msg.metadata?.sender === "agent" && msg.metadata?.context?.routed) {
       const m = JSON.parse(msg.payload.input);
       logger.debug(`From assistant: Top-level intent is: ${msg.payload.input}`);
       if (m.data.top_level_intent === "ACTION") {
@@ -61,6 +61,8 @@ Your capabilities: {capabilities}
           const instruction = sessionContext.getSession().core.getInstructionByName(second_level_intent);
           logger.debug(`Instruction found: ${JSON.stringify(instruction)} for ${second_level_intent}`);
           if (instruction) {
+            logger.debug(`Instruction description: ${instruction.description}`);
+            sessionContext.setCurrentInstruction(instruction);
             return base_prompt + "\n" + instruction.description;
           }
           else {
@@ -73,13 +75,18 @@ Your capabilities: {capabilities}
           logger.warning(`Second-level intent not found: ${m.data.second_level_intent}`);
           return base_prompt;
         }
-      } else {    
-        // this should not happen 
-        logger.warning(`Top-level intent should be ACTION but found: ${m.data.top_level_intent}`);
+      } else if (msg.metadata?.sender === "agent" && msg.metadata?.context?.exception){    
+        const instruction = sessionContext.getCurrentInstruction();
+        if (instruction) {
+          logger.debug(`Instruction found: ${JSON.stringify(instruction)} for ${instruction.name}`);
+          return base_prompt + "\n" + instruction.description;
+        }
+        return base_prompt;
+      } else {
         return base_prompt;
       }
     }
-    else if (msg.metadata?.sender === "agent") {
+    else if (msg.metadata?.sender === "agent" && msg.metadata?.context?.tool_call) {
       const m = JSON.parse(msg.payload.input);
       logger.debug(`From agent: Top-level intent is: ${msg.payload.input}`);
       const instructionName = m.data.second_level_intent;
@@ -136,7 +143,15 @@ Your capabilities: {capabilities}
           logger.warning(`Second-level intent not found: ${m.data.second_level_intent}. Assistant prompt set to empty.`);
           return "";
         }
-      } else {    
+      } else if (msg.metadata?.context?.exception) {
+        const instruction = sessionContext.getCurrentInstruction();
+        if (instruction) {
+          return "Respond in the following JSON format:\n" + 
+          JSON.stringify({ messageType: instruction.name, data: instruction.schemaTemplate }, null, 2) + "\n";
+        }
+        return "";
+      }
+      else {    
         // this should not happen 
         logger.warning(`Top-level intent should be ACTION but found: ${m.data.top_level_intent}. Assistant prompt set to empty.`);
         return "";
@@ -158,6 +173,14 @@ Your capabilities: {capabilities}
   }
 
   extractDataFromLLMResponse(response: string): string {
+    try {
+      const res = JSON.parse(response);
+      if (res.top_level_intent === "CONVERSATION") {
+        return res.response;
+      } 
+    } catch (error) {
+      logger.warn(`extractDataFromLLMResponse failed to parse LLM response: ${error}`);
+    }
     return response;
   }
 

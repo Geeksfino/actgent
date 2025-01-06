@@ -23,19 +23,16 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
   }
 
   protected abstract parseLLMResponse(
-    response: string,
-    validationOptions: ValidationOptions
+    response: string
   ): {
     isToolCall: boolean;
     instruction: string | undefined;
     parsedLLMResponse: InferClassificationUnion<T>;
     answer: string | undefined;
-    validationResult: ValidationResult<InferClassificationUnion<T>>;
   };
 
   protected categorizeLLMResponse(
     response: string,
-    validationOptions: ValidationOptions
   ): ParsedLLMResponse<T> | null {
     // Default implementation returns null to indicate not implemented
     return null;
@@ -47,11 +44,7 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
   ): ResponseType {
     try {
       // Try the new categorization first
-      const categorizedResponse = this.categorizeLLMResponse(response, {
-        level: 'lenient',
-        allowPartialMatch: true,
-        requireMessageType: true
-      });
+      const categorizedResponse = this.categorizeLLMResponse(response);
       
       if (categorizedResponse) {
         // Route response based on type
@@ -103,11 +96,7 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
 
       // Fall back to legacy parsing if categorization returns null
       const { isToolCall, instruction, parsedLLMResponse, answer } = 
-        this.parseLLMResponse(response, {
-          level: 'lenient',
-          allowPartialMatch: true,
-          requireMessageType: true
-      });
+        this.parseLLMResponse(response);
             
       if (isToolCall) {
         session.triggerToolCallsHandlers(parsedLLMResponse);

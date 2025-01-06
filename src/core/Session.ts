@@ -2,14 +2,14 @@ import { AgentCore } from "./AgentCore";
 import { ClassificationTypeConfig } from "./IClassifier";
 import { Message, PayloadType } from "./Message";
 import { InferClassificationUnion } from "./TypeInference";
-import { JSONOutput, Tool, ValidationError, ToolOutput } from "./Tool";
+import { Tool, ValidationError, ToolOutput } from "./Tool";
 import { logger } from './Logger';
-
-
+import { SessionContext } from './SessionContext';
 export class Session {
     core: AgentCore;
     owner: string;
     sessionId: string;
+    context: SessionContext | null = null;
     description: string;
     parentSessionId?: string;  // Optional reference to the parent session
     subtasks?: Session[];  
@@ -57,6 +57,14 @@ export class Session {
         this.core.receive(msg);
     }
 
+    public setContext(context: SessionContext): void {
+        this.context = context;
+    }
+
+    public getContext(): SessionContext | null {
+        return this.context;
+    }
+    
     public onEvent<
         InstructionType extends InferClassificationUnion<T>,
         ToolOutputType extends ToolOutput,

@@ -162,6 +162,9 @@ export abstract class BaseAgent<
     session.onRouting((message: any, session: Session) => {
       this.defaultRoutingHandler(message, session);
     });
+    session.onException((raw: any, session: Session) => {
+      this.defaultExceptionHandler(raw, session);
+    });
 
     return session;
   }
@@ -206,6 +209,21 @@ export abstract class BaseAgent<
       logger.error(`Event processing failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
+
+  private defaultExceptionHandler(raw: any, session: Session): void {
+    logger.debug("Exception received:", raw);
+    const sessionContext = session.getContext();
+    const instruction = sessionContext?.getCurrentInstruction();
+    
+    try {
+      const errorMsg = `Cannot handle the content format of ${raw}. Please review and re-generate the content.`;
+      session.chat(errorMsg, "agent", { exception: true }).catch(error => {
+        logger.error("Error sending exception back to LLM:", error);
+      });
+    } catch (error) {
+      logger.error(`Exception processing failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  } 
 
   private defaultRoutingHandler(message: any, session: Session): void {
     logger.debug("Routing message received:", message);
