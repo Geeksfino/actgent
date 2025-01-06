@@ -62,8 +62,12 @@ async function handleInitialInput(): Promise<string> {
 // Handle chat responses
 function setupResponseHandler(session: any) {
     session.onEvent((response: any) => {
+        console.log("event");
         if (typeof response === 'string') {
-            console.log(`\n${HealthcareExpert.getName()}:`, response);
+            process.stdout.write(`\n${HealthcareExpert.getName()}: `);
+            process.stdout.write("Structured output to be handled by a tool:\n");
+            process.stdout.write(JSON.stringify(response, null, 2));
+            process.stdout.write(`\n\n${defaultPrompt}`);
         } else if (typeof response === 'object') {
             if ('clarification' in response) {
                 const { questions } = response.clarification;
@@ -87,7 +91,10 @@ function setupResponseHandler(session: any) {
                     }
                 }
             } else {
-                console.log(`${HealthcareExpert.getName()}:`, JSON.stringify(response, null, 2));
+                process.stdout.write(`\n${HealthcareExpert.getName()}: `);
+                process.stdout.write("Structured output to be handled by a tool:\n");
+                process.stdout.write(JSON.stringify(response, null, 2));
+                process.stdout.write(`\n\n${defaultPrompt}`);
             }
         }
     });
@@ -97,9 +104,9 @@ function setupResponseHandler(session: any) {
     });
 
     session.onConversation((response: any) => {
-        process.stdout.write(`\n${HealthcareExpert.getName()}:`);
+        process.stdout.write(`\n${HealthcareExpert.getName()}: `);
         process.stdout.write(JSON.stringify(response, null, 2));
-        process.stdout.write("\n\nYou: ");
+        process.stdout.write(`\n\n${defaultPrompt}`);
     });
 }
 
@@ -131,7 +138,7 @@ async function handleChat(session: any): Promise<void> {
 // Main chat loop
 async function chatLoop(): Promise<void> {
     try {
-        console.log("Welcome to the HealthcareExpert!");
+        console.log("~~~ Welcome to the HealthcareExpert ~~~");
         console.log("Type '/exit' to end the conversation.");
 
         const initialInput = await handleInitialInput();
