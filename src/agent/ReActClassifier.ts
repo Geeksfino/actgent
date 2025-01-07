@@ -2,8 +2,7 @@ import { ClassificationTypeConfig } from "../core/IClassifier";
 import { AbstractClassifier } from "../core/AbstractClassifier";
 import { InferClassificationUnion } from "../core/TypeInference";
 import { logger } from "../core/Logger";
-import { ValidationResult } from "../core/types/ValidationResult";
-import { ValidationOptions } from "../core/types/ValidationResult";
+
 export class ReActClassifier<T extends readonly ClassificationTypeConfig[]> extends AbstractClassifier<T> {
   constructor(schemaTypes: T) {
     super(schemaTypes);

@@ -1,7 +1,6 @@
 import { ClassificationTypeConfig } from "../core/IClassifier";
 import { AbstractClassifier } from "../core/AbstractClassifier";
 import { InferClassificationUnion } from "../core/TypeInference";
-import { ValidationResult, ValidationOptions } from "../core/types/ValidationResult";
 import { logger } from "../core/Logger";
 
 export class SimpleClassifier<T extends readonly ClassificationTypeConfig[]> extends AbstractClassifier<T> {

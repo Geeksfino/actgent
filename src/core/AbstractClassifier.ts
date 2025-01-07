@@ -5,9 +5,8 @@ import {
 } from "./IClassifier";
 import { Session } from "./Session";
 import { InferClassificationUnion } from "./TypeInference";
-import { ValidationResult, ValidationOptions } from './types/ValidationResult';
-import { logger } from './Logger';
 import { ParsedLLMResponse, ResponseType } from "./ResponseTypes";
+import { logger } from "./Logger";
 
 export abstract class AbstractClassifier<T extends readonly ClassificationTypeConfig[]>
   implements IClassifier<T>

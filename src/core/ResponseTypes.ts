@@ -1,6 +1,5 @@
 import { ClassificationTypeConfig } from './IClassifier';
 import { InferClassificationUnion } from './TypeInference';
-import { ValidationResult } from './types/ValidationResult';
 import { Session } from './Session';
 
 export enum ResponseType {

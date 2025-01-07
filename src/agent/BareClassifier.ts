@@ -4,7 +4,6 @@ import { Message } from "../core/Message";
 import { BarePromptTemplate } from "./BarePromptTemplate";
 import { InferStrategy } from "../core/InferContext";
 import { InferClassificationUnion } from "../core/TypeInference";
-import { ValidationResult, ValidationOptions } from "../core/types/ValidationResult";
 import { logger } from "../core/Logger";
 
 export class BareClassifier<T extends readonly ClassificationTypeConfig[]> extends AbstractClassifier<T> {
