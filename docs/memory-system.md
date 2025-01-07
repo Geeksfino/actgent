@@ -1,171 +1,239 @@
 # Memory System Documentation
 
 ## Overview
-The ActGent memory system is designed to mimic human memory processes, providing a sophisticated mechanism for storing, retrieving, and managing information. It includes working memory, long-term memory, context management, memory consolidation, and memory association capabilities.
+The Actgent memory system is designed to mimic human memory processes, providing a sophisticated mechanism for storing, retrieving, and managing information. It includes working memory, long-term memory, context management, memory consolidation, and memory association capabilities.
 
 ## Architecture
 
 ### Class Diagram
 ```mermaid
 classDiagram
-    %% Core System
-    AgentMemorySystem --> WorkingMemory
-    AgentMemorySystem --> LongTermMemory
-    AgentMemorySystem --> ContextManager
-    AgentMemorySystem --> MemoryConsolidator
-    AgentMemorySystem --> MemoryAssociator
-    
-    %% Memory Hierarchy
-    BaseMemorySystem <|-- WorkingMemory
-    BaseMemorySystem <|-- LongTermMemory
-    BaseMemorySystem <|-- DeclarativeMemory
-    BaseMemorySystem <|-- ProceduralMemory
-    DeclarativeMemory <|-- EpisodicMemory
-    DeclarativeMemory <|-- SemanticMemory
-    
     %% Interfaces
-    BaseMemorySystem ..|> IMemorySystem
-    MemoryConsolidator ..|> IMemoryConsolidation
-    
-    %% Dependencies
-    BaseMemorySystem --> IMemoryStorage
-    BaseMemorySystem --> IMemoryIndex
-    ContextManager --> WorkingMemory
-    ContextManager --> EpisodicMemory
-    
-    class AgentMemorySystem {
-        -workingMemory: WorkingMemory
-        -longTermMemory: LongTermMemory
-        -contextManager: ContextManager
-        -consolidator: MemoryConsolidator
-        -associator: MemoryAssociator
-        -consolidationTimer: Timer
-        -consolidationInterval: number
-        +storeWorkingMemory()
-        +storeLongTerm()
-        +retrieveMemories()
-        +setContext()
-        +getContext()
-        +cleanup()
+    class IMemoryUnit {
+        <<interface>>
+        +id: string
+        +timestamp: Date
+        +content: any
+        +metadata: Map<string, any>
     }
 
+    class IEpisodicMemoryUnit {
+        <<interface>>
+        +timeSequence: number
+        +location: string
+        +actors: string[]
+        +actions: string[]
+        +emotions: Map<string, number>
+    }
+
+    class ISemanticMemoryUnit {
+        <<interface>>
+        +concept: string
+        +relations: Map<string, string[]>
+        +confidence: number
+        +source: string
+    }
+
+    class IMemoryRetrieval {
+        <<interface>>
+        +query(filter: MemoryFilter): Promise<IMemoryUnit[]>
+        +exists(id: string): Promise<boolean>
+    }
+
+    class IMemoryStorage {
+        <<interface>>
+        +store(memory: IMemoryUnit): Promise<void>
+        +retrieve(id: string): Promise<IMemoryUnit>
+        +update(memory: IMemoryUnit): Promise<void>
+        +delete(id: string): Promise<void>
+        +batchStore(memories: IMemoryUnit[]): Promise<void>
+        +batchRetrieve(ids: string[]): Promise<IMemoryUnit[]>
+    }
+
+    class IMemoryIndex {
+        <<interface>>
+        +index(memory: IMemoryUnit): Promise<void>
+        +search(query: string): Promise<string[]>
+        +batchIndex(memories: IMemoryUnit[]): Promise<void>
+        +remove(id: string): Promise<void>
+    }
+
+    %% Abstract Classes
     class BaseMemorySystem {
+        <<abstract>>
         #storage: IMemoryStorage
         #index: IMemoryIndex
-        #cache: Map<string, IMemoryUnit>
+        #cache: MemoryCache
         #cacheSize: number
         #cacheExpiryMs: number
-        +store()
-        +retrieve()
-        +delete()
-        #cleanupCache()
+        +store(content: any, metadata?: Map): Promise<void>
+        +retrieve(filter: MemoryFilter): Promise<IMemoryUnit[]>
+        +delete(id: string): Promise<void>
+        #cleanupCache(): void
     }
 
-    class WorkingMemory {
-        -cleanupTimer: Timer
-        -maxAge: number
-        -timeToLive: number
-        -ephemeralTimeToLive: number
-        +store()
-        +storeEphemeral()
-        +update()
-        +cleanup()
-        -isExpired()
+    class DeclarativeMemoryFactory {
+        <<abstract>>
+        +createMemoryUnit(content, metadata): IMemoryUnit
     }
 
+    %% Concrete Classes
     class LongTermMemory {
-        +store()
-        +retrieve()
-        +search()
+        -declarativeMemory: DeclarativeMemory
+        -proceduralMemory: ProceduralMemory
+        +store(content, metadata?): Promise<void>
+        +retrieve(filter): Promise<IMemoryUnit[]>
+        +search(query: string): Promise<IMemoryUnit[]>
     }
 
     class DeclarativeMemory {
         -episodicMemory: EpisodicMemory
         -semanticMemory: SemanticMemory
-        +store()
-        +retrieve()
-        -classifyMemoryType()
+        +store(content, metadata?): Promise<void>
+        +retrieve(filter): Promise<IMemoryUnit[]>
+        -classifyMemoryType(content, metadata?): MemoryType
     }
 
     class EpisodicMemory {
         -factory: EpisodicMemoryFactory
-        +store()
-        +retrieve()
-        +findSimilarExperiences()
-        -buildEpisodicQuery()
+        +store(content, metadata?): Promise<void>
+        +retrieve(filter): Promise<IMemoryUnit[]>
+        +findSimilarExperiences(experience): Promise<IEpisodicMemoryUnit[]>
+        -buildEpisodicQuery(filter): string
     }
 
     class SemanticMemory {
         -factory: SemanticMemoryFactory
-        -conceptGraph: Map
-        +store()
-        +retrieve()
-        -updateConceptGraph()
-        -buildSemanticQuery()
+        -conceptGraph: Map<string, Set<string>>
+        +store(content, metadata?): Promise<void>
+        +retrieve(filter): Promise<IMemoryUnit[]>
+        +findRelatedConcepts(concept): Promise<string[]>
+        -updateConceptGraph(memory): void
+        -buildSemanticQuery(filter): string
+    }
+
+    class EpisodicMemoryFactory {
+        +createMemoryUnit(content, metadata): IEpisodicMemoryUnit
+    }
+
+    class SemanticMemoryFactory {
+        +createMemoryUnit(content, metadata): ISemanticMemoryUnit
     }
 
     class ProceduralMemory {
-        +store()
-        +retrieve()
-        -buildQuery()
+        +store(content, metadata?): Promise<void>
+        +retrieve(filter): Promise<IMemoryUnit[]>
+        -buildQuery(filter): string
     }
 
-    class MemoryConsolidator {
-        -triggers: Map<string, ConsolidationTrigger>
-        -maxWorkingMemorySize: number
-        -currentWorkingMemorySize: number
-        +consolidate()
-        +checkTriggers()
-        +getConsolidationCandidates()
-        -moveToLongTerm()
-        +updateWorkingMemorySize()
+    class WorkingMemory {
+        -timeToLive: number
+        -cleanupInterval: number
+        -cleanupTimer: Timer
+        -ephemeralTimeToLive: number
+        +store(content, metadata?): Promise<void>
+        +storeEphemeral(content, metadata?): Promise<void>
+        +retrieve(filter): Promise<IMemoryUnit[]>
+        +update(memory: IMemoryUnit): Promise<void>
+        -cleanup(): Promise<void>
+        -isExpired(memory): boolean
     }
 
-    class MemoryAssociator {
-        +associate()
-        +dissociate()
-        +findRelatedMemories()
+    class MemoryCache {
+        -cache: Map<string, IMemoryUnit>
+        -maxSize: number
+        +set(id, memory): void
+        +get(id): IMemoryUnit
+        +clear(): void
     }
 
     class ContextManager {
         -currentContext: Map<string, any>
         -workingMemory: WorkingMemory
         -episodicMemory: EpisodicMemory
-        +setContext()
-        +getContext()
-        +clearContext()
-        +loadContext()
-        +persistContext()
-        +storeContextAsEpisodicMemory()
+        +setContext(key, value): void
+        +getContext(key): any
+        +clearContext(): void
+        +loadContext(): Promise<void>
+        +getAllContext(): Map<string, any>
+        +persistContext(): Promise<void>
+        +storeContextAsEpisodicMemory(metadata?: Map): Promise<void>
+        +cleanup(): void
     }
 
-    interface IMemoryStorage {
-        +store()
-        +retrieve()
-        +update()
-        +delete()
-        +batchStore()
-        +batchRetrieve()
+    class AgentMemorySystem {
+        -longTermMemory: LongTermMemory
+        -workingMemory: WorkingMemory
+        -contextManager: ContextManager
+        -consolidator: MemoryConsolidator
+        -associator: MemoryAssociator
+        -consolidationTimer: Timer
+        -consolidationInterval: number
+        +storeLongTerm(content, metadata?): Promise<void>
+        +storeWorkingMemory(content, metadata?): Promise<void>
+        +retrieveMemories(filter): Promise<IMemoryUnit[]>
+        +setContext(key, value): void
+        +getContext(key): any
+        +cleanup(): void
     }
 
-    interface IMemoryIndex {
-        +index()
-        +search()
-        +batchIndex()
-        +remove()
+    class MemoryFilter {
+        +type: MemoryType[]
+        +metadataFilters: Map<string, any>[]
+        +contentFilters: Map<string, any>[]
+        +dateRange: {start: Date, end: Date}
+        +ids: string[]
     }
 
-    interface IMemoryConsolidation {
-        +consolidate()
-        +isConsolidationNeeded()
-        +getConsolidationCandidates()
+    enum MemoryType {
+        EPISODIC
+        SEMANTIC
+        PROCEDURAL
+        PERCEPTUAL
+        SOCIAL
+        CONTEXTUAL
+        WORKING
     }
 
-    interface IMemorySystem {
-        +store()
-        +retrieve()
-        +delete()
-    }
+    %% Relationships
+    IEpisodicMemoryUnit --|> IMemoryUnit
+    ISemanticMemoryUnit --|> IMemoryUnit
+
+    BaseMemorySystem ..> IMemoryUnit
+    BaseMemorySystem ..> IMemoryStorage
+    BaseMemorySystem ..> IMemoryIndex
+    BaseMemorySystem *-- MemoryCache
+
+    LongTermMemory --|> BaseMemorySystem
+    LongTermMemory *-- DeclarativeMemory
+    LongTermMemory *-- ProceduralMemory
+
+    DeclarativeMemory --|> BaseMemorySystem
+    DeclarativeMemory *-- EpisodicMemory
+    DeclarativeMemory *-- SemanticMemory
+
+    EpisodicMemory --|> BaseMemorySystem
+    EpisodicMemory *-- EpisodicMemoryFactory
+    EpisodicMemory ..> IEpisodicMemoryUnit
+
+    SemanticMemory --|> BaseMemorySystem
+    SemanticMemory *-- SemanticMemoryFactory
+    SemanticMemory ..> ISemanticMemoryUnit
+
+    EpisodicMemoryFactory --|> DeclarativeMemoryFactory
+    SemanticMemoryFactory --|> DeclarativeMemoryFactory
+
+    ProceduralMemory --|> BaseMemorySystem
+    WorkingMemory --|> BaseMemorySystem
+
+    AgentMemorySystem *-- LongTermMemory
+    AgentMemorySystem *-- WorkingMemory
+    AgentMemorySystem *-- ContextManager
+    AgentMemorySystem *-- MemoryConsolidator
+    AgentMemorySystem *-- MemoryAssociator
+
+    ContextManager *-- WorkingMemory
+    ContextManager *-- EpisodicMemory
 ```
 
 ## Memory Types
