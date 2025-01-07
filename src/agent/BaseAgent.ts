@@ -216,8 +216,7 @@ export abstract class BaseAgent<
     const instruction = sessionContext?.getCurrentInstruction();
     
     try {
-      const errorMsg = `Cannot handle the content format of ${raw}. Please review and re-generate the content.`;
-      session.chat(errorMsg, "agent", { exception: true }).catch(error => {
+      session.chat(raw, "agent", { exception: true }).catch(error => {
         logger.error("Error sending exception back to LLM:", error);
       });
     } catch (error) {
