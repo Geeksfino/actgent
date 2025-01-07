@@ -53,50 +53,59 @@ Your capabilities: {capabilities}
       return base_prompt + "\n" + this.topLevelPrompt();
     }
     else if (msg.metadata?.sender === "agent" && msg.metadata?.context?.routed) {
-      const m = JSON.parse(msg.payload.input);
-      logger.debug(`From assistant: Top-level intent is: ${msg.payload.input}`);
-      if (m.data.top_level_intent === "ACTION") {
-        const second_level_intent = m.data.second_level_intent;
-        if (second_level_intent) {
-          const instruction = sessionContext.getSession().core.getInstructionByName(second_level_intent);
-          logger.debug(`Instruction found: ${JSON.stringify(instruction)} for ${second_level_intent}`);
-          if (instruction) {
-            logger.debug(`Instruction description: ${instruction.description}`);
-            sessionContext.setCurrentInstruction(instruction);
-            return base_prompt + "\n" + instruction.description;
-          }
-          else {
+      try {
+        const m = JSON.parse(msg.payload.input);
+        logger.debug(`From assistant: Top-level intent is: ${msg.payload.input}`);
+        if (m.data.top_level_intent === "ACTION") {
+          const second_level_intent = m.data.second_level_intent;
+          if (second_level_intent) {
+            const instruction = sessionContext.getSession().core.getInstructionByName(second_level_intent);
+            logger.debug(`Instruction found: ${JSON.stringify(instruction)} for ${second_level_intent}`);
+            if (instruction) {
+              logger.debug(`Instruction description: ${instruction.description}`);
+              sessionContext.setCurrentInstruction(instruction);
+              return base_prompt + "\n" + instruction.description;
+            }
+            else {
+              logger.warning(`Instruction not found: ${second_level_intent}`);
+              return base_prompt;
+            }
+          } else {
             // this should not happen
-            logger.warning(`Instruction not found: ${second_level_intent}`);
+            logger.warning(`Second-level intent not found: ${m.data.second_level_intent}`);
             return base_prompt;
           }
+        } else if (msg.metadata?.sender === "agent" && msg.metadata?.context?.exception){    
+          const instruction = sessionContext.getCurrentInstruction();
+          if (instruction) {
+            logger.debug(`Instruction found: ${JSON.stringify(instruction)} for ${instruction.name}`);
+            return base_prompt + "\n" + instruction.description;
+          }
+          return base_prompt;
         } else {
-          // this should not happen
-          logger.warning(`Second-level intent not found: ${m.data.second_level_intent}`);
           return base_prompt;
         }
-      } else if (msg.metadata?.sender === "agent" && msg.metadata?.context?.exception){    
-        const instruction = sessionContext.getCurrentInstruction();
-        if (instruction) {
-          logger.debug(`Instruction found: ${JSON.stringify(instruction)} for ${instruction.name}`);
-          return base_prompt + "\n" + instruction.description;
-        }
-        return base_prompt;
-      } else {
+      } catch (error) {
+        logger.warning(`Failed to parse message payload: ${error}`);
         return base_prompt;
       }
     }
     else if (msg.metadata?.sender === "agent" && msg.metadata?.context?.tool_call) {
-      const m = JSON.parse(msg.payload.input);
-      logger.debug(`From agent: Top-level intent is: ${msg.payload.input}`);
-      const instructionName = m.data.second_level_intent;
-      logger.debug(`Instruction name found: ${instructionName}`);
-      if (instructionName) {
-        return base_prompt + "\n" + `[Agent] has executed ${instructionName} with results: ${msg.payload.input}`;
-      }
-      else {
-        // this should not happen
-        logger.warning(`Instruction not found: ${m.data.second_level_intent}`);
+      try {
+        const m = JSON.parse(msg.payload.input);
+        logger.debug(`From agent: Top-level intent is: ${msg.payload.input}`);
+        const instructionName = m.data.second_level_intent;
+        logger.debug(`Instruction name found: ${instructionName}`);
+        if (instructionName) {
+          return base_prompt + "\n" + `[Agent] has executed ${instructionName} with results: ${msg.payload.input}`;
+        }
+        else {
+          // this should not happen
+          logger.warning(`Instruction not found: ${m.data.second_level_intent}`);
+          return base_prompt;
+        }
+      } catch (error) {
+        logger.warning(`Failed to parse message payload: ${error}`);
         return base_prompt;
       }
     }
@@ -108,52 +117,58 @@ Your capabilities: {capabilities}
   async getAssistantPrompt(sessionContext: SessionContext, memory: Memory): Promise<string> {
     const msg = sessionContext.getLatestMessage();
     if (msg.metadata?.sender === "agent") {
-      const m = JSON.parse(msg.payload.input);
-      if (m.data.top_level_intent === "ACTION") {
-        const second_level_intent = m.data.second_level_intent;
-        if (second_level_intent) {
-          const instruction = sessionContext.getSession().core.getInstructionByName(second_level_intent);
-          if (instruction) {
-            let schema;
-            if (instruction.schemaTemplate) {
-              try {
-                schema = JSON.parse(instruction.schemaTemplate);
-              } catch (error) {
-                console.warn(`Failed to parse schema for ${instruction.name}: ${error}`);
+      try {
+        const m = JSON.parse(msg.payload.input);
+        logger.debug(`From assistant: Top-level intent is: ${msg.payload.input}`);
+        if (m.data.top_level_intent === "ACTION") {
+          const second_level_intent = m.data.second_level_intent;
+          if (second_level_intent) {
+            const instruction = sessionContext.getSession().core.getInstructionByName(second_level_intent);
+            if (instruction) {
+              let schema;
+              if (instruction.schemaTemplate) {
+                try {
+                  schema = JSON.parse(instruction.schemaTemplate);
+                } catch (error) {
+                  console.warn(`Failed to parse schema for ${instruction.name}: ${error}`);
+                }
+              }
+              else 
+                schema = null;
+              
+              if (schema) {
+                return "Respond in the following JSON format:\n" + 
+                JSON.stringify({ messageType: instruction.name, data: schema }, null, 2) + "\n";
+              }
+              else {
+                return "";
               }
             }
-            else 
-              schema = null;
-            
-            if (schema) {
-              return "Respond in the following JSON format:\n" + 
-              JSON.stringify({ messageType: instruction.name, data: schema }, null, 2) + "\n";
-            }
             else {
+              // this should not happen
+              logger.warning(`Instruction not found: ${second_level_intent}. Assistant prompt set to empty.`);
               return "";
             }
-          }
-          else {
+          } else {
             // this should not happen
-            logger.warning(`Instruction not found: ${second_level_intent}. Assistant prompt set to empty.`);
+            logger.warning(`Second-level intent not found: ${m.data.second_level_intent}. Assistant prompt set to empty.`);
             return "";
           }
-        } else {
-          // this should not happen
-          logger.warning(`Second-level intent not found: ${m.data.second_level_intent}. Assistant prompt set to empty.`);
+        } else if (msg.metadata?.context?.exception) {
+          const instruction = sessionContext.getCurrentInstruction();
+          if (instruction) {
+            return "Respond in the following JSON format:\n" + 
+            JSON.stringify({ messageType: instruction.name, data: instruction.schemaTemplate }, null, 2) + "\n";
+          }
           return "";
         }
-      } else if (msg.metadata?.context?.exception) {
-        const instruction = sessionContext.getCurrentInstruction();
-        if (instruction) {
-          return "Respond in the following JSON format:\n" + 
-          JSON.stringify({ messageType: instruction.name, data: instruction.schemaTemplate }, null, 2) + "\n";
+        else {    
+          // this should not happen 
+          logger.warning(`Top-level intent should be ACTION but found: ${m.data.top_level_intent}. Assistant prompt set to empty.`);
+          return "";
         }
-        return "";
-      }
-      else {    
-        // this should not happen 
-        logger.warning(`Top-level intent should be ACTION but found: ${m.data.top_level_intent}. Assistant prompt set to empty.`);
+      } catch (error) {
+        logger.warning(`Failed to parse message payload: ${error}`);
         return "";
       }
     }
