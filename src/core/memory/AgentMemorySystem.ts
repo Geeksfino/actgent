@@ -1,6 +1,6 @@
 import { LongTermMemory } from './LongTermMemory';
 import { WorkingMemory } from './WorkingMemory';
-import { ContextManager } from './ContextManager';
+import { MemoryContextManager } from './MemoryContextManager';
 import { MemoryConsolidator } from './MemoryConsolidator';
 import { MemoryAssociator } from './MemoryAssociator';
 import { IMemoryUnit, MemoryFilter, IMemoryStorage, IMemoryIndex, MemoryType } from './types';
@@ -8,7 +8,7 @@ import { IMemoryUnit, MemoryFilter, IMemoryStorage, IMemoryIndex, MemoryType } f
 export class AgentMemorySystem {
     private longTermMemory: LongTermMemory;
     private workingMemory: WorkingMemory;
-    private contextManager: ContextManager;
+    private contextManager: MemoryContextManager;
     private consolidator: MemoryConsolidator;
     private associator: MemoryAssociator;
     private consolidationTimer: NodeJS.Timer | null = null;
@@ -21,7 +21,7 @@ export class AgentMemorySystem {
     ) {
         this.longTermMemory = new LongTermMemory(storage, index);
         this.workingMemory = new WorkingMemory(storage, index);
-        this.contextManager = new ContextManager(storage, index);
+        this.contextManager = new MemoryContextManager(storage, index);
         this.consolidator = new MemoryConsolidator(storage, index);
         this.associator = new MemoryAssociator(storage, index);
         this.consolidationInterval = consolidationInterval;
@@ -63,11 +63,11 @@ export class AgentMemorySystem {
         this.contextManager.clearContext();
     }
 
-    async loadContext(): Promise<void> {
-        await this.contextManager.loadContext();
+    async loadContext(filter: any = {}): Promise<void> {
+        await this.contextManager.loadContext(filter);
     }
 
-    getAllContext(): Map<string, any> {
+    async getAllContext(): Promise<Map<string, any>> {
         return this.contextManager.getAllContext();
     }
 
@@ -146,7 +146,7 @@ export class AgentMemorySystem {
         return this.workingMemory;
     }
 
-    getContextManager(): ContextManager {
+    getContextManager(): MemoryContextManager {
         return this.contextManager;
     }
 

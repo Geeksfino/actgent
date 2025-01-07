@@ -3,9 +3,9 @@ import { SmartHistoryManager } from './SmartHistoryManager';
 import { WorkingMemory } from '../memory/WorkingMemory';
 
 /**
- * Enhanced context manager with smart history management
+ * Enhanced context manager with smart history management for conversations
  */
-export class ContextManager {
+export class ConversationContextManager {
     private historyManager: SmartHistoryManager;
     private workingMemory: WorkingMemory;
     private context: Map<string, any>;
