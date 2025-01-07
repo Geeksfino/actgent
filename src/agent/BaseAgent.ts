@@ -230,14 +230,9 @@ export abstract class BaseAgent<
     try {
       // Pass through the content.data without assuming its structure
       const routedData = message.content?.data || message;
-      session.chat(JSON.stringify(routedData), "agent", { routed: true }).catch(error => {
-        logger.error("Error sending routing message back to LLM:", error);
-      });
+      session.chat(JSON.stringify(routedData), "agent", { routed: true });
     } catch (error) {
-      const errorMsg = `Message routing failed: ${error instanceof Error ? error.message : String(error)}. Please handle this error appropriately.`;
-      session.chat(errorMsg, "agent", { routed: true }).catch(err => {
-        logger.error("Error sending routing error back to LLM:", err);
-      });
+      logger.error("Error sending routing error back to LLM:", error);
     }
   }
 
