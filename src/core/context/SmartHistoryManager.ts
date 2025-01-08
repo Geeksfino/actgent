@@ -1,4 +1,4 @@
-import { IHistoryManager, ConversationMessage, IContextOptimizer, IContextMetric, ContextMetrics } from './types';
+import { IHistoryManager, ConversationMessage, IContextOptimizer, IContextMetric, ContextMetrics} from './types';
 import { WorkingMemory } from '../memory/WorkingMemory';
 import { TokenMetric } from './metrics/TokenMetric';
 import { RelevanceMetric } from './metrics/RelevanceMetric';
@@ -6,6 +6,7 @@ import { AgeMetric } from './metrics/AgeMetric';
 import { SummarizationOptimizer } from './optimizers/SummarizationOptimizer';
 import { RelevanceOptimizer } from './optimizers/RelevanceOptimizer';
 import { TimeDecayOptimizer } from './optimizers/TimeDecayOptimizer';
+import { MemoryType } from '../memory/types';
 
 /**
  * Manages conversation history with smart optimization strategies
@@ -14,18 +15,22 @@ export class SmartHistoryManager implements IHistoryManager {
     private messages: ConversationMessage[] = [];
     private optimizers: Map<string, IContextOptimizer> = new Map();
     private metrics: Map<string, IContextMetric> = new Map();
-    private workingMemory: WorkingMemory;
 
-    constructor(workingMemory: WorkingMemory) {
-        this.workingMemory = workingMemory;
+
+    constructor(private workingMemory: WorkingMemory) {
+        this.messages = [];
+        this.optimizers = new Map();
+        this.metrics = new Map();
         this.initializeOptimizers();
         this.initializeMetrics();
     }
 
     private initializeOptimizers(): void {
-        this.optimizers.set('summarization', new SummarizationOptimizer());
-        this.optimizers.set('relevance', new RelevanceOptimizer());
-        this.optimizers.set('timeDecay', new TimeDecayOptimizer());
+        this.optimizers.set('relevance', {
+            shouldOptimize: (metrics: ContextMetrics) => metrics.averageRelevance < 0.7,
+            optimize: async (messages: ConversationMessage[]) => 
+                messages.filter(m => m.relevanceScore >= 0.7)
+        });
     }
 
     private initializeMetrics(): void {
@@ -34,9 +39,20 @@ export class SmartHistoryManager implements IHistoryManager {
         this.metrics.set('age', new AgeMetric());
     }
 
-    public addMessage(message: ConversationMessage): void {
+    public async addMessage(message: ConversationMessage): Promise<void> {
         this.messages.push(message);
-        this.checkOptimizationTriggers();
+        
+        // Store in working memory
+        const metadata = new Map<string, any>([
+            ['type', MemoryType.WORKING],
+            ['relevanceScore', message.relevanceScore],
+            ['importance', message.importance],
+            ['tokens', message.tokens],
+            ['expiresAt', new Date('2025-01-08T09:47:44+08:00').getTime() + 300000] // 5 minutes
+        ]);
+
+        await this.workingMemory.store(message, metadata);
+        await this.checkOptimizationTriggers();
     }
 
     public async getContext(): Promise<string> {
@@ -44,12 +60,47 @@ export class SmartHistoryManager implements IHistoryManager {
     }
 
     public async optimize(): Promise<void> {
-        const metrics = this.updateMetrics();
-        
-        for (const optimizer of this.optimizers.values()) {
-            if (optimizer.shouldOptimize(metrics)) {
-                this.messages = await optimizer.optimize(this.messages);
+        if (this.messages.length === 0) return;
+    
+        try {
+            const metrics = this.updateMetrics();
+            let optimizedMessages = [...this.messages];
+            
+            for (const optimizer of this.optimizers.values()) {
+                if (optimizer.shouldOptimize(metrics)) {
+                    const result = await optimizer.optimize(optimizedMessages);
+                    if (result && result.length > 0) {
+                        optimizedMessages = result;
+                    }
+                }
             }
+    
+            if (optimizedMessages.length > 0) {
+                this.messages = optimizedMessages;
+                await this.syncWithWorkingMemory();
+            }
+        } catch (error) {
+            console.error('Optimization error:', error);
+        }
+    }
+
+    private async syncWithWorkingMemory(): Promise<void> {
+        // Clear existing messages and store optimized ones
+        const workingMemories = await this.workingMemory.retrieve({
+            types: [MemoryType.WORKING]
+        });
+
+        // Store new messages
+        for (const message of this.messages) {
+            const metadata = new Map<string, any>([
+                ['type', 'working'],
+                ['relevanceScore', message.relevanceScore],
+                ['importance', message.importance],
+                ['tokens', message.tokens],
+                ['expiresAt', new Date('2025-01-08T09:47:44+08:00').getTime() + 300000]
+            ]);
+
+            await this.workingMemory.store(message, metadata);
         }
     }
 

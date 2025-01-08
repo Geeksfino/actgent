@@ -64,6 +64,7 @@ export interface MemoryFilter {
     types?: MemoryType[];
     metadataFilters?: Map<string, any>[];
     contentFilters?: Map<string, any>[];
+    contextFilter?: Map<string, any>;
     dateRange?: {
         start: Date;
         end: Date;
@@ -96,19 +97,24 @@ export interface IMemoryRetrieval {
  */
 export interface IMemoryStorage {
     store(memory: IMemoryUnit): Promise<void>;
-    retrieve(id: string): Promise<IMemoryUnit>;
+    retrieve(id: string): Promise<IMemoryUnit | null>;
+    retrieveByFilter(filter: MemoryFilter): Promise<IMemoryUnit[]>;
     update(memory: IMemoryUnit): Promise<void>;
     delete(id: string): Promise<void>;
+    clear(): Promise<void>;
     batchStore(memories: IMemoryUnit[]): Promise<void>;
-    batchRetrieve(ids: string[]): Promise<IMemoryUnit[]>;
+    batchRetrieve(ids: string[]): Promise<(IMemoryUnit | null)[]>;
 }
 
 /**
  * Interface for memory indexing operations
  */
 export interface IMemoryIndex {
-    index(memory: IMemoryUnit): Promise<void>;
+    add(memory: IMemoryUnit): Promise<void>;
+    index(memory: IMemoryUnit): Promise<void>;  // Alias for add for backward compatibility
     search(query: string): Promise<string[]>;
+    update(memory: IMemoryUnit): Promise<void>;
+    remove(id: string): Promise<void>;
     batchIndex(memories: IMemoryUnit[]): Promise<void>;
 }
 
@@ -117,8 +123,9 @@ export interface IMemoryIndex {
  */
 export interface IMemoryConsolidation {
     consolidate(memory: IMemoryUnit): Promise<void>;
-    isConsolidationNeeded(memory: IMemoryUnit): boolean;
     getConsolidationCandidates(): Promise<IMemoryUnit[]>;
+    isConsolidationNeeded(memory: IMemoryUnit): boolean;
+    updateWorkingMemorySize(delta: number): Promise<void>;
 }
 
 /**
@@ -129,6 +136,17 @@ export interface IMemoryAssociation {
     dissociate(sourceId: string, targetId: string): Promise<void>;
     getAssociations(id: string): Promise<string[]>;
     findRelatedMemories(id: string, maxResults?: number): Promise<IMemoryUnit[]>;
+}
+
+/**
+ * Interface for memory context management operations
+ */
+export interface IMemoryContextManager {
+    setContext(key: string, value: any): Promise<void>;
+    getContext(key: string): Promise<any>;
+    getAllContext(): Promise<Map<string, any>>;
+    clearContext(): Promise<void>;
+    storeContextAsEpisodicMemory(context: Map<string, any>): Promise<void>;
 }
 
 /**
@@ -187,6 +205,12 @@ export function buildQueryFromFilter(filter: MemoryFilter): string {
             for (const [key, value] of contentFilter.entries()) {
                 queryParts.push(`content.${key}:${value}`);
             }
+        }
+    }
+
+    if (filter.contextFilter?.size) {
+        for (const [key, value] of filter.contextFilter.entries()) {
+            queryParts.push(`context.${key}:${value}`);
         }
     }
 

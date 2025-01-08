@@ -4,7 +4,8 @@ import {
     ConsolidationStatus, 
     IMemoryStorage, 
     IMemoryIndex,
-    MemoryType
+    MemoryType,
+    MemoryFilter
 } from './types';
 
 export interface ConsolidationTrigger {
@@ -19,121 +20,146 @@ export class MemoryConsolidator implements IMemoryConsolidation {
     private triggers: Map<string, ConsolidationTrigger>;
     private maxWorkingMemorySize: number;
     private currentWorkingMemorySize: number = 0;
+    private consolidationThreshold: number;
 
     constructor(
         storage: IMemoryStorage,
         index: IMemoryIndex,
-        maxWorkingMemorySize: number = 1000, // Maximum number of working memories
-        triggers?: Map<string, ConsolidationTrigger>
+        maxWorkingMemorySize: number = 1000,
+        triggers?: Map<string, ConsolidationTrigger>,
+        consolidationThreshold: number = 5
     ) {
         this.storage = storage;
         this.index = index;
         this.maxWorkingMemorySize = maxWorkingMemorySize;
+        this.consolidationThreshold = consolidationThreshold;
         
         // Default consolidation triggers
         this.triggers = triggers || new Map([
-            ['access_count', { 
-                type: 'access_count',
-                threshold: 5 // Consolidate after 5 accesses
-            }],
-            ['time_based', { 
-                type: 'time_based',
-                threshold: 24 * 60 * 60 * 1000, // 24 hours
-                lastCheck: Date.now()
-            }],
-            ['priority_change', { 
-                type: 'priority_change',
-                threshold: 0.7 // Consolidate if priority exceeds 0.7
-            }],
-            ['context_switch', { 
-                type: 'context_switch',
-                threshold: 3 // Consolidate after 3 context switches
-            }],
-            ['memory_capacity', { 
-                type: 'memory_capacity',
-                threshold: 0.8 // Consolidate when working memory is 80% full
-            }]
+            ['access_count', { type: 'access_count', threshold: 5 }],
+            ['time_based', { type: 'time_based', threshold: 24 * 60 * 60 * 1000 }], // 24 hours
+            ['priority_change', { type: 'priority_change', threshold: 0.8 }],
+            ['context_switch', { type: 'context_switch', threshold: 3 }],
+            ['memory_capacity', { type: 'memory_capacity', threshold: 0.8 }]
         ]);
     }
 
-    async checkTriggers(memory: IMemoryUnit): Promise<boolean> {
-        const now = Date.now();
-        let shouldConsolidate = false;
+    async consolidate(memory: IMemoryUnit): Promise<void> {
+        // Get memories to consolidate
+        const candidates = await this.getConsolidationCandidates();
+        if (candidates.length === 0) return;
 
-        // Check access count trigger
-        const accessTrigger = this.triggers.get('access_count');
-        if (accessTrigger && (memory.accessCount || 0) >= accessTrigger.threshold) {
-            shouldConsolidate = true;
+        // Group similar memories
+        const groups = await this.groupSimilarMemories(candidates);
+
+        // Consolidate each group
+        for (const group of groups) {
+            await this.consolidateGroup(group);
         }
-
-        // Check time-based trigger
-        const timeTrigger = this.triggers.get('time_based');
-        if (timeTrigger && memory.timestamp) {
-            const age = now - memory.timestamp.getTime();
-            if (age >= timeTrigger.threshold) {
-                shouldConsolidate = true;
-            }
-        }
-
-        // Check priority trigger
-        const priorityTrigger = this.triggers.get('priority_change');
-        if (priorityTrigger && (memory.priority || 0) >= priorityTrigger.threshold) {
-            shouldConsolidate = true;
-        }
-
-        // Check context switch trigger
-        const contextTrigger = this.triggers.get('context_switch');
-        if (contextTrigger) {
-            const contextSwitches = memory.metadata.get('contextSwitches') || 0;
-            if (contextSwitches >= contextTrigger.threshold) {
-                shouldConsolidate = true;
-            }
-        }
-
-        // Check memory capacity trigger
-        const capacityTrigger = this.triggers.get('memory_capacity');
-        if (capacityTrigger) {
-            const capacityRatio = this.currentWorkingMemorySize / this.maxWorkingMemorySize;
-            if (capacityRatio >= capacityTrigger.threshold) {
-                shouldConsolidate = true;
-            }
-        }
-
-        return shouldConsolidate;
     }
 
-    async consolidate(memory: IMemoryUnit): Promise<void> {
-        if (!this.isConsolidationNeeded(memory) && !(await this.checkTriggers(memory))) {
-            return;
-        }
+    async getConsolidationCandidates(): Promise<IMemoryUnit[]> {
+        const filter: MemoryFilter = {
+            types: [MemoryType.WORKING],
+            metadataFilters: []
+        };
 
-        // Mark memory as being consolidated
-        memory.metadata.set('consolidationStatus', ConsolidationStatus.IN_PROGRESS);
-        await this.storage.update(memory);
+        const memories = await this.storage.retrieveByFilter(filter);
+        return memories.filter(memory => {
+            const accessCount = memory.accessCount || 0;
+            return accessCount >= this.consolidationThreshold;
+        });
+    }
 
-        try {
-            // If it's a working memory with triggered consolidation, move it to long-term storage
-            if (memory.metadata.get('type') === MemoryType.WORKING) {
-                await this.moveToLongTerm(memory);
-                this.currentWorkingMemorySize--;
+    private async groupSimilarMemories(memories: IMemoryUnit[]): Promise<IMemoryUnit[][]> {
+        const groups: IMemoryUnit[][] = [];
+        const processed = new Set<string>();
+
+        for (const memory of memories) {
+            if (processed.has(memory.id)) continue;
+
+            const similar = await this.findSimilarMemories(memory);
+            if (similar.length > 0) {
+                groups.push([memory, ...similar]);
+                processed.add(memory.id);
+                similar.forEach(m => processed.add(m.id));
             }
-
-            // Update consolidation status and metadata
-            memory.metadata.set('consolidationStatus', ConsolidationStatus.CONSOLIDATED);
-            memory.metadata.set('lastConsolidated', new Date().toISOString());
-            memory.metadata.set('consolidationTriggers', Array.from(this.triggers.entries())
-                .filter(([_, trigger]) => this.checkTriggerCondition(memory, trigger))
-                .map(([type, _]) => type)
-            );
-
-            await this.storage.update(memory);
-            await this.index.index(memory);
-        } catch (error) {
-            // If consolidation fails, mark it as unconsolidated
-            memory.metadata.set('consolidationStatus', ConsolidationStatus.UNCONSOLIDATED);
-            await this.storage.update(memory);
-            throw error;
         }
+
+        return groups;
+    }
+
+    private async findSimilarMemories(memory: IMemoryUnit): Promise<IMemoryUnit[]> {
+        // Get related memory IDs from the index
+        const relatedIds = await this.index.search(JSON.stringify(memory.content));
+        
+        // Filter out the current memory ID
+        const otherIds = relatedIds.filter(id => id !== memory.id);
+        
+        // Retrieve all related memories
+        const memories = await this.storage.batchRetrieve(otherIds);
+        
+        // Filter out null values and return valid memories
+        return memories.filter((m): m is IMemoryUnit => m !== null);
+    }
+
+    private async consolidateGroup(memories: IMemoryUnit[]): Promise<void> {
+        if (memories.length < 2) return;
+
+        // Get all related memories
+        const allRelatedIds = new Set<string>();
+        for (const memory of memories) {
+            const relatedIds = await this.index.search(JSON.stringify(memory.content));
+            relatedIds.forEach(id => allRelatedIds.add(id));
+        }
+
+        // Retrieve all related memories
+        const relatedMemories = await this.storage.batchRetrieve(Array.from(allRelatedIds));
+        const validMemories = relatedMemories.filter((m): m is IMemoryUnit => m !== null);
+
+        // Create consolidated memory
+        const consolidatedMemory = await this.createConsolidatedMemory(validMemories);
+
+        // Store consolidated memory
+        await this.storage.store(consolidatedMemory);
+
+        // Delete original memories
+        await Promise.all(validMemories.map(m => this.storage.delete(m.id)));
+    }
+
+    private async createConsolidatedMemory(memories: IMemoryUnit[]): Promise<IMemoryUnit> {
+        // Combine content from all memories
+        const combinedContent = memories.reduce((acc, memory) => {
+            if (typeof memory.content === 'object') {
+                return { ...acc, ...memory.content };
+            }
+            return acc;
+        }, {});
+
+        // Combine metadata from all memories
+        const combinedMetadata = new Map<string, any>();
+        memories.forEach(memory => {
+            memory.metadata.forEach((value, key) => {
+                if (!combinedMetadata.has(key)) {
+                    combinedMetadata.set(key, value);
+                }
+            });
+        });
+
+        // Create new consolidated memory
+        return {
+            id: crypto.randomUUID(),
+            content: combinedContent,
+            metadata: combinedMetadata,
+            timestamp: new Date(),
+            accessCount: 0
+        };
+    }
+
+    public isConsolidationNeeded(memory: IMemoryUnit): boolean {
+        return Array.from(this.triggers.values()).some(trigger => 
+            this.checkTriggerCondition(memory, trigger)
+        );
     }
 
     private checkTriggerCondition(memory: IMemoryUnit, trigger: ConsolidationTrigger): boolean {
@@ -153,55 +179,7 @@ export class MemoryConsolidator implements IMemoryConsolidation {
         }
     }
 
-    isConsolidationNeeded(memory: IMemoryUnit): boolean {
-        return memory.metadata.get('consolidationStatus') !== ConsolidationStatus.CONSOLIDATED;
-    }
-
-    async getConsolidationCandidates(): Promise<IMemoryUnit[]> {
-        const candidates = await this.storage.batchRetrieve(
-            await this.index.search(`
-                (consolidationStatus:${ConsolidationStatus.UNCONSOLIDATED} OR 
-                 consolidationStatus:${ConsolidationStatus.IN_PROGRESS})
-            `)
-        );
-
-        const needsConsolidation = await Promise.all(
-            candidates.map(async memory => ({
-                memory,
-                shouldConsolidate: this.isConsolidationNeeded(memory) || await this.checkTriggers(memory)
-            }))
-        );
-
-        return needsConsolidation
-            .filter(({ shouldConsolidate }) => shouldConsolidate)
-            .map(({ memory }) => memory);
-    }
-
-    private async moveToLongTerm(memory: IMemoryUnit): Promise<void> {
-        // Create a copy of the memory for long-term storage
-        const longTermMemory: IMemoryUnit = {
-            ...memory,
-            id: `lt_${memory.id}`, // New ID for long-term version
-            metadata: new Map([
-                ...Array.from(memory.metadata.entries()),
-                ['type', MemoryType.EPISODIC], // Convert to episodic memory
-                ['originalId', memory.id],
-                ['consolidatedFrom', 'working_memory'],
-                ['consolidationTimestamp', new Date().toISOString()]
-            ])
-        };
-
-        // Store the long-term version
-        await this.storage.store(longTermMemory);
-        await this.index.index(longTermMemory);
-
-        // Update the original memory with a reference to the long-term version
-        memory.metadata.set('longTermId', longTermMemory.id);
-        await this.storage.update(memory);
-    }
-
-    // Method to update working memory size
-    async updateWorkingMemorySize(delta: number): Promise<void> {
+    public async updateWorkingMemorySize(delta: number): Promise<void> {
         this.currentWorkingMemorySize += delta;
         if (this.currentWorkingMemorySize < 0) {
             this.currentWorkingMemorySize = 0;

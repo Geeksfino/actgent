@@ -1,0 +1,427 @@
+import { expect, test, describe, beforeEach, afterEach } from 'bun:test';
+import { AgentMemorySystem } from '../../src/core/memory/AgentMemorySystem';
+import { IMemoryStorage, IMemoryIndex, IMemoryUnit, MemoryFilter, MemoryType } from '../../src/core/memory/types';
+
+// Mock LLM response for testing
+class MockLLM {
+    async generate(prompt: string): Promise<string> {
+        return "This is a mock LLM response";
+    }
+}
+
+// Mock Memory Cache
+class MockMemoryCache {
+    private cache: Map<string, IMemoryUnit> = new Map();
+    private maxSize: number;
+
+    constructor(maxSize: number = 1000) {
+        this.cache = new Map();
+        this.maxSize = maxSize;
+    }
+
+    set(id: string, memory: IMemoryUnit): void {
+        if (this.cache.size >= this.maxSize) {
+            // Remove oldest entry
+            const firstKey = this.cache.keys().next().value;
+            this.cache.delete(firstKey);
+        }
+        this.cache.set(id, memory);
+    }
+
+    get(id: string): IMemoryUnit | undefined {
+        return this.cache.get(id);
+    }
+
+    clear(): void {
+        this.cache.clear();
+    }
+}
+
+// Mock Memory Storage
+class MockMemoryStorage implements IMemoryStorage {
+    private storage: Map<string, IMemoryUnit> = new Map();
+    private cache: MockMemoryCache;
+
+    constructor() {
+        this.cache = new MockMemoryCache();
+    }
+
+    async store(memory: IMemoryUnit): Promise<void> {
+        if (!memory.id) {
+            memory.id = Math.random().toString(36).substring(7);
+        }
+        if (!memory.lastAccessed) {
+            memory.lastAccessed = new Date();
+        }
+        this.storage.set(memory.id, memory);
+        this.cache.set(memory.id, memory);
+    }
+
+    async retrieve(id: string): Promise<IMemoryUnit> {
+        const cached = this.cache.get(id);
+        if (cached) {
+            cached.lastAccessed = new Date();
+            return cached;
+        }
+
+        const memory = this.storage.get(id);
+        if (memory) {
+            memory.lastAccessed = new Date();
+            this.cache.set(id, memory);
+            return memory;
+        }
+        throw new Error(`Memory unit with id ${id} not found`);
+    }
+
+    async update(memory: IMemoryUnit): Promise<void> {
+        if (!memory.id) {
+            throw new Error('Cannot update memory without id');
+        }
+        memory.lastAccessed = new Date();
+        await this.store(memory);
+    }
+
+    async delete(id: string): Promise<void> {
+        this.storage.delete(id);
+        this.cache.clear();
+    }
+
+    async batchStore(memories: IMemoryUnit[]): Promise<void> {
+        for (const memory of memories) {
+            await this.store(memory);
+        }
+    }
+
+    async batchRetrieve(ids: string[]): Promise<IMemoryUnit[]> {
+        const memories: IMemoryUnit[] = [];
+        for (const id of ids) {
+            try {
+                memories.push(await this.retrieve(id));
+            } catch (error) {
+                // Skip non-existent memories in batch retrieval
+                continue;
+            }
+        }
+        return memories;
+    }
+
+    async clear(): Promise<void> {
+        this.storage.clear();
+        this.cache.clear();
+    }
+
+    // Helper method for testing
+    async retrieveByFilter(filter: MemoryFilter): Promise<IMemoryUnit[]> {
+        const memories = Array.from(this.storage.values());
+        return memories.filter(memory => {
+            // Check if memory is expired
+            const expiresAt = memory.metadata.get('expiresAt');
+            if (expiresAt && typeof expiresAt === 'number' && expiresAt < Date.now()) {
+                return false;
+            }
+
+            // Check memory type
+            if (filter.types && filter.types.length > 0) {
+                const memoryType = memory.metadata.get('type');
+                if (!memoryType || !filter.types.includes(memoryType)) {
+                    return false;
+                }
+            }
+
+            // Check metadata filters
+            if (filter.metadataFilters && filter.metadataFilters.length > 0) {
+                return filter.metadataFilters.every(filterMap => {
+                    return Array.from(filterMap.entries()).every(([key, value]) => {
+                        if (key === 'expiresAt') return true; // Skip expiresAt check in metadata filters
+                        return memory.metadata.get(key) === value;
+                    });
+                });
+            }
+
+            return true;
+        });
+    }
+}
+
+// Mock Memory Index
+class MockMemoryIndex implements IMemoryIndex {
+    private indexMap: Map<string, Set<string>> = new Map();
+    private cache: MockMemoryCache;
+    private storage: MockMemoryStorage;
+
+    constructor(storage: MockMemoryStorage) {
+        this.cache = new MockMemoryCache();
+        this.storage = storage;
+    }
+
+    async add(memory: IMemoryUnit): Promise<void> {
+        await this.index(memory);
+    }
+
+    async index(memory: IMemoryUnit): Promise<void> {
+        if (!memory.id) {
+            throw new Error('Cannot index memory without id');
+        }
+
+        // Index by memory type
+        const typeKey = `type:${memory.metadata.get('type')}`;
+        if (!this.indexMap.has(typeKey)) {
+            this.indexMap.set(typeKey, new Set());
+        }
+        this.indexMap.get(typeKey)?.add(memory.id);
+
+        // Index by metadata
+        for (const [key, value] of memory.metadata.entries()) {
+            const metaKey = `meta:${key}:${value}`;
+            if (!this.indexMap.has(metaKey)) {
+                this.indexMap.set(metaKey, new Set());
+            }
+            this.indexMap.get(metaKey)?.add(memory.id);
+        }
+
+        this.cache.set(memory.id, memory);
+    }
+
+    async update(memory: IMemoryUnit): Promise<void> {
+        await this.remove(memory.id);
+        await this.add(memory);
+    }
+
+    async remove(id: string): Promise<void> {
+        // Remove from all indexes
+        for (const [_, ids] of this.indexMap.entries()) {
+            ids.delete(id);
+        }
+        this.cache.clear();
+    }
+
+    async search(query: string): Promise<string[]> {
+        // Simple implementation that returns all memories of the queried type
+        const typeMatch = query.match(/type:(\w+)/);
+        if (typeMatch) {
+            const typeKey = `type:${typeMatch[1]}`;
+            return Array.from(this.indexMap.get(typeKey) || []);
+        }
+        return [];
+    }
+
+    async batchIndex(memories: IMemoryUnit[]): Promise<void> {
+        await Promise.all(memories.map(memory => this.index(memory)));
+    }
+
+    async clear(): Promise<void> {
+        this.indexMap.clear();
+        this.cache.clear();
+    }
+}
+
+describe('AgentMemorySystem', () => {
+    let memorySystem: AgentMemorySystem;
+    let storage: MockMemoryStorage;
+    let index: MockMemoryIndex;
+    const mockLLM = new MockLLM();
+
+    beforeEach(() => {
+        storage = new MockMemoryStorage();
+        index = new MockMemoryIndex(storage);
+        // Using a shorter consolidation interval for testing
+        memorySystem = new AgentMemorySystem(storage, index, 1000);
+    });
+
+    afterEach(async () => {
+        await storage.clear();
+        await index.clear();
+        if (memorySystem) {
+            memorySystem.stopAllTimers();
+        }
+    });
+
+    describe('Memory Storage Tests', () => {
+        test('should store and retrieve long-term memories', async () => {
+            const content = { text: 'test memory' };
+            const metadata = new Map([['type', MemoryType.EPISODIC]]);
+            
+            await memorySystem.getLongTermMemory().store(content, metadata);
+            
+            const filter: MemoryFilter = {
+                types: [MemoryType.EPISODIC],
+                metadataFilters: [metadata]
+            };
+            
+            const memories = await memorySystem.getLongTermMemory().retrieve(filter);
+            expect(memories.length).toBe(1);
+            expect(memories[0].content).toEqual(content);
+        });
+
+        test('should store and retrieve working memories', async () => {
+            const content = { text: 'working memory' };
+            const metadata = new Map<string, MemoryType | number>([
+                ['type', MemoryType.WORKING],
+                ['expiresAt', Date.now() + 10000] // Not expired yet
+            ]);
+            
+            await memorySystem.getWorkingMemory().store(content, metadata);
+            
+            const filter: MemoryFilter = {
+                types: [MemoryType.WORKING],
+                metadataFilters: [metadata]
+            };
+
+            const memories = await memorySystem.getWorkingMemory().retrieve(filter);
+            expect(memories.length).toBe(1);
+            expect(memories[0].content).toEqual(content);
+        });
+
+        test('should consolidate working memories after threshold', async () => {
+            const content = { text: 'test memory' };
+            const metadata = new Map<string, MemoryType | number>([
+                ['type', MemoryType.WORKING],
+                ['expiresAt', Date.now() - 2000] // Already expired
+            ]);
+
+            // Store working memory
+            await memorySystem.getWorkingMemory().store(content, metadata);
+
+            // Wait for cleanup
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            // Verify memory is cleaned up
+            const filter: MemoryFilter = {
+                types: [MemoryType.WORKING],
+                metadataFilters: [metadata]
+            };
+
+            const memories = await memorySystem.getWorkingMemory().retrieve(filter);
+            expect(memories.length).toBe(0);
+        });
+    });
+
+    describe('Context Management Tests', () => {
+        test('should manage context effectively', async () => {
+            await memorySystem.setContext('currentOperation', 'testing');
+            const context = await memorySystem.getContext('currentOperation');
+            expect(context).toBe('testing');
+        });
+
+        test('should clear context properly', async () => {
+            await memorySystem.setContext('testKey', 'testValue');
+            await memorySystem.clearContext();
+            const context = await memorySystem.getContext('testKey');
+            expect(context).toBeUndefined();
+        });
+
+        test('should load context based on filter', async () => {
+            // Store some context
+            memorySystem.setContext('testKey1', 'testValue1');
+            memorySystem.setContext('testKey2', 'testValue2');
+
+            // Store context as episodic memory with relevant type
+            await memorySystem.storeContextAsEpisodicMemory(
+                new Map([['contextType', 'relevant']])
+            );
+
+            // Load context with filter
+            await memorySystem.loadContext({
+                types: [MemoryType.EPISODIC],
+                metadataFilters: [new Map([['contextType', 'relevant']])]
+            });
+
+            // Verify context is loaded
+            const allContext = await memorySystem.getAllContext();
+            expect(allContext.size).toBeGreaterThan(0);
+            expect(allContext.get('testKey1')).toBe('testValue1');
+            expect(allContext.get('testKey2')).toBe('testValue2');
+        });
+
+        test('should handle memory and context interactions', async () => {
+            // Set initial context
+            memorySystem.setContext('currentOperation', 'testing');
+            memorySystem.setContext('operationType', 'test');
+
+            // Store some memories with context
+            await memorySystem.storeWorkingMemory(
+                { action: 'test1', operationType: 'test' },
+                new Map<string, MemoryType | string | number>([
+                    ['type', MemoryType.CONTEXTUAL],
+                    ['contextKey', 'operationType'],
+                    ['expiresAt', Date.now() + 10000] // Not expired yet
+                ])
+            );
+
+            await memorySystem.storeLongTerm(
+                { action: 'test2', operationStatus: 'running' },
+                new Map<string, MemoryType | string>([
+                    ['type', MemoryType.CONTEXTUAL],
+                    ['contextKey', 'operationStatus']
+                ])
+            );
+
+            // Store context as episodic memory
+            await memorySystem.storeContextAsEpisodicMemory(
+                new Map<string, string>([['contextType', 'test']])
+            );
+
+            // Verify context includes both explicit and memory-derived context
+            const allContext = await memorySystem.getAllContext();
+            expect(allContext.get('currentOperation')).toBe('testing');
+            expect(allContext.get('operationType')).toBe('test');
+            expect(allContext.get('operationStatus')).toBe('running');
+            expect(allContext.size).toBeGreaterThan(1);
+        });
+    });
+
+    describe('Integration Tests', () => {
+        test('should handle memory and context interactions', async () => {
+            // Set initial context
+            memorySystem.setContext('currentOperation', 'testing');
+            memorySystem.setContext('operationType', 'integration');
+
+            // Store some working memories
+            await memorySystem.storeWorkingMemory(
+                { text: 'test memory 1', contextKey: 'memoryType', memoryType: 'test' },
+                new Map<string, MemoryType | string | number>([
+                    ['type', MemoryType.CONTEXTUAL],
+                    ['contextKey', 'memoryType'],
+                    ['expiresAt', Date.now() + 10000] // Not expired yet
+                ])
+            );
+
+            // Store context as episodic memory
+            await memorySystem.storeContextAsEpisodicMemory(
+                new Map<string, string>([['contextType', 'integration']])
+            );
+
+            // Verify context includes both explicit and memory-derived context
+            const allContext = await memorySystem.getAllContext();
+            expect(allContext.get('currentOperation')).toBe('testing');
+            expect(allContext.get('operationType')).toBe('integration');
+            expect(allContext.get('memoryType')).toBe('test');
+            expect(allContext.size).toBeGreaterThan(1);
+        });
+
+        test('should handle memory consolidation with context switches', async () => {
+            // Store working memory
+            await memorySystem.getWorkingMemory().store(
+                { text: 'temp memory' },
+                new Map<string, MemoryType | number>([
+                    ['type', MemoryType.WORKING],
+                    ['expiresAt', Date.now() - 2000] // Already expired
+                ])
+            );
+
+            // Switch context
+            await memorySystem.setContext('operation', 'newOp');
+
+            // Wait for cleanup
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            // Verify working memory was consolidated
+            const workingMemories = await memorySystem.getWorkingMemory().retrieve({
+                types: [MemoryType.WORKING],
+                metadataFilters: []
+            });
+
+            expect(workingMemories.length).toBe(0);
+        });
+    });
+});

@@ -14,63 +14,48 @@ export class LongTermMemory extends BaseMemorySystem {
     }
 
     async store(content: any, metadata?: Map<string, any>): Promise<void> {
-        const memoryType = LongTermMemory.classifyMemoryType(content, metadata);
-        
-        switch (memoryType) {
-            case MemoryType.EPISODIC:
-            case MemoryType.SEMANTIC:
-                await this.declarativeMemory.store(content, metadata);
-                break;
-            case MemoryType.PROCEDURAL:
-                await this.proceduralMemory.store(content, metadata);
-                break;
-            default:
-                throw new Error(`Invalid memory type: ${memoryType}`);
+        const memoryMetadata = new Map(metadata || []);
+        if (!memoryMetadata.has('type')) {
+            // Classify memory type based on content
+            const memoryType = LongTermMemory.classifyMemoryType(content, memoryMetadata);
+            memoryMetadata.set('type', memoryType);
         }
+
+        const memory: IMemoryUnit = {
+            id: crypto.randomUUID(),
+            content,
+            metadata: memoryMetadata,
+            timestamp: new Date()
+        };
+
+        await this.storage.store(memory);
+        await this.index.index(memory);
     }
 
     async retrieve(filter: MemoryFilter): Promise<IMemoryUnit[]> {
-        const memoryType = filter.metadata?.get('type') as MemoryType | undefined;
-        
-        switch (memoryType) {
-            case MemoryType.EPISODIC:
-            case MemoryType.SEMANTIC:
-                return this.declarativeMemory.retrieve(filter);
-            case MemoryType.PROCEDURAL:
-                return this.proceduralMemory.retrieve(filter);
-            default:
-                // If no specific type is specified, retrieve from all
-                const [declarativeResults, proceduralResults] = await Promise.all([
-                    this.declarativeMemory.retrieve(filter),
-                    this.proceduralMemory.retrieve(filter)
-                ]);
-                return [...declarativeResults, ...proceduralResults];
-        }
+        return this.storage.retrieveByFilter(filter);
     }
 
     private static classifyMemoryType(content: any, metadata?: Map<string, any>): MemoryType {
         // First check if type is explicitly specified in metadata
         if (metadata?.has('type')) {
-            const type = metadata.get('type');
-            if (Object.values(MemoryType).includes(type as MemoryType)) {
-                return type as MemoryType;
-            }
+            return metadata.get('type') as MemoryType;
         }
 
-        // Otherwise, try to infer from content structure
-        if (typeof content === 'object') {
-            if ('timeSequence' in content || 'location' in content || 'actors' in content) {
-                return MemoryType.EPISODIC;
-            }
+        // Try to infer from content structure
+        if (content && typeof content === 'object') {
             if ('concept' in content || 'relations' in content) {
                 return MemoryType.SEMANTIC;
             }
-            if ('procedure' in content || 'steps' in content || 'skills' in content) {
-                return MemoryType.PROCEDURAL;
+            if ('timeSequence' in content || 'location' in content || 'actors' in content) {
+                return MemoryType.EPISODIC;
+            }
+            if ('contextKey' in content || metadata?.has('contextKey')) {
+                return MemoryType.CONTEXTUAL;
             }
         }
 
-        // Default to episodic if can't determine
+        // Default to episodic memory
         return MemoryType.EPISODIC;
     }
 }

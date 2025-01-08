@@ -1,32 +1,31 @@
 import { WorkingMemory } from './WorkingMemory';
 import { EpisodicMemory } from './EpisodicMemory';
-import { IMemoryStorage, IMemoryIndex, MemoryType } from './types';
+import { LongTermMemory } from './LongTermMemory';
+import { IMemoryStorage, IMemoryIndex, MemoryType, MemoryFilter, IMemoryUnit, IMemoryContextManager } from './types';
+import crypto from 'crypto';
 
-export class MemoryContextManager {
+export class MemoryContextManager implements IMemoryContextManager {
+    private storage: IMemoryStorage;
+    private index: IMemoryIndex;
     private currentContext: Map<string, any>;
     private workingMemory: WorkingMemory;
     private episodicMemory: EpisodicMemory;
+    private longTermMemory: LongTermMemory;
 
     constructor(storage: IMemoryStorage, index: IMemoryIndex) {
+        this.storage = storage;
+        this.index = index;
         this.currentContext = new Map();
         this.workingMemory = new WorkingMemory(storage, index);
         this.episodicMemory = new EpisodicMemory(storage, index);
+        this.longTermMemory = new LongTermMemory(storage, index);
     }
 
-    setContext(key: string, value: any): void {
+    async setContext(key: string, value: any): Promise<void> {
         this.currentContext.set(key, value);
-        
-        // Store context in working memory
-        this.workingMemory.store(
-            { [key]: value },
-            new Map<string, any>([
-                ['type', MemoryType.CONTEXTUAL],
-                ['contextKey', key]
-            ])
-        ).catch(console.error);
     }
 
-    getContext(key: string): any {
+    async getContext(key: string): Promise<any> {
         return this.currentContext.get(key);
     }
 
@@ -34,8 +33,24 @@ export class MemoryContextManager {
         return new Map(this.currentContext);
     }
 
-    clearContext(): void {
+    async clearContext(): Promise<void> {
         this.currentContext.clear();
+    }
+
+    async loadContext(filter: MemoryFilter): Promise<void> {
+        const memories = await this.storage.retrieveByFilter({
+            ...filter,
+            types: [MemoryType.CONTEXTUAL]
+        });
+
+        // Load context from all memories
+        for (const memory of memories) {
+            if (typeof memory.content === 'object') {
+                for (const [key, value] of Object.entries(memory.content)) {
+                    await this.setContext(key, value);
+                }
+            }
+        }
     }
 
     async persistContext(): Promise<void> {
@@ -44,57 +59,36 @@ export class MemoryContextManager {
             Object.fromEntries(this.currentContext),
             new Map<string, any>([
                 ['type', MemoryType.CONTEXTUAL],
-                ['timestamp', new Date().toISOString()]
+                ['timestamp', new Date('2025-01-07T22:13:44+08:00').toISOString()]
             ])
         );
     }
 
-    async loadContext(filter: any): Promise<void> {
-        const memories = await this.episodicMemory.retrieve({
-            types: [MemoryType.CONTEXTUAL],
-            ...filter
-        });
+    async storeContextAsEpisodicMemory(metadata: Map<string, any>): Promise<void> {
+        // Create memory unit with current context
+        const memory: IMemoryUnit = {
+            id: crypto.randomUUID(),
+            content: Object.fromEntries(this.currentContext),
+            metadata: new Map([
+                ...Array.from(metadata.entries()),
+                ['type', MemoryType.CONTEXTUAL],
+                ['timestamp', new Date('2025-01-07T22:13:44+08:00').toISOString()]
+            ]),
+            timestamp: new Date('2025-01-07T22:13:44+08:00'),
+            accessCount: 0
+        };
 
-        // Load the most recent context state
-        if (memories.length > 0) {
-            const latestMemory = memories.reduce((latest, current) => 
-                latest.timestamp > current.timestamp ? latest : current
-            );
-
-            if (typeof latestMemory.content === 'object') {
-                Object.entries(latestMemory.content).forEach(([key, value]) => {
-                    this.setContext(key, value);
-                });
-            }
-        }
+        // Store in long-term memory
+        await this.storage.store(memory);
+        await this.index.index(memory);
     }
 
-    async getContextHistory(): Promise<any[]> {
-        return this.episodicMemory.retrieve({
+    async getContextHistory(): Promise<IMemoryUnit[]> {
+        const filter: MemoryFilter = {
             types: [MemoryType.CONTEXTUAL]
-        });
-    }
+        };
 
-    async storeContextAsEpisodicMemory(metadata?: Map<string, any>): Promise<void> {
-        const contextSnapshot = Array.from(this.currentContext.entries()).reduce(
-            (acc, [key, value]) => ({ ...acc, [key]: value }),
-            {}
-        );
-
-        const defaultMetadata = new Map<string, any>([
-            ['type', MemoryType.CONTEXTUAL],
-            ['timestamp', new Date().toISOString()],
-            ['location', 'system'],
-            ['actors', ['system']],
-            ['actions', ['context_snapshot']]
-        ]);
-
-        const mergedMetadata = new Map<string, any>([
-            ...Array.from(defaultMetadata.entries()),
-            ...(metadata ? Array.from(metadata.entries()) : [])
-        ]);
-
-        await this.episodicMemory.store(contextSnapshot, mergedMetadata);
+        return this.storage.retrieveByFilter(filter);
     }
 
     cleanup(): void {

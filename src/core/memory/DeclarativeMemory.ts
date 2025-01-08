@@ -14,7 +14,7 @@ export class DeclarativeMemory extends BaseMemorySystem {
     }
 
     async store(content: any, metadata?: Map<string, any>): Promise<void> {
-        const memoryType = this.classifyMemoryType(content, metadata);
+        const memoryType = DeclarativeMemory.classifyMemoryType(content, metadata);
         
         switch (memoryType) {
             case MemoryType.EPISODIC:
@@ -22,6 +22,9 @@ export class DeclarativeMemory extends BaseMemorySystem {
                 break;
             case MemoryType.SEMANTIC:
                 await this.semanticMemory.store(content, metadata);
+                break;
+            case MemoryType.CONTEXTUAL:
+                await this.episodicMemory.store(content, metadata);
                 break;
             default:
                 throw new Error(`Invalid memory type: ${memoryType}`);
@@ -46,26 +49,29 @@ export class DeclarativeMemory extends BaseMemorySystem {
         return [...episodicResults, ...semanticResults];
     }
 
-    private classifyMemoryType(content: any, metadata?: Map<string, any>): MemoryType {
+    private static classifyMemoryType(content: any, metadata?: Map<string, any>): MemoryType {
         // First check if type is explicitly specified in metadata
         if (metadata?.has('type')) {
             const type = metadata.get('type');
-            if (Object.values(MemoryType).includes(type as MemoryType)) {
+            if (type in MemoryType) {
                 return type as MemoryType;
             }
         }
 
-        // Otherwise, try to infer from content structure
-        if (typeof content === 'object') {
-            if ('timeSequence' in content || 'location' in content || 'actors' in content) {
-                return MemoryType.EPISODIC;
-            }
+        // If no type is specified, try to infer from content
+        if (content && typeof content === 'object') {
             if ('concept' in content || 'relations' in content) {
                 return MemoryType.SEMANTIC;
             }
+            if ('timeSequence' in content || 'location' in content || 'actors' in content) {
+                return MemoryType.EPISODIC;
+            }
+            if ('contextKey' in content || metadata?.has('contextKey')) {
+                return MemoryType.CONTEXTUAL;
+            }
         }
 
-        // Default to episodic if can't determine
+        // Default to episodic memory
         return MemoryType.EPISODIC;
     }
 }
