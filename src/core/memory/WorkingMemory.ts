@@ -1,6 +1,7 @@
 import { IMemoryUnit, MemoryFilter, MemoryType } from './types';
 import { BaseMemorySystem } from './BaseMemorySystem';
 import { IMemoryStorage, IMemoryIndex } from './types';
+import { logger } from '../Logger';
 
 export class WorkingMemory extends BaseMemorySystem {
     protected readonly MAX_WORKING_MEMORY_SIZE = 100;
@@ -32,11 +33,14 @@ export class WorkingMemory extends BaseMemorySystem {
         // Check if already expired - if so, just skip storing
         const expiresAt = metadataMap.get('expiresAt');
         if (expiresAt && Date.now() > expiresAt) {
+            logger.debug('Memory already expired, skipping store: %o', memory);
             return;
         }
 
         // Store in working memory
         await this.storage.store(memory);
+        await this.index.index(memory);
+        logger.debug('Stored memory: %o', memory);
 
         // Check capacity after storing
         await this.ensureCapacity();
@@ -46,7 +50,7 @@ export class WorkingMemory extends BaseMemorySystem {
             const timeout = setTimeout(async () => {
                 const currentMemory = await this.storage.retrieve(memoryId);
                 if (currentMemory) {
-                    await this.storage.delete(memoryId);
+                    await this.moveToEpisodicMemory(currentMemory);
                 }
                 this.expirationTimers.delete(memoryId);
             }, expiresAt - Date.now());
@@ -62,12 +66,14 @@ export class WorkingMemory extends BaseMemorySystem {
         if (typeof idOrFilter === 'string') {
             const memory = await this.storage.retrieve(idOrFilter);
             if (!memory || memory.metadata.get('type') !== MemoryType.WORKING) {
+                logger.debug('Memory not found or not working memory: %s', idOrFilter);
                 return [];
             }
 
             const expiresAt = memory.metadata.get('expiresAt');
             const now = Date.now();
             if (typeof expiresAt === 'number' && now > expiresAt) {
+                logger.debug('Memory expired, moving to episodic: %o', memory);
                 await this.moveToEpisodicMemory(memory);
                 return [];
             }
@@ -77,17 +83,24 @@ export class WorkingMemory extends BaseMemorySystem {
 
         // Handle filter case
         const filter = idOrFilter || {};
-        const memories = await this.storage.retrieveByFilter({
-            ...filter,
-            types: [MemoryType.WORKING]
-        });
+        const types = filter.types || [MemoryType.WORKING];
+        if (!types.includes(MemoryType.WORKING)) {
+            logger.debug('Filter does not include working memories: %o', filter);
+            return [];
+        }
 
+        const memories = await this.storage.retrieveByFilter(filter);
         const now = Date.now();
         const validMemories: IMemoryUnit[] = [];
 
         for (const memory of memories) {
+            if (memory.metadata.get('type') !== MemoryType.WORKING) {
+                continue;
+            }
+
             const expiresAt = memory.metadata.get('expiresAt');
             if (typeof expiresAt === 'number' && now > expiresAt) {
+                logger.debug('Memory expired, moving to episodic: %o', memory);
                 await this.moveToEpisodicMemory(memory);
                 continue;
             }
@@ -102,20 +115,34 @@ export class WorkingMemory extends BaseMemorySystem {
      * Used for immediate transitions (expiration, capacity)
      */
     private async moveToEpisodicMemory(memory: IMemoryUnit): Promise<void> {
+        // Clear expiration timer first
+        this.clearExpirationTimer(memory.id);
+
         const episodicMetadata = new Map(memory.metadata);
         episodicMetadata.set('type', MemoryType.EPISODIC);
         episodicMetadata.delete('expiresAt');  // Episodic memories don't expire
         episodicMetadata.set('originalType', MemoryType.WORKING);
         episodicMetadata.set('consolidationTime', Date.now());
         episodicMetadata.set('transitionType', 'immediate');
+        episodicMetadata.set('originalId', memory.id);
+
+        // Preserve important metadata
+        const preserveKeys = ['priority', 'relevance', 'importance', 'tags', 'category', 'source'];
+        for (const key of preserveKeys) {
+            const value = memory.metadata.get(key);
+            if (value !== undefined) {
+                episodicMetadata.set(key, value);
+            }
+        }
 
         const episodicMemory: IMemoryUnit = {
             id: crypto.randomUUID(),
             content: memory.content,
             metadata: episodicMetadata,
-            timestamp: new Date()
+            timestamp: memory.timestamp // Preserve original timestamp
         };
 
+        logger.debug('Moving memory to episodic: %o', episodicMemory);
         await this.storage.store(episodicMemory);
         await this.index.index(episodicMemory);
         await this.storage.delete(memory.id);
@@ -142,7 +169,7 @@ export class WorkingMemory extends BaseMemorySystem {
 
         // Process each context group
         for (const [context, groupMemories] of contextGroups) {
-            // Create consolidated episodic memory for the group
+            // Consolidate metadata from all memories
             const consolidatedMetadata = new Map<string, any>();
             consolidatedMetadata.set('type', MemoryType.EPISODIC);
             consolidatedMetadata.set('context', context);
@@ -151,20 +178,58 @@ export class WorkingMemory extends BaseMemorySystem {
             consolidatedMetadata.set('transitionType', 'batch');
             consolidatedMetadata.set('originalIds', groupMemories.map(m => m.id));
 
+            // Consolidate important metadata
+            const preserveKeys = ['priority', 'relevance', 'importance', 'tags', 'category', 'source'];
+            for (const key of preserveKeys) {
+                const values = groupMemories
+                    .map(m => m.metadata.get(key))
+                    .filter(v => v !== undefined);
+                
+                if (values.length > 0) {
+                    if (key === 'priority' || key === 'relevance' || key === 'importance') {
+                        // For numeric values, take the maximum
+                        consolidatedMetadata.set(key, Math.max(...values.map(v => Number(v))));
+                    } else if (key === 'tags' || key === 'category') {
+                        // For arrays or sets, combine unique values
+                        const uniqueValues = new Set(values.flat());
+                        consolidatedMetadata.set(key, Array.from(uniqueValues));
+                    } else {
+                        // For other values, take the most common
+                        const valueCounts = new Map<any, number>();
+                        values.forEach(v => valueCounts.set(v, (valueCounts.get(v) || 0) + 1));
+                        const [mostCommon] = Array.from(valueCounts.entries())
+                            .sort((a, b) => b[1] - a[1])[0];
+                        consolidatedMetadata.set(key, mostCommon);
+                    }
+                }
+            }
+
+            // Create consolidated memory
             const consolidatedMemory: IMemoryUnit = {
                 id: crypto.randomUUID(),
                 content: {
-                    memories: groupMemories.map(m => m.content),
+                    memories: groupMemories.map(m => ({
+                        id: m.id,
+                        content: m.content,
+                        metadata: Object.fromEntries(m.metadata),
+                        timestamp: m.timestamp
+                    })),
                     context
                 },
                 metadata: consolidatedMetadata,
-                timestamp: new Date()
+                timestamp: new Date(Math.max(...groupMemories.map(m => m.timestamp.getTime())))
             };
 
             // Store consolidated memory and cleanup originals
+            logger.debug('Storing consolidated memory: %o', consolidatedMemory);
             await this.storage.store(consolidatedMemory);
             await this.index.index(consolidatedMemory);
-            await Promise.all(groupMemories.map(m => this.storage.delete(m.id)));
+
+            // Clear expiration timers and delete originals
+            for (const memory of groupMemories) {
+                this.clearExpirationTimer(memory.id);
+                await this.storage.delete(memory.id);
+            }
         }
     }
 
@@ -216,7 +281,7 @@ export class WorkingMemory extends BaseMemorySystem {
             const timer = setTimeout(async () => {
                 const currentMemory = await this.storage.retrieve(memoryId);
                 if (currentMemory) {
-                    await this.storage.delete(memoryId);
+                    await this.moveToEpisodicMemory(currentMemory);
                 }
                 this.expirationTimers.delete(memoryId);
             }, expirationTime - Date.now());
@@ -325,6 +390,43 @@ export class WorkingMemory extends BaseMemorySystem {
             await Promise.all(memoriesToMove.map(memory => 
                 this.moveToEpisodicMemory(memory)
             ));
+        }
+    }
+
+    /**
+     * Get statistics about the working memory state
+     */
+    async getStats(): Promise<{ capacityUsage: number; totalMemories: number }> {
+        const memories = await this.retrieve({ types: [MemoryType.WORKING] });
+        return {
+            totalMemories: memories.length,
+            capacityUsage: memories.length / this.MAX_WORKING_MEMORY_SIZE
+        };
+    }
+
+    /**
+     * Update context
+     */
+    public async updateContext(newContext: string): Promise<void> {
+        const memories = await this.retrieve({ types: [MemoryType.WORKING] });
+        
+        for (const memory of memories) {
+            const metadata = new Map(memory.metadata);
+            const currentContext = metadata.get('context');
+            
+            if (currentContext && currentContext !== newContext) {
+                // Increment context switch count
+                const switches = (metadata.get('contextSwitches') || 0) + 1;
+                metadata.set('contextSwitches', switches);
+                
+                // Update context
+                metadata.set('context', newContext);
+                
+                await this.update({
+                    ...memory,
+                    metadata
+                });
+            }
         }
     }
 }

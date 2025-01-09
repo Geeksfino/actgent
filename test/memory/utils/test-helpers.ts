@@ -1,14 +1,9 @@
 import { IMemoryStorage, IMemoryIndex, IMemoryUnit, MemoryFilter, MemoryType } from '../../../src/core/memory/types';
 import crypto from 'crypto';
+import { logger } from '../../../src/core/Logger';
 
 // Debug flag that can be controlled via environment variable
 const DEBUG = process.env.DEBUG === 'true';
-
-function debugLog(...args: any[]) {
-    if (DEBUG) {
-        console.log(...args);
-    }
-}
 
 export class MockMemoryStorage implements IMemoryStorage {
     private memories: Map<string, IMemoryUnit> = new Map();
@@ -32,6 +27,7 @@ export class MockMemoryStorage implements IMemoryStorage {
             clonedMemory.metadata.set('type', MemoryType.WORKING);
         }
         
+        logger.debug('Storing memory: %o', clonedMemory);
         this.memories.set(clonedMemory.id, clonedMemory);
     }
 
@@ -61,16 +57,18 @@ export class MockMemoryStorage implements IMemoryStorage {
     }
 
     async retrieve(id: string): Promise<IMemoryUnit | null> {
-        return this.memories.get(id) || null;
+        const memory = this.memories.get(id);
+        logger.debug('Retrieved memory %s: %o', id, memory);
+        return memory || null;
     }
 
     async retrieveByFilter(filter: MemoryFilter): Promise<IMemoryUnit[]> {
-        debugLog('Memories:', Array.from(this.memories.values()).map(m => ({
+        logger.debug('Memories:', Array.from(this.memories.values()).map(m => ({
             id: m.id,
             content: m.content,
             metadata: Object.fromEntries(m.metadata.entries())
         })));
-        debugLog('Filter:', filter);
+        logger.debug('Filter:', filter);
         
         const memories = Array.from(this.memories.values()).filter(memory => {
             // Type check
@@ -154,14 +152,17 @@ export class MockMemoryStorage implements IMemoryStorage {
         if (!(memory.metadata instanceof Map)) {
             memory.metadata = new Map(Object.entries(memory.metadata || {}));
         }
+        logger.debug('Updating memory: %o', memory);
         this.memories.set(memory.id, memory);
     }
 
     async delete(id: string): Promise<void> {
+        logger.debug('Deleting memory: %s', id);
         this.memories.delete(id);
     }
 
     async clear(): Promise<void> {
+        logger.debug('Clearing all memories');
         this.memories.clear();
     }
 
@@ -204,6 +205,7 @@ export class MockMemoryIndex implements IMemoryIndex {
             }
             this.indexMap.get(word)!.add(memory.id);
         }
+        logger.debug('Added to index - memory: %o', memory);
     }
 
     async search(query: string): Promise<string[]> {
@@ -220,9 +222,11 @@ export class MockMemoryIndex implements IMemoryIndex {
         }
         
         // Sort by relevance (number of matching words)
-        return Array.from(results.entries())
+        const sortedResults = Array.from(results.entries())
             .sort(([, a], [, b]) => b - a)
             .map(([id]) => id);
+        logger.debug('Searching index - query: %s, results: %o', query, sortedResults);
+        return sortedResults;
     }
 
     async update(memory: IMemoryUnit): Promise<void> {
@@ -235,6 +239,7 @@ export class MockMemoryIndex implements IMemoryIndex {
         for (const ids of this.indexMap.values()) {
             ids.delete(id);
         }
+        logger.debug('Removed from index - id: %s', id);
     }
 
     async batchIndex(memories: IMemoryUnit[]): Promise<void> {
@@ -244,6 +249,8 @@ export class MockMemoryIndex implements IMemoryIndex {
     }
 
     async getMemory(id: string): Promise<IMemoryUnit | null> {
-        return this.memories.get(id) || null;
+        const memory = this.memories.get(id);
+        logger.debug('Retrieved memory from index - id: %s, memory: %o', id, memory);
+        return memory || null;
     }
 }

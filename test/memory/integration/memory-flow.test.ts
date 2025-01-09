@@ -31,7 +31,7 @@ describe('Memory Flow Integration', () => {
         expect(workingMemories[0].content).toBe(content);
 
         // Consolidate to episodic memory
-        await memorySystem.consolidateWorkingMemory();
+        await memorySystem.getTransitionManager().checkAndTransition();
 
         // Verify it's moved to episodic memory
         const episodicFilter = {
@@ -65,7 +65,7 @@ describe('Memory Flow Integration', () => {
         expect(storedMemories.length).toBe(memories.length);
 
         // Consolidate all memories
-        await memorySystem.consolidateWorkingMemory();
+        await memorySystem.getTransitionManager().checkAndTransition();
 
         // Verify all moved to episodic memory
         const episodicFilter = { types: [MemoryType.EPISODIC] };
@@ -89,7 +89,7 @@ describe('Memory Flow Integration', () => {
         await memorySystem.storeWorkingMemory(content, metadata);
 
         // Consolidate to episodic memory
-        await memorySystem.consolidateWorkingMemory();
+        await memorySystem.getTransitionManager().checkAndTransition();
 
         // Retrieve from episodic memory and verify metadata
         const filter = {
@@ -103,5 +103,48 @@ describe('Memory Flow Integration', () => {
         expect(memories[0].metadata.get('importance')).toBe('high');
         expect(memories[0].metadata.get('category')).toBe('test');
         expect(memories[0].metadata.has('timestamp')).toBe(true);
+    });
+
+    test('should transition memories based on access count', async () => {
+        const memory = await memorySystem.storeWorkingMemory('test content', new Map([['accessCount', 5]]));
+        
+        // Trigger transition check
+        await memorySystem.getTransitionManager().checkAndTransition();
+        
+        // Memory should be moved to long-term memory
+        const workingMemories = await memorySystem.getWorkingMemory().retrieve({});
+        expect(workingMemories).toHaveLength(0);
+        
+        const longTermMemories = await memorySystem.getLongTermMemory().retrieve({});
+        expect(longTermMemories).toHaveLength(1);
+    });
+
+    test('should transition memories based on time threshold', async () => {
+        const oldTimestamp = Date.now() - (25 * 60 * 60 * 1000); // 25 hours ago
+        const memory = await memorySystem.storeWorkingMemory('test content', new Map([['timestamp', oldTimestamp]]));
+        
+        // Trigger transition check
+        await memorySystem.getTransitionManager().checkAndTransition();
+        
+        // Memory should be moved to long-term memory
+        const workingMemories = await memorySystem.getWorkingMemory().retrieve({});
+        expect(workingMemories).toHaveLength(0);
+        
+        const longTermMemories = await memorySystem.getLongTermMemory().retrieve({});
+        expect(longTermMemories).toHaveLength(1);
+    });
+
+    test('should transition memories based on importance', async () => {
+        const memory = await memorySystem.storeWorkingMemory('test content', new Map([['importance', 0.8]]));
+        
+        // Trigger transition check
+        await memorySystem.getTransitionManager().checkAndTransition();
+        
+        // Memory should be moved to long-term memory
+        const workingMemories = await memorySystem.getWorkingMemory().retrieve({});
+        expect(workingMemories).toHaveLength(0);
+        
+        const longTermMemories = await memorySystem.getLongTermMemory().retrieve({});
+        expect(longTermMemories).toHaveLength(1);
     });
 });

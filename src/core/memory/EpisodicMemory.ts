@@ -11,6 +11,7 @@ import {
     EmotionalContext,
     IMemoryMetadata
 } from './types';
+import { logger } from '../Logger';
 
 export class EpisodicMemory extends BaseMemorySystem {
     protected readonly MIN_IMPORTANCE_SCORE = 0.3;
@@ -61,18 +62,18 @@ export class EpisodicMemory extends BaseMemorySystem {
     public async findSimilarExperiences(memory: IEpisodicMemoryUnit): Promise<IEpisodicMemoryUnit[]> {
         const allMemories = await this.retrieve({ types: [MemoryType.EPISODIC] });
         
-        console.log('Finding similar experiences for:', JSON.stringify(memory, null, 2));
-        console.log('All memories:', JSON.stringify(allMemories, null, 2));
+        logger.debug('Finding similar experiences for: %o', JSON.stringify(memory, null, 2));
+        logger.debug('All memories: %o', JSON.stringify(allMemories, null, 2));
         
         // Ensure memory has required properties
         if (!memory?.content?.location || !memory?.content?.actors || !memory?.content?.actions) {
-            console.log('Memory missing required properties');
+            logger.debug('Memory missing required properties');
             return [];
         }
         
         return allMemories.filter(existingMemory => {
             if (existingMemory.id === memory.id) {
-                console.log('Skipping same memory');
+                logger.debug('Skipping same memory');
                 return false;
             }
             
@@ -83,7 +84,7 @@ export class EpisodicMemory extends BaseMemorySystem {
             const locationMatch = existingMemory.content.location === memory.content.location;
             if (locationMatch) {
                 similarityScore += 0.4;
-                console.log('Location match:', existingMemory.content.location);
+                logger.debug('Location match: %s', existingMemory.content.location);
             }
             
             // Actor overlap (30%)
@@ -91,20 +92,21 @@ export class EpisodicMemory extends BaseMemorySystem {
                 existingMemory.content.actors.includes(actor)
             ).length / Math.max(memory.content.actors.length, existingMemory.content.actors.length);
             similarityScore += 0.3 * actorOverlap;
-            console.log('Actor overlap:', actorOverlap);
+            logger.debug('Actor overlap: %s', actorOverlap);
             
             // Action overlap (30%)
-            const actionOverlap = memory.content.actions.filter(action => 
-                existingMemory.content.actions.includes(action)
-            ).length / Math.max(memory.content.actions.length, existingMemory.content.actions.length);
+            const actionOverlap = this.calculateSetOverlap(
+                new Set(memory.content.actions),
+                new Set(existingMemory.content.actions)
+            );
             similarityScore += 0.3 * actionOverlap;
-            console.log('Action overlap:', actionOverlap);
+            logger.debug('Action overlap: %s', actionOverlap);
             
             const hasCommonAction = memory.content.actions.some(action => 
                 existingMemory.content.actions.includes(action)
             );
             
-            console.log('Memory comparison:', {
+            logger.debug('Memory comparison: %o', {
                 id: existingMemory.id,
                 location: existingMemory.content.location,
                 locationMatch,
@@ -116,7 +118,7 @@ export class EpisodicMemory extends BaseMemorySystem {
             // 1. Same location and at least one common action
             // 2. Overall similarity score > 0.3
             const isSimilar = (locationMatch && hasCommonAction) || similarityScore > 0.3;
-            console.log('Is similar:', isSimilar);
+            logger.debug('Is similar: %s', isSimilar);
             return isSimilar;
         });
     }

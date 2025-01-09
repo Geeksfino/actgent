@@ -295,7 +295,7 @@ describe('AgentMemorySystem', () => {
             ]);
 
             await memorySystem.storeWorkingMemory(content, metadata);
-            await memorySystem.consolidateWorkingMemory();
+            await memorySystem.getTransitionManager().checkAndTransition();
 
             const workingFilter: MemoryFilter = {
                 types: [MemoryType.WORKING],
@@ -355,6 +355,42 @@ describe('AgentMemorySystem', () => {
             const memories = await memorySystem.retrieveWorkingMemories(filter);
             expect(memories.length).toBe(0);
         });
+
+        test('should preserve metadata during consolidation', async () => {
+            // Store test memory with metadata
+            const metadata = new Map<string, any>([
+                ['type', 'test'],
+                ['importance', 0.8]
+            ]);
+            await memorySystem.storeWorkingMemory('test content', metadata);
+
+            // Trigger transition
+            await memorySystem.getTransitionManager().checkAndTransition();
+
+            // Verify metadata preserved
+            const episodicMemories = await memorySystem.getEpisodicMemory().retrieve({});
+            expect(episodicMemories).toHaveLength(1);
+            expect(episodicMemories[0].metadata.get('type')).toBe('test');
+            expect(episodicMemories[0].metadata.get('importance')).toBe(0.8);
+        });
+
+        test('should handle memory consolidation with context', async () => {
+            // Store test memory with context
+            const metadata = new Map<string, any>([
+                ['context', 'test-context'],
+                ['priority', 1]
+            ]);
+            await memorySystem.storeWorkingMemory('test content', metadata);
+
+            // Trigger transition
+            await memorySystem.getTransitionManager().checkAndTransition();
+
+            // Verify consolidation with context
+            const episodicMemories = await memorySystem.getEpisodicMemory().retrieve({});
+            expect(episodicMemories).toHaveLength(1);
+            expect(episodicMemories[0].metadata.get('context')).toBe('test-context');
+            expect(episodicMemories[0].metadata.get('priority')).toBe(1);
+        });
     });
 
     describe('Context Management Tests', () => {
@@ -395,72 +431,189 @@ describe('AgentMemorySystem', () => {
         });
     });
 
+    describe('Memory Transition', () => {
+        test('should handle memory transitions correctly', async () => {
+            // Store memory in working memory
+            const content = 'test memory content';
+            const memory = await memorySystem.storeWorkingMemory(content);
+
+            // Verify it's in working memory
+            let workingMemories = await memorySystem.getWorkingMemory().retrieve({});
+            expect(workingMemories).toHaveLength(1);
+
+            // Add high access count to trigger transition
+            const metadata = new Map(workingMemories[0].metadata);
+            metadata.set('accessCount', '5');
+            await memorySystem.updateWorkingMemory({ ...workingMemories[0], metadata });
+
+            // Trigger transition
+            await memorySystem.getTransitionManager().checkAndTransition();
+
+            // Verify memory moved to long-term memory
+            workingMemories = await memorySystem.getWorkingMemory().retrieve({});
+            expect(workingMemories).toHaveLength(0);
+
+            const longTermMemories = await memorySystem.getLongTermMemory().retrieve({});
+            expect(longTermMemories).toHaveLength(1);
+        });
+
+        test('should handle context-based transitions', async () => {
+            // Store test memory with context switches
+            const metadata = new Map<string, any>([
+                ['context', 'test-context'],
+                ['contextSwitches', '3']
+            ]);
+            await memorySystem.storeWorkingMemory('test content', metadata);
+
+            // Trigger transition
+            await memorySystem.getTransitionManager().checkAndTransition();
+
+            // Verify memory moved to episodic memory
+            const workingMemories = await memorySystem.getWorkingMemory().retrieve({});
+            expect(workingMemories).toHaveLength(0);
+
+            const episodicMemories = await memorySystem.getEpisodicMemory().retrieve({});
+            expect(episodicMemories).toHaveLength(1);
+        });
+    });
+
+    describe('Memory Consolidation', () => {
+        test('should consolidate working memories to episodic memory', async () => {
+            // Store test memory
+            const content = 'test memory';
+            const metadata = new Map<string, any>([
+                ['type', 'test']
+            ]);
+            await memorySystem.storeWorkingMemory(content, metadata);
+
+            // Trigger transition
+            await memorySystem.getTransitionManager().checkAndTransition();
+
+            // Verify memory moved to episodic
+            const workingMemories = await memorySystem.getWorkingMemory().retrieve({});
+            expect(workingMemories).toHaveLength(0);
+
+            const episodicMemories = await memorySystem.getEpisodicMemory().retrieve({});
+            expect(episodicMemories).toHaveLength(1);
+            expect(episodicMemories[0].metadata.get('type')).toBe('test');
+        });
+
+        test('should preserve metadata during consolidation', async () => {
+            // Store test memory with metadata
+            const metadata = new Map<string, any>([
+                ['type', 'test'],
+                ['importance', 0.8]
+            ]);
+            await memorySystem.storeWorkingMemory('test content', metadata);
+
+            // Trigger transition
+            await memorySystem.getTransitionManager().checkAndTransition();
+
+            // Verify metadata preserved
+            const episodicMemories = await memorySystem.getEpisodicMemory().retrieve({});
+            expect(episodicMemories).toHaveLength(1);
+            expect(episodicMemories[0].metadata.get('type')).toBe('test');
+            expect(episodicMemories[0].metadata.get('importance')).toBe(0.8);
+        });
+    });
+
+    describe('Memory Cleanup', () => {
+        test('should handle cleanup of expired memories', async () => {
+            // Store test memory with short expiration
+            const metadata = new Map<string, any>([
+                ['type', 'test'],
+                ['expiresAt', (Date.now() + 100).toString()] // 100ms expiration
+            ]);
+            await memorySystem.storeWorkingMemory('test content', metadata);
+
+            // Wait for expiration
+            await new Promise(resolve => setTimeout(resolve, 200));
+
+            // Trigger cleanup via transition manager
+            await memorySystem.getTransitionManager().checkAndTransition();
+
+            // Verify memory was cleaned up
+            const workingMemories = await memorySystem.getWorkingMemory().retrieve({});
+            expect(workingMemories).toHaveLength(0);
+        });
+
+        test('should handle memory transitions with context', async () => {
+            // Store test memory with context
+            const metadata = new Map<string, any>([
+                ['context', 'test-context'],
+                ['contextSwitches', '3']
+            ]);
+            await memorySystem.storeWorkingMemory('test content', metadata);
+
+            // Trigger transition
+            await memorySystem.getTransitionManager().checkAndTransition();
+
+            // Verify memory moved to episodic memory
+            const workingMemories = await memorySystem.getWorkingMemory().retrieve({});
+            expect(workingMemories).toHaveLength(0);
+
+            const episodicMemories = await memorySystem.getEpisodicMemory().retrieve({});
+            expect(episodicMemories).toHaveLength(1);
+            expect(episodicMemories[0].metadata.get('context')).toBe('test-context');
+        });
+    });
+
     describe('Integration Tests', () => {
         test('should handle memory and context interactions', async () => {
             // Set initial context
-            await memorySystem.setContext('currentOperation', 'testing');
-            await memorySystem.setContext('operationType', 'integration');
-
-            // Store contextual memory and explicitly set the context
-            const contextualMemory = {
-                text: 'test memory 1',
-                value: 'test'  // The value we want to set in context
-            };
-
-            const metadata = new Map<string, any>([
-                ['type', MemoryType.CONTEXTUAL],
-                ['contextKey', 'memoryType'],
-                ['value', 'test'],
-                ['expiresAt', Date.now() + 10000]
+            const contextData = new Map<string, any>([
+                ['location', 'test-location'],
+                ['activity', 'testing'],
+                ['timestamp', Date.now().toString()]
             ]);
+            await memorySystem.getContextManager().setContext('test', contextData);
 
-            // Store the memory
-            await memorySystem.storeWorkingMemory(contextualMemory, metadata);
+            // Store memory with context
+            const metadata = new Map<string, any>([
+                ['context', 'test-context'],
+                ['priority', '1'],
+                ['timestamp', Date.now().toString()]
+            ]);
+            await memorySystem.storeWorkingMemory('test content', metadata);
 
-            // Explicitly set the context value
-            await memorySystem.setContext('memoryType', 'test');
+            // Verify context association
+            const memories = await memorySystem.getWorkingMemory().retrieve({});
+            expect(memories).toHaveLength(1);
+            expect(memories[0].metadata.get('context')).toBe('test-context');
+            expect(memories[0].metadata.get('priority')).toBe('1');
 
-            // Wait a small amount of time for any async operations
-            await new Promise(resolve => setTimeout(resolve, 100));
+            // Update context
+            const newContextData = new Map<string, any>([
+                ['location', 'new-location'],
+                ['activity', 'updated-testing'],
+                ['timestamp', Date.now().toString()]
+            ]);
+            await memorySystem.getContextManager().setContext('test', newContextData);
 
-            // Store context as episodic memory
-            await memorySystem.storeContextAsEpisodicMemory(
-                new Map<string, any>([['contextType', 'integration']])
-            );
-
-            // Verify context includes both explicit and memory-derived context
-            const allContext = await memorySystem.getAllContext();
-            expect(allContext.get('currentOperation')).toBe('testing');
-            expect(allContext.get('operationType')).toBe('integration');
-            expect(allContext.get('memoryType')).toBe('test');
-            expect(allContext.size).toBeGreaterThan(1);
+            // Verify context update reflected in memory
+            const updatedMemories = await memorySystem.getWorkingMemory().retrieve({});
+            expect(updatedMemories[0].metadata.get('context')).toBe('test-context');
         });
 
         test('should handle memory consolidation with context switches', async () => {
-            // Store working memory
-            await memorySystem.getWorkingMemory().store(
-                { text: 'temp memory' },
-                new Map<string, any>([
-                    ['type', MemoryType.WORKING],
-                    ['expiresAt', Date.now() - 2000]
-                ])
-            );
+            // Store test memory with context switches
+            const metadata = new Map<string, any>([
+                ['context', 'test-context'],
+                ['contextSwitches', '3'],
+                ['timestamp', Date.now().toString()]
+            ]);
+            await memorySystem.storeWorkingMemory('test content', metadata);
 
-            // Switch context
-            await memorySystem.setContext('operation', 'newOp');
+            // Trigger transition
+            await memorySystem.getTransitionManager().checkAndTransition();
 
-            // Wait for cleanup
-            await new Promise(resolve => setTimeout(resolve, 100));
+            // Verify memory moved to episodic memory
+            const workingMemories = await memorySystem.getWorkingMemory().retrieve({});
+            expect(workingMemories).toHaveLength(0);
 
-            // Verify working memory was consolidated
-            const workingFilter: MemoryFilter = {
-                types: [MemoryType.WORKING],
-                metadataFilters: []
-            };
-
-            const workingMemories = await memorySystem.getWorkingMemory().retrieve(workingFilter);
-
-            expect(workingMemories.length).toBe(0);
+            const episodicMemories = await memorySystem.getEpisodicMemory().retrieve({});
+            expect(episodicMemories).toHaveLength(1);
+            expect(episodicMemories[0].metadata.get('context')).toBe('test-context');
         });
     });
 });

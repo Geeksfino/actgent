@@ -51,7 +51,8 @@ export enum MemoryType {
     PROCEDURAL = 'procedural',
     PERCEPTUAL = 'perceptual',
     SOCIAL = 'social',
-    CONTEXTUAL = 'contextual'
+    CONTEXTUAL = 'contextual',
+    LONG_TERM = 'long_term'
 }
 
 /**

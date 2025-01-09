@@ -234,7 +234,196 @@ classDiagram
 
     ContextManager *-- WorkingMemory
     ContextManager *-- EpisodicMemory
+}
+
+## Memory Transitions
+
+The memory system implements automated transitions between different memory types through the `MemoryTransitionManager`. This component handles the movement of memories from Working Memory to Long-Term Memory based on various triggers and criteria.
+
+### Transition Flow
+
+The following diagram illustrates the memory transition process:
+
+```mermaid
+graph TD
+    A[Working Memory] --> B[MemoryTransitionManager]
+    B -->|Monitor| C[Triggers]
+    C -->|1| D[Access Count]
+    C -->|2| E[Time Threshold]
+    C -->|3| F[Importance Score]
+    C -->|4| G[Context Switches]
+    C -->|5| H[Memory Capacity]
+    
+    D & E & F & G & H -->|Threshold Met| I[Transition Process]
+    
+    I -->|Analyze| J[Memory Classification]
+    J -->|Choose| K[Target Memory Type]
+    
+    K -->|Store| L[Episodic Memory]
+    K -->|Store| M[Semantic Memory]
+    K -->|Store| N[Procedural Memory]
+    
+    L & M & N -->|Complete| O[Update Metadata]
+    O -->|Cleanup| P[Remove from Working Memory]
 ```
+
+The MemoryTransitionManager acts as an automated memory manager, making decisions about when and where to move memories based on their usage patterns and characteristics. This process mimics human memory transition that occurs during rest periods.
+
+### Memory Transition Manager
+
+The `MemoryTransitionManager` is responsible for:
+- Monitoring memory usage and access patterns
+- Applying transition rules and triggers
+- Managing the movement of memories between different memory types
+- Preserving memory metadata during transitions
+
+```typescript
+interface TransitionConfig {
+    accessCountThreshold: number;      // Number of accesses before transition
+    timeThresholdMs: number;          // Time in working memory before transition
+    capacityThreshold: number;        // Working memory capacity threshold (0-1)
+    importanceThreshold: number;      // Importance score threshold (0-1)
+    contextSwitchThreshold: number;   // Number of context switches before transition
+}
+```
+
+### Transition Triggers
+
+1. **Access Frequency**
+   - Monitors how often a memory is accessed
+   - Triggers when access count exceeds configured threshold (default: 5)
+   - Useful for identifying frequently used information
+   ```typescript
+   if (memory.accessCount >= config.accessCountThreshold) {
+       await transitionMemory(memory);
+   }
+   ```
+
+2. **Time-Based**
+   - Tracks how long a memory has been in working memory
+   - Triggers after configured duration (default: 24 hours)
+   - Ensures older memories are properly archived
+   ```typescript
+   if (now - memory.timestamp >= config.timeThresholdMs) {
+       await transitionMemory(memory);
+   }
+   ```
+
+3. **Importance/Relevance**
+   - Uses importance scores assigned to memories
+   - Triggers when importance exceeds threshold (default: 0.7)
+   - Prioritizes retention of significant information
+   ```typescript
+   if (memory.importance >= config.importanceThreshold) {
+       await transitionMemory(memory);
+   }
+   ```
+
+4. **Context Changes**
+   - Tracks number of context switches for each memory
+   - Triggers after threshold switches (default: 3)
+   - Helps identify persistent, cross-context information
+   ```typescript
+   if (memory.contextSwitches >= config.contextSwitchThreshold) {
+       await transitionMemory(memory);
+   }
+   ```
+
+5. **Capacity-Based**
+   - Monitors working memory usage
+   - Triggers when capacity exceeds threshold (default: 80%)
+   - Transitions oldest memories first to free up space
+   ```typescript
+   if (workingMemory.capacityUsage >= config.capacityThreshold) {
+       await transitionOldestMemories();
+   }
+   ```
+
+### Memory Type Classification
+
+The system uses metadata and content analysis to determine the appropriate memory type during transition:
+
+```typescript
+private determineTargetMemoryType(memory: IMemoryUnit): MemoryType {
+    const metadata = memory.metadata;
+    
+    // Episodic Memory: Event-based with temporal/spatial context
+    if (metadata.has('timeSequence') || metadata.has('location') || 
+        metadata.has('contextSwitches')) {
+        return MemoryType.EPISODIC;
+    }
+    
+    // Semantic Memory: Factual knowledge and concepts
+    if (metadata.has('concept') || metadata.has('relations') || 
+        metadata.get('importance') >= this.config.importanceThreshold) {
+        return MemoryType.SEMANTIC;
+    }
+
+    // Procedural Memory: Task-related information
+    if (metadata.has('procedure') || metadata.has('steps') || 
+        metadata.has('taskRelated')) {
+        return MemoryType.PROCEDURAL;
+    }
+
+    return MemoryType.SEMANTIC;  // Default type
+}
+```
+
+### Metadata Preservation
+
+During transition, important metadata is preserved and enhanced:
+
+```typescript
+{
+    type: MemoryType.EPISODIC,        // New memory type
+    originalType: MemoryType.WORKING,  // Original type preserved
+    transitionTime: timestamp,         // When transition occurred
+    accessCount: number,               // Access frequency
+    importance: number,                // Memory importance score
+    contextSwitches: number,          // Number of context switches
+    context: string                    // Current context
+}
+```
+
+### Integration with AgentMemorySystem
+
+The MemoryTransitionManager is integrated into the AgentMemorySystem and runs periodic checks:
+
+```typescript
+class AgentMemorySystem {
+    private transitionManager: MemoryTransitionManager;
+    
+    constructor(storage: IMemoryStorage, index: IMemoryIndex) {
+        this.transitionManager = new MemoryTransitionManager(
+            this.workingMemory,
+            this.episodicMemory,
+            this.longTermMemory,
+            {
+                accessCountThreshold: 5,
+                timeThresholdMs: 24 * 60 * 60 * 1000,
+                capacityThreshold: 0.8,
+                importanceThreshold: 0.7,
+                contextSwitchThreshold: 3
+            }
+        );
+        
+        // Periodic transition check
+        setInterval(() => {
+            this.transitionManager.checkAndTransition();
+        }, TRANSITION_INTERVAL);
+    }
+}
+```
+
+### Future Enhancements
+
+Planned improvements to the transition system:
+1. Enhanced memory type classification using LLM analysis
+2. Dynamic adjustment of transition thresholds based on usage patterns
+3. Memory compression for similar or related memories
+4. Improved context change detection using semantic analysis
+5. Memory pruning strategies for less relevant information
+6. Bidirectional transitions between memory types
 
 ## Memory Types
 
@@ -253,62 +442,6 @@ classDiagram
   - PERCEPTUAL: Sensory information
   - SOCIAL: Relationship and interaction data
   - CONTEXTUAL: Environmental and situational data
-
-## Memory Consolidation
-
-### Automatic Consolidation Triggers
-
-1. **Access Count Trigger**
-   - Threshold: 5 accesses
-   - Consolidates frequently accessed working memories
-   ```typescript
-   if (memory.accessCount >= 5) {
-       await consolidator.consolidate(memory);
-   }
-   ```
-
-2. **Time-Based Trigger**
-   - Threshold: 24 hours
-   - Consolidates memories that have existed for a long period
-   ```typescript
-   if (now - memory.timestamp.getTime() >= 24 * 60 * 60 * 1000) {
-       await consolidator.consolidate(memory);
-   }
-   ```
-
-3. **Priority Change Trigger**
-   - Threshold: 0.7 (on a 0-1 scale)
-   - Consolidates high-priority memories
-   ```typescript
-   if (memory.priority >= 0.7) {
-       await consolidator.consolidate(memory);
-   }
-   ```
-
-4. **Context Switch Trigger**
-   - Threshold: 3 context switches
-   - Consolidates memories that persist across multiple contexts
-   ```typescript
-   if (memory.metadata.get('contextSwitches') >= 3) {
-       await consolidator.consolidate(memory);
-   }
-   ```
-
-5. **Memory Capacity Trigger**
-   - Threshold: 80% of maximum working memory capacity
-   - Triggers consolidation when working memory is nearly full
-   ```typescript
-   if (currentWorkingMemorySize / maxWorkingMemorySize >= 0.8) {
-       await consolidator.consolidate(memory);
-   }
-   ```
-
-### Consolidation Process
-1. Memory is marked as IN_PROGRESS
-2. Content is copied to long-term storage
-3. Metadata is updated with consolidation information
-4. Original working memory is updated with reference to long-term version
-5. Memory is marked as CONSOLIDATED
 
 ## Memory Association
 

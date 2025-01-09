@@ -3,6 +3,7 @@ import { WorkingMemory } from '../../../src/core/memory/WorkingMemory';
 import { MockMemoryStorage, MockMemoryIndex } from '../utils/test-helpers';
 import { createWorkingMemory } from '../utils/test-data';
 import { MemoryType, MemoryFilter } from '../../../src/core/memory/types';
+import { debugLog } from '../utils/test-utils';
 
 describe('WorkingMemory', () => {
     let workingMemory: WorkingMemory;
@@ -30,12 +31,12 @@ describe('WorkingMemory', () => {
             ['expiresAt', mockNow + 10000] // Not expired yet
         ]);
         
-        console.log('Before store - metadata:', Object.fromEntries(metadata.entries()));
+        debugLog('Before store - metadata:', Object.fromEntries(metadata.entries()));
         await workingMemory.store(content, metadata);
         
         // Check what's in storage directly
         const allMemories = await storage.retrieveByFilter({});
-        console.log('After store - all memories:', allMemories.map(m => ({
+        debugLog('After store - all memories:', allMemories.map(m => ({
             id: m.id,
             content: m.content,
             metadata: Object.fromEntries(m.metadata.entries()),
@@ -45,10 +46,10 @@ describe('WorkingMemory', () => {
         const filter: MemoryFilter = {
             types: [MemoryType.WORKING]
         };
-        console.log('Filter:', filter);
+        debugLog('Filter:', filter);
 
         const memories = await workingMemory.retrieve(filter);
-        console.log('Retrieved memories:', memories.map(m => ({
+        debugLog('Retrieved memories:', memories.map(m => ({
             id: m.id,
             content: m.content,
             metadata: Object.fromEntries(m.metadata.entries()),

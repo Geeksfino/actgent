@@ -236,81 +236,155 @@ describe('Memory System Integration', () => {
         });
     });
 
+    describe('Memory Transition', () => {
+        test('should handle memory transitions correctly', async () => {
+            // Store memory in working memory
+            const content = 'test memory content';
+            const memory = await memorySystem.storeWorkingMemory(content);
+
+            // Verify it's in working memory
+            let workingMemories = await memorySystem.getWorkingMemory().retrieve({});
+            expect(workingMemories).toHaveLength(1);
+
+            // Add high access count to trigger transition
+            const metadata = new Map(workingMemories[0].metadata);
+            metadata.set('accessCount', 5);
+            await memorySystem.updateWorkingMemory({ ...workingMemories[0], metadata });
+
+            // Trigger transition
+            await memorySystem.getTransitionManager().checkAndTransition();
+
+            // Verify memory moved to long-term memory
+            workingMemories = await memorySystem.getWorkingMemory().retrieve({});
+            expect(workingMemories).toHaveLength(0);
+
+            const longTermMemories = await memorySystem.getLongTermMemory().retrieve({});
+            expect(longTermMemories).toHaveLength(1);
+        });
+
+        test('should handle capacity-based transitions', async () => {
+            // Store multiple memories to trigger capacity threshold
+            const memories = [];
+            for (let i = 0; i < 10; i++) {
+                memories.push(await memorySystem.storeWorkingMemory(`memory ${i}`));
+            }
+
+            // Set old timestamp to trigger capacity-based transition
+            for (const memory of memories) {
+                const metadata = new Map(memory.metadata);
+                metadata.set('timestamp', Date.now() - (25 * 60 * 60 * 1000));
+                await memorySystem.updateWorkingMemory({ ...memory, metadata });
+            }
+
+            // Trigger transition
+            await memorySystem.getTransitionManager().checkAndTransition();
+
+            // Verify some memories moved to long-term memory
+            const workingMemories = await memorySystem.getWorkingMemory().retrieve({});
+            expect(workingMemories.length).toBeLessThan(10);
+
+            const longTermMemories = await memorySystem.getLongTermMemory().retrieve({});
+            expect(longTermMemories.length).toBeGreaterThan(0);
+        });
+    });
+
+    describe('Memory Consolidation', () => {
+        test('should consolidate working memories to episodic memory', async () => {
+            // Store test memories
+            const memories = [
+                { content: 'test1', metadata: new Map([['type', 'test']]) },
+                { content: 'test2', metadata: new Map([['type', 'test']]) }
+            ];
+
+            for (const mem of memories) {
+                await memorySystem.storeWorkingMemory(mem.content, mem.metadata);
+            }
+
+            // Trigger transition
+            await memorySystem.getTransitionManager().checkAndTransition();
+
+            // Verify memories moved to episodic
+            const workingMemories = await memorySystem.getWorkingMemory().retrieve({});
+            expect(workingMemories).toHaveLength(0);
+
+            const episodicMemories = await memorySystem.getEpisodicMemory().retrieve({});
+            expect(episodicMemories.length).toBeGreaterThan(0);
+        });
+
+        test('should preserve metadata during consolidation', async () => {
+            // Store test memory with metadata
+            const metadata = new Map<string, any>([
+                ['type', 'test'],
+                ['importance', 0.8]
+            ]);
+            await memorySystem.storeWorkingMemory('test content', metadata);
+
+            // Trigger transition
+            await memorySystem.getTransitionManager().checkAndTransition();
+
+            // Verify metadata preserved
+            const episodicMemories = await memorySystem.getEpisodicMemory().retrieve({});
+            expect(episodicMemories).toHaveLength(1);
+            expect(episodicMemories[0].metadata.get('type')).toBe('test');
+            expect(episodicMemories[0].metadata.get('importance')).toBe(0.8);
+        });
+
+        test('should handle memory consolidation with context', async () => {
+            // Store test memory with context
+            const metadata = new Map<string, any>([
+                ['context', 'test-context'],
+                ['priority', 1]
+            ]);
+            await memorySystem.storeWorkingMemory('test content', metadata);
+
+            // Trigger transition
+            await memorySystem.getTransitionManager().checkAndTransition();
+
+            // Verify consolidation with context
+            const episodicMemories = await memorySystem.getEpisodicMemory().retrieve({});
+            expect(episodicMemories).toHaveLength(1);
+            expect(episodicMemories[0].metadata.get('context')).toBe('test-context');
+            expect(episodicMemories[0].metadata.get('priority')).toBe(1);
+        });
+    });
+
     describe('Memory Cleanup and Optimization', () => {
-        test('should cleanup expired working memories', async () => {
-            // Store a memory with expiration
-            const expiresAt = Date.now() + 100; // Expires in 100ms
-            await memorySystem.storeWorkingMemory('Ephemeral content', new Map<string, any>([
-                ['expiresAt', expiresAt]
-            ]));
-
-            // Verify it exists
-            const filter: MemoryFilter = {
-                types: [MemoryType.WORKING]
-            };
-
-            let result = await memorySystem.retrieveWorkingMemories(filter);
-            expect(result.length).toBe(1);
+        test('should handle cleanup of expired memories', async () => {
+            // Store test memory with short expiration
+            const metadata = new Map<string, any>([
+                ['type', 'test'],
+                ['expiresAt', Date.now() + 100] // 100ms expiration
+            ]);
+            await memorySystem.storeWorkingMemory('test content', metadata);
 
             // Wait for expiration
             await new Promise(resolve => setTimeout(resolve, 200));
 
-            // Force cleanup
-            await (memorySystem as any).workingMemory.cleanup(true);
+            // Trigger cleanup via transition manager
+            await memorySystem.getTransitionManager().checkAndTransition();
 
-            // Wait for cleanup to complete
-            await new Promise(resolve => setTimeout(resolve, 100));
-
-            // Verify it's been cleaned up
-            result = await memorySystem.retrieveWorkingMemories(filter);
-            expect(result.length).toBe(0);
+            // Verify memory was cleaned up
+            const workingMemories = await memorySystem.getWorkingMemory().retrieve({});
+            expect(workingMemories).toHaveLength(0);
         });
 
         test('should optimize memory storage based on access patterns', async () => {
-            // Create test memories with different access counts
-            const memories = Array.from({ length: 5 }, (_, i) => ({
-                id: `opt-${i}`,
-                content: `Content ${i}`,
-                metadata: new Map<string, any>([
-                    ['type', MemoryType.WORKING],
-                    ['priority', 0.5],
-                    ['accessCount', i],
-                    ['lastAccessed', new Date(Date.now() - i * 1000)],
-                    ['optimized', false]
-                ]),
-                timestamp: new Date()
-            }));
+            // Store test memory with high access count
+            const metadata = new Map<string, any>([
+                ['type', 'test'],
+                ['accessCount', 10]
+            ]);
+            await memorySystem.storeWorkingMemory('test content', metadata);
 
-            // Store memories
-            await Promise.all(memories.map(memory => 
-                memorySystem.storeWorkingMemory(memory.content, memory.metadata)
-            ));
+            // Trigger optimization via transition manager
+            await memorySystem.getTransitionManager().checkAndTransition();
 
-            // Wait for optimization
-            await new Promise(resolve => setTimeout(resolve, 100));
+            // Verify memory was moved to long-term storage
+            const workingMemories = await memorySystem.getWorkingMemory().retrieve({});
+            expect(workingMemories).toHaveLength(0);
 
-            // Force consolidation
-            await memorySystem.consolidateWorkingMemory();
-
-            // Wait for consolidation to complete
-            await new Promise(resolve => setTimeout(resolve, 100));
-
-            // Check if less accessed memories are affected
-            const leastAccessedFilter: MemoryFilter = {
-                types: [MemoryType.EPISODIC],
-                query: 'Content 0'
-            };
-
-            const mostAccessedFilter: MemoryFilter = {
-                types: [MemoryType.EPISODIC],
-                query: 'Content 4'
-            };
-
-            const leastAccessed = await memorySystem.retrieveEpisodicMemories(leastAccessedFilter);
-            const mostAccessed = await memorySystem.retrieveEpisodicMemories(mostAccessedFilter);
-
-            expect(leastAccessed[0]?.metadata.get('optimized')).toBeTruthy();
-            expect(mostAccessed[0]?.metadata.get('optimized')).toBeFalsy();
+            const longTermMemories = await memorySystem.getLongTermMemory().retrieve({});
+            expect(longTermMemories).toHaveLength(1);
         });
     });
 });
