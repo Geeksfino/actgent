@@ -3,14 +3,10 @@
   "compilerOptions": {
     "composite": true,
     "rootDir": ".",
-    "outDir": "../dist-test",
-    "noEmit": true,
+    "outDir": "../dist-agents",
+    "noEmit": false,
     "types": ["bun-types"],
-    "tsBuildInfoFile": "../dist-test/.tsbuildinfo",
-    "paths": {
-      "@finogeeks/actgent": ["../src/index"],
-      "@finogeeks/actgent/*": ["../src/*"]
-    }
+    "tsBuildInfoFile": "../dist-agents/.tsbuildinfo"
   },
   "include": [
     "**/*.ts"
@@ -21,6 +17,6 @@
   "exclude": [
     "node_modules",
     "dist",
-    "dist-test"
+    "dist-agents"
   ]
 }

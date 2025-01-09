@@ -179,5 +179,6 @@ agent.db
 .env
 dist/
 dist-test/
+dist-agents/
 *.log
 generated-agents/

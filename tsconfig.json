@@ -21,11 +21,7 @@
     "emitDecoratorMetadata": true,
     "incremental": true,
     "tsBuildInfoFile": "./dist/.tsbuildinfo",
-    "composite": true,
-    "paths": {
-      "@finogeeks/actgent": ["./src/index"],
-      "@finogeeks/actgent/*": ["./src/*"]
-    }
+    "composite": true
   },
   "include": ["src/**/*", "src/**/*.json"],
   "exclude": ["test/**/*", "node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]
