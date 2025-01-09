@@ -1,6 +1,6 @@
 import { BaseMemorySystem } from './BaseMemorySystem';
 import { SemanticMemoryFactory } from './SemanticMemoryFactory';
-import { IMemoryUnit, ISemanticMemoryUnit, MemoryFilter, IMemoryStorage, IMemoryIndex } from './types';
+import { IMemoryUnit, ISemanticMemoryUnit, MemoryFilter, IMemoryStorage, IMemoryIndex, MemoryType } from './types';
 
 export class SemanticMemory extends BaseMemorySystem {
     private factory: SemanticMemoryFactory;
@@ -90,5 +90,11 @@ export class SemanticMemory extends BaseMemorySystem {
         }
 
         return queryParts.join(' AND ');
+    }
+
+    protected async cleanup(): Promise<void> {
+        // Semantic memory could implement relevance-based cleanup
+        // For now, just resolve
+        return Promise.resolve();
     }
 }

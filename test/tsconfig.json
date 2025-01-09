@@ -1,0 +1,22 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": ".",
+    "outDir": "../dist-test",
+    "noEmit": true,
+    "types": ["bun-types"],
+    "tsBuildInfoFile": "../dist-test/.tsbuildinfo"
+  },
+  "include": [
+    "**/*.ts"
+  ],
+  "references": [
+    { "path": "../" }
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "dist-test"
+  ]
+}

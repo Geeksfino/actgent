@@ -1,217 +1,239 @@
-import { LongTermMemory } from './LongTermMemory';
 import { WorkingMemory } from './WorkingMemory';
+import { EpisodicMemory } from './EpisodicMemory';
+import { LongTermMemory } from './LongTermMemory';
 import { MemoryContextManager } from './MemoryContextManager';
 import { MemoryConsolidator } from './MemoryConsolidator';
 import { MemoryAssociator } from './MemoryAssociator';
-import { IMemoryUnit, MemoryFilter, IMemoryStorage, IMemoryIndex, MemoryType } from './types';
+import { 
+    IMemoryStorage, 
+    IMemoryIndex, 
+    IMemoryUnit, 
+    MemoryType, 
+    MemoryFilter 
+} from './types';
+import { BaseMemorySystem } from './BaseMemorySystem';
 
 export class AgentMemorySystem {
-    private longTermMemory: LongTermMemory;
     private workingMemory: WorkingMemory;
+    private episodicMemory: EpisodicMemory;
+    private longTermMemory: LongTermMemory;
     private contextManager: MemoryContextManager;
     private consolidator: MemoryConsolidator;
     private associator: MemoryAssociator;
-    private storage: IMemoryStorage;
     private consolidationTimer: NodeJS.Timer | null = null;
-    private consolidationInterval: number;
 
     constructor(
         storage: IMemoryStorage, 
         index: IMemoryIndex,
-        consolidationInterval: number = 5 * 60 * 1000 // 5 minutes
+        consolidationInterval: number = 5 * 60 * 1000 // 5 minutes default
     ) {
-        this.storage = storage;
-        this.longTermMemory = new LongTermMemory(storage, index);
         this.workingMemory = new WorkingMemory(storage, index);
+        this.episodicMemory = new EpisodicMemory(storage, index);
+        this.longTermMemory = new LongTermMemory(storage, index);
         this.contextManager = new MemoryContextManager(storage, index);
         this.consolidator = new MemoryConsolidator(storage, index);
         this.associator = new MemoryAssociator(storage, index);
-        this.consolidationInterval = consolidationInterval;
-        this.startConsolidationTimer();
+
+        // Start consolidation timer
+        this.consolidationTimer = setInterval(() => {
+            this.consolidateWorkingMemory().catch(console.error);
+        }, consolidationInterval);
     }
 
-    async storeLongTerm(content: any, metadata?: Map<string, any>): Promise<void> {
-        const mergedMetadata = new Map<string, any>(metadata || []);
-        await this.longTermMemory.store(content, mergedMetadata);
-        // If this is a contextual memory, update the context
-        if (mergedMetadata.get('type') === MemoryType.CONTEXTUAL) {
-            const contextKey = mergedMetadata.get('contextKey');
-            if (typeof contextKey === 'string' && content[contextKey] !== undefined) {
-                await this.contextManager.setContext(contextKey, content[contextKey]);
-            }
+    // Working Memory Methods
+    async storeWorkingMemory(content: any, metadata: Map<string, any>): Promise<void> {
+        await this.workingMemory.store(content, metadata);
+    }
+
+    async retrieveWorkingMemories(filter: MemoryFilter): Promise<IMemoryUnit[]> {
+        return this.workingMemory.retrieve(filter);
+    }
+
+    // Episodic Memory Methods
+    async storeEpisodicMemory(content: any, metadata: Map<string, any>): Promise<void> {
+        await this.episodicMemory.store(content, metadata);
+    }
+
+    async retrieveEpisodicMemories(filter: MemoryFilter): Promise<IMemoryUnit[]> {
+        return this.episodicMemory.retrieve(filter);
+    }
+
+    // Long-term Memory Methods
+    async storeLongTerm(content: any, metadata: Map<string, any>): Promise<void> {
+        await this.longTermMemory.store(content, metadata);
+    }
+
+    async retrieveLongTerm(filter: MemoryFilter): Promise<IMemoryUnit[]> {
+        return this.longTermMemory.retrieve(filter);
+    }
+
+    // Context Management Methods
+    async setContext(key: string, value: any): Promise<void> {
+        // Store in context manager
+        await this.contextManager.setContext(key, value);
+
+        // Store as contextual memory
+        const metadata = new Map<string, any>([
+            ['type', MemoryType.CONTEXTUAL],
+            ['contextSnapshot', true],
+            ['contextKey', key],
+            ['timestamp', Date.now()]
+        ]);
+
+        await this.episodicMemory.store({ key, value }, metadata);
+
+        // Update relevant working memories with new context
+        const workingMemories = await this.workingMemory.retrieve({
+            types: [MemoryType.WORKING],
+            metadataFilters: [new Map<string, any>([['contextKey', key]])]
+        });
+
+        for (const memory of workingMemories) {
+            const metadata = new Map(memory.metadata);
+            metadata.set('context', value);
+            await this.workingMemory.update({
+                ...memory,
+                metadata
+            });
         }
     }
 
-    async storeWorkingMemory(content: any, metadata?: Map<string, any>): Promise<void> {
-        const mergedMetadata = new Map<string, any>(metadata || []);
-        await this.workingMemory.store(content, mergedMetadata);
-        // If this is a contextual memory, update the context
-        if (mergedMetadata.get('type') === MemoryType.CONTEXTUAL) {
-            const contextKey = mergedMetadata.get('contextKey');
-            if (typeof contextKey === 'string' && content[contextKey] !== undefined) {
-                await this.contextManager.setContext(contextKey, content[contextKey]);
-            }
-        }
-        await this.consolidator.updateWorkingMemorySize(1);
-        // Check if consolidation is needed after storing
-        await this.checkConsolidation();
-    }
-
-    async storeEphemeral(content: any, metadata?: Map<string, any>): Promise<void> {
-        const mergedMetadata = new Map<string, any>(metadata || []);
-        mergedMetadata.set('type', MemoryType.WORKING);
-        mergedMetadata.set('ephemeral', true);
-        await this.store(content, mergedMetadata);
-    }
-
-    async store(content: any, metadata: Map<string, any>): Promise<void> {
-        const memoryType = metadata.get('type') as MemoryType;
-        
-        // Create a new metadata map to avoid modifying the input
-        const updatedMetadata = new Map<string, any>(metadata);
-
-        // Only add context if not already present in metadata
-        const context = await this.contextManager.getAllContext();
+    async setContextBatch(context: Map<string, any>): Promise<void> {
+        // Store each context value
         for (const [key, value] of context) {
-            if (!updatedMetadata.has(key)) {
-                updatedMetadata.set(key, value);
-            }
-        }
-        
-        switch (memoryType) {
-            case MemoryType.WORKING:
-                await this.workingMemory.store(content, updatedMetadata);
-                break;
-            case MemoryType.EPISODIC:
-            case MemoryType.SEMANTIC:
-            case MemoryType.CONTEXTUAL:
-                await this.longTermMemory.store(content, updatedMetadata);
-                break;
-            default:
-                throw new Error(`Invalid memory type: ${memoryType}`);
+            await this.setContext(key, value);
         }
     }
 
-    async retrieve(filter: MemoryFilter): Promise<IMemoryUnit[]> {
-        const memories = await this.storage.retrieveByFilter(filter);
-        
-        // Update access count for each memory
-        await Promise.all(memories.map(async memory => {
-            memory.accessCount = (memory.accessCount || 0) + 1;
-            memory.lastAccessed = new Date();
-            await this.storage.update(memory);
-        }));
-
-        return memories;
-    }
-
-    // Context Management
-    setContext(key: string, value: any): void {
-        this.contextManager.setContext(key, value);
-        // Increment context switch count for working memories
-        this.updateContextSwitchCount().catch(console.error);
-    }
-
-    getContext(key: string): any {
+    async getContext(key: string): Promise<any> {
         return this.contextManager.getContext(key);
     }
 
-    clearContext(): void {
-        this.contextManager.clearContext();
-    }
-
-    async loadContext(filter: any = {}): Promise<void> {
-        await this.contextManager.loadContext(filter);
-    }
-
     async getAllContext(): Promise<Map<string, any>> {
-        return this.contextManager.getAllContext();
-    }
-
-    async persistContext(): Promise<void> {
-        await this.contextManager.persistContext();
-    }
-
-    async storeContextAsEpisodicMemory(context: Map<string, any>): Promise<void> {
-        await this.contextManager.storeContextAsEpisodicMemory(context);
-    }
-
-    // Memory Association
-    async associateMemories(sourceId: string, targetId: string): Promise<void> {
-        await this.associator.associate(sourceId, targetId);
-    }
-
-    async dissociateMemories(sourceId: string, targetId: string): Promise<void> {
-        await this.associator.dissociate(sourceId, targetId);
-    }
-
-    async getAssociatedMemories(id: string): Promise<IMemoryUnit[]> {
-        return this.associator.findRelatedMemories(id);
-    }
-
-    // Memory Consolidation
-    private startConsolidationTimer(): void {
-        if (this.consolidationTimer) {
-            clearInterval(this.consolidationTimer);
+        const combinedContext = new Map<string, any>();
+        
+        // Get context from context manager (most recent values)
+        const currentContext = await this.contextManager.getAllContext();
+        for (const [key, value] of currentContext) {
+            combinedContext.set(key, value);
         }
-        this.consolidationTimer = setInterval(() => {
-            this.checkConsolidation().catch(console.error);
-        }, this.consolidationInterval);
-    }
-
-    private async checkConsolidation(): Promise<void> {
-        const workingMemories = await this.workingMemory.retrieve({
-            types: [MemoryType.WORKING]
+        
+        // Get context from contextual memories
+        const relevantMemories = await this.episodicMemory.retrieve({
+            types: [MemoryType.CONTEXTUAL],
+            metadataFilters: [
+                new Map<string, any>([['contextSnapshot', true]])
+            ]
         });
 
-        for (const memory of workingMemories) {
-            if (memory.accessCount && memory.accessCount > 5) {
-                await this.consolidateMemory(memory);
+        // Add memory-derived context, but don't override current context
+        for (const memory of relevantMemories) {
+            const { key, value } = memory.content;
+            if (!combinedContext.has(key)) {
+                combinedContext.set(key, value);
+            }
+        }
+
+        return combinedContext;
+    }
+
+    async loadContext(filter: MemoryFilter): Promise<void> {
+        const memories = await this.episodicMemory.retrieve({
+            ...filter,
+            types: [MemoryType.EPISODIC],
+            metadataFilters: [...(filter.metadataFilters || []), new Map<string, any>([['contextSnapshot', true]])]
+        });
+
+        // Load each memory's content as context
+        for (const memory of memories) {
+            const { key, value } = memory.content;
+            if (key && value !== undefined) {
+                await this.setContext(key, value);
             }
         }
     }
 
-    private async consolidateMemory(memory: IMemoryUnit): Promise<void> {
-        try {
-            await this.consolidator.consolidate(memory);
-        } catch (error) {
-            console.error(`Failed to consolidate memory ${memory.id}:`, error);
+    // For backward compatibility
+    async storeContextAsEpisodicMemory(context: Map<string, any>): Promise<void> {
+        await this.setContextBatch(context);
+    }
+
+    async clearContext(): Promise<void> {
+        // Clear context from context manager
+        await this.contextManager.clearContext();
+        
+        // Clear context from episodic memories
+        const contextMemories = await this.episodicMemory.retrieve({
+            types: [MemoryType.EPISODIC],
+            metadataFilters: [new Map<string, any>([['contextSnapshot', true]])]
+        });
+
+        for (const memory of contextMemories) {
+            const memoryId = memory.id;
+            if (memoryId) {
+                await this.episodicMemory.delete(memoryId);
+            }
         }
     }
 
-    private async updateContextSwitchCount(): Promise<void> {
+    // Memory Consolidation
+    async consolidateWorkingMemory(): Promise<void> {
+        // Get working memories that need consolidation
         const workingMemories = await this.workingMemory.retrieve({
             types: [MemoryType.WORKING]
         });
 
+        // Group memories by context
+        const contextGroups = new Map<string, IMemoryUnit[]>();
         for (const memory of workingMemories) {
-            const switchCount = (memory.metadata.get('contextSwitches') || 0) + 1;
-            memory.metadata.set('contextSwitches', switchCount);
-            await this.workingMemory.update(memory);
-            // Check if consolidation is needed after context switch
-            await this.checkConsolidation();
+            const context = memory.metadata.get('context') || 'default';
+            if (!contextGroups.has(context)) {
+                contextGroups.set(context, []);
+            }
+            contextGroups.get(context)!.push(memory);
+        }
+
+        // Consolidate each group
+        for (const [context, memories] of contextGroups) {
+            if (memories.length === 0) continue;
+
+            // Create consolidated memory
+            const consolidatedContent = memories.map(m => m.content);
+            const metadata = new Map<string, any>([
+                ['type', MemoryType.EPISODIC],
+                ['context', context],
+                ['consolidatedFrom', memories.map(m => m.id)],
+                ['timestamp', Date.now()]
+            ]);
+
+            // Store consolidated memory
+            await this.episodicMemory.store(consolidatedContent, metadata);
+
+            // Remove original memories
+            for (const memory of memories) {
+                const memoryId = memory.id;
+                if (memoryId) {
+                    await this.workingMemory.delete(memoryId);
+                }
+            }
         }
     }
 
     // Cleanup resources
-    cleanup(): void {
+    public stopAllCleanupTimers(): void {
         this.workingMemory.stopCleanupTimer();
-        this.contextManager.cleanup();
         if (this.consolidationTimer) {
             clearInterval(this.consolidationTimer);
             this.consolidationTimer = null;
         }
     }
 
-    stopAllTimers(): void {
-        if (this.consolidationTimer) {
-            clearInterval(this.consolidationTimer);
-            this.consolidationTimer = null;
-        }
-        this.workingMemory.stopCleanupTimer();
+    // Alias for stopAllCleanupTimers for backward compatibility
+    public stopAllTimers(): void {
+        this.stopAllCleanupTimers();
     }
 
-    // Getters for accessing individual memory systems
+    // Getters
     getLongTermMemory(): LongTermMemory {
         return this.longTermMemory;
     }

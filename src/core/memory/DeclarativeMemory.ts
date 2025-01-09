@@ -49,6 +49,12 @@ export class DeclarativeMemory extends BaseMemorySystem {
         return [...episodicResults, ...semanticResults];
     }
 
+    protected async cleanup(): Promise<void> {
+        // Declarative memory could implement importance-based cleanup
+        // For now, just resolve
+        return Promise.resolve();
+    }
+
     private static classifyMemoryType(content: any, metadata?: Map<string, any>): MemoryType {
         // First check if type is explicitly specified in metadata
         if (metadata?.has('type')) {

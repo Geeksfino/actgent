@@ -48,15 +48,32 @@ export class SmartHistoryManager implements IHistoryManager {
             ['relevanceScore', message.relevanceScore],
             ['importance', message.importance],
             ['tokens', message.tokens],
-            ['expiresAt', new Date('2025-01-08T09:47:44+08:00').getTime() + 300000] // 5 minutes
+            ['role', message.role],
+            ['expiresAt', Date.now() + 300000] // 5 minutes
         ]);
 
-        await this.workingMemory.store(message, metadata);
+        // Store message content and metadata separately
+        await this.workingMemory.store(
+            { content: message.content, role: message.role },
+            metadata
+        );
         await this.checkOptimizationTriggers();
     }
 
     public async getContext(): Promise<string> {
-        return this.messages.map(msg => msg.content).join('\n');
+        const messageStrings = this.messages.map(msg => {
+            let msgStr = `${msg.role}: ${msg.content}`;
+            
+            // Include environmental context if present
+            if (msg.metadata?.environment) {
+                const env = msg.metadata.environment;
+                msgStr += `\nContext: ${JSON.stringify(env)}`;
+            }
+            
+            return msgStr;
+        });
+
+        return messageStrings.join('\n');
     }
 
     public async optimize(): Promise<void> {
@@ -93,11 +110,11 @@ export class SmartHistoryManager implements IHistoryManager {
         // Store new messages
         for (const message of this.messages) {
             const metadata = new Map<string, any>([
-                ['type', 'working'],
+                ['type', MemoryType.WORKING],
                 ['relevanceScore', message.relevanceScore],
                 ['importance', message.importance],
                 ['tokens', message.tokens],
-                ['expiresAt', new Date('2025-01-08T09:47:44+08:00').getTime() + 300000]
+                ['expiresAt', Date.now() + 300000]
             ]);
 
             await this.workingMemory.store(message, metadata);

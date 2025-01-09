@@ -9,6 +9,10 @@ export interface ConversationMessage {
     relevanceScore: number;
     importance: number;
     tokens: number;
+    metadata?: {
+        environment?: any;
+        [key: string]: any;
+    };
 }
 
 /**

@@ -16,12 +16,18 @@ export interface IMemoryUnit {
  * Interface for episodic memory units, representing experiences and events
  */
 export interface IEpisodicMemoryUnit extends IMemoryUnit {
-    timeSequence: number;
-    location: string;
-    actors: string[];
-    actions: string[];
-    emotions: Map<string, number>;
-    consolidationStatus?: ConsolidationStatus;
+    content: {
+        timeSequence: number;
+        location: string;
+        actors: string[];
+        actions: string[];
+        emotions?: Map<string, number>;
+        consolidationStatus?: ConsolidationStatus;
+        originalMemories?: string[];  // IDs of memories that were consolidated
+        relatedTo?: string[];        // IDs of related memories
+        timestamp: Date;
+    };
+    metadata: Map<string, any>;
 }
 
 /**
@@ -52,9 +58,112 @@ export enum MemoryType {
  * Enum for memory consolidation status
  */
 export enum ConsolidationStatus {
-    UNCONSOLIDATED = 'unconsolidated',
-    IN_PROGRESS = 'in_progress',
-    CONSOLIDATED = 'consolidated'
+    NEW = 'new',
+    CONSOLIDATED = 'consolidated',
+    ABSTRACT = 'abstract'
+}
+
+/**
+ * Interface for emotional context
+ */
+export interface EmotionalContext {
+    valence: number;      // -1 to 1, negative to positive
+    arousal: number;      // 0 to 1, calm to excited
+    dominance: number;    // 0 to 1, submissive to dominant
+}
+
+/**
+ * Base metadata interface that all memory types must implement
+ */
+export interface BaseMetadata {
+    type: MemoryType;
+}
+
+/**
+ * Working memory specific metadata
+ */
+export interface WorkingMetadata extends BaseMetadata {
+    type: MemoryType.WORKING;
+    expiresAt: number;
+}
+
+/**
+ * Episodic memory specific metadata
+ */
+export interface EpisodicMetadata extends BaseMetadata {
+    type: MemoryType.EPISODIC;
+    importanceScore?: number;
+    emotionalSignificance?: number;
+    consolidationStatus?: ConsolidationStatus;
+    consolidatedFrom?: string;
+    consolidatedInto?: string;
+    location?: string;
+    actors?: string;
+}
+
+/**
+ * Convert a metadata object to a Map
+ */
+export function metadataToMap(metadata: BaseMetadata): Map<string, any> {
+    return new Map(Object.entries(metadata));
+}
+
+/**
+ * Convert a Map back to a typed metadata object
+ */
+export function mapToMetadata<T extends BaseMetadata>(map: Map<string, any>): T {
+    const obj: any = {};
+    map.forEach((value, key) => {
+        obj[key] = value;
+    });
+    return obj as T;
+}
+
+/**
+ * Create working memory metadata
+ */
+export function createWorkingMetadata(expiresAt: number): Map<string, any> {
+    const metadata: WorkingMetadata = {
+        type: MemoryType.WORKING,
+        expiresAt
+    };
+    return metadataToMap(metadata);
+}
+
+/**
+ * Create episodic memory metadata
+ */
+export function createEpisodicMetadata(params: Partial<Omit<EpisodicMetadata, 'type'>>): Map<string, any> {
+    const metadata: EpisodicMetadata = {
+        type: MemoryType.EPISODIC,
+        ...params
+    };
+    return metadataToMap(metadata);
+}
+
+/**
+ * Type guard to check if metadata map represents working memory
+ */
+export function isWorkingMemory(metadata: Map<string, any>): boolean {
+    return metadata.get('type') === MemoryType.WORKING;
+}
+
+/**
+ * Type guard to check if metadata map represents episodic memory
+ */
+export function isEpisodicMemory(metadata: Map<string, any>): boolean {
+    return metadata.get('type') === MemoryType.EPISODIC;
+}
+
+/**
+ * Interface for memory metadata
+ */
+export interface IMemoryMetadata {
+    type: MemoryType;
+    importanceScore?: number;
+    emotionalSignificance?: number;
+    consolidationStatus?: ConsolidationStatus;
+    [key: string]: any;
 }
 
 /**

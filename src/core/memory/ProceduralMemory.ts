@@ -108,4 +108,10 @@ export class ProceduralMemory extends BaseMemorySystem {
 
         return queryParts.join(' AND ');
     }
+
+    protected async cleanup(): Promise<void> {
+        // Procedural memory could implement usage-based cleanup
+        // For now, just resolve
+        return Promise.resolve();
+    }
 }

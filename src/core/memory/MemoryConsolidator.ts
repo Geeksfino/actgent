@@ -67,7 +67,22 @@ export class MemoryConsolidator implements IMemoryConsolidation {
         const memories = await this.storage.retrieveByFilter(filter);
         return memories.filter(memory => {
             const accessCount = memory.accessCount || 0;
-            return accessCount >= this.consolidationThreshold;
+            const lastAccessed = memory.lastAccessed?.getTime() || memory.timestamp.getTime();
+            const age = Date.now() - lastAccessed;
+
+            // Optimize memories with low access counts and old age
+            if (accessCount < 5 && age > 24 * 60 * 60 * 1000) {  // 24 hours
+                memory.metadata.set('optimized', true);
+                return true;
+            }
+
+            // Don't optimize frequently accessed memories
+            if (accessCount >= 10) {
+                memory.metadata.set('optimized', false);
+                return false;
+            }
+
+            return false;
         });
     }
 
@@ -133,7 +148,7 @@ export class MemoryConsolidator implements IMemoryConsolidation {
             if (typeof memory.content === 'object') {
                 return { ...acc, ...memory.content };
             }
-            return acc;
+            return memory.content;
         }, {});
 
         // Combine metadata from all memories
@@ -145,6 +160,18 @@ export class MemoryConsolidator implements IMemoryConsolidation {
                 }
             });
         });
+
+        // Preserve memory type from original memory
+        const originalType = memories[0].metadata.get('type');
+        if (originalType) {
+            combinedMetadata.set('type', originalType);
+        }
+
+        // Set optimization flags
+        const isOptimized = memories.some(m => m.metadata.get('optimized'));
+        if (isOptimized) {
+            combinedMetadata.set('optimized', true);
+        }
 
         // Create new consolidated memory
         return {

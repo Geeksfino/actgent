@@ -1,180 +1,330 @@
+import { IMemoryUnit, MemoryFilter, MemoryType } from './types';
 import { BaseMemorySystem } from './BaseMemorySystem';
-import { IMemoryUnit, MemoryFilter, IMemoryStorage, IMemoryIndex, buildQueryFromFilter, MemoryType } from './types';
-import { LongTermMemory } from './LongTermMemory'; // Import LongTermMemory
+import { IMemoryStorage, IMemoryIndex } from './types';
 
 export class WorkingMemory extends BaseMemorySystem {
-    private timeToLive: number;
-    private cleanupInterval: number;
-    private cleanupTimer: NodeJS.Timer | null = null;
-    private ephemeralTimeToLive: number;
+    protected readonly MAX_WORKING_MEMORY_SIZE = 100;
+    protected readonly DEFAULT_TTL = 30 * 60 * 1000; // 30 minutes
+    protected readonly expirationTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 
-    constructor(
-        storage: IMemoryStorage, 
-        index: IMemoryIndex, 
-        timeToLive: number = 300000, // 5 minutes in milliseconds
-        cleanupInterval: number = 60000, // 1 minute in milliseconds
-        ephemeralTimeToLive: number = 30000 // 30 seconds in milliseconds
-    ) {
+    constructor(storage: IMemoryStorage, index: IMemoryIndex) {
         super(storage, index);
-        this.timeToLive = timeToLive;
-        this.cleanupInterval = cleanupInterval;
-        this.ephemeralTimeToLive = ephemeralTimeToLive;
         this.startCleanupTimer();
     }
 
-    async store(content: any, metadata: Map<string, any>): Promise<void> {
+    /**
+     * Store content in working memory
+     */
+    public async store(content: any, metadata: any = {}): Promise<void> {
+        const memoryId = crypto.randomUUID();
+        const metadataMap = metadata instanceof Map ? metadata : new Map(Object.entries(metadata || {}));
+        metadataMap.set('id', memoryId);
+        metadataMap.set('type', MemoryType.WORKING);
+
+        // Store the memory
         const memory: IMemoryUnit = {
-            id: crypto.randomUUID(),
+            id: memoryId,
             content,
-            metadata,
-            timestamp: new Date(),
-            accessCount: 0
+            metadata: metadataMap,
+            timestamp: new Date()
         };
 
+        // Check if already expired - if so, just skip storing
+        const expiresAt = metadataMap.get('expiresAt');
+        if (expiresAt && Date.now() > expiresAt) {
+            return;
+        }
+
+        // Store in working memory
         await this.storage.store(memory);
-        await this.index.index(memory);
 
-        // Set up expiry if specified
-        const expiresAt = metadata.get('expiresAt');
+        // Check capacity after storing
+        await this.ensureCapacity();
+
+        // Set expiration timer
         if (expiresAt) {
-            const timeout = expiresAt - Date.now();
-            if (timeout > 0) {
-                setTimeout(async () => {
-                    // Move to long-term memory
-                    const longTermMemory: IMemoryUnit = {
-                        ...memory,
-                        id: `lt_${memory.id}`,
-                        metadata: new Map([
-                            ...Array.from(memory.metadata.entries()),
-                            ['type', MemoryType.EPISODIC],
-                            ['originalId', memory.id],
-                            ['movedFromWorking', true]
-                        ])
-                    };
-
-                    await this.storage.store(longTermMemory);
-                    await this.index.index(longTermMemory);
-                    await this.storage.delete(memory.id);
-                }, timeout);
-            }
+            const timeout = setTimeout(async () => {
+                const currentMemory = await this.storage.retrieve(memoryId);
+                if (currentMemory) {
+                    await this.storage.delete(memoryId);
+                }
+                this.expirationTimers.delete(memoryId);
+            }, expiresAt - Date.now());
+            this.expirationTimers.set(memoryId, timeout);
         }
     }
 
-    async storeEphemeral(content: any, metadata?: Map<string, any>): Promise<void> {
-        const mergedMetadata = new Map<string, any>(metadata || []);
-        mergedMetadata.set('ephemeral', true);
-        await this.store(content, mergedMetadata);
-    }
+    /**
+     * Retrieve memories by filter or id
+     */
+    public async retrieve(idOrFilter: string | MemoryFilter): Promise<IMemoryUnit[]> {
+        // Handle string ID case
+        if (typeof idOrFilter === 'string') {
+            const memory = await this.storage.retrieve(idOrFilter);
+            if (!memory || memory.metadata.get('type') !== MemoryType.WORKING) {
+                return [];
+            }
 
-    async retrieve(filter: MemoryFilter): Promise<IMemoryUnit[]> {
+            const expiresAt = memory.metadata.get('expiresAt');
+            const now = Date.now();
+            if (typeof expiresAt === 'number' && now > expiresAt) {
+                await this.moveToEpisodicMemory(memory);
+                return [];
+            }
+
+            return [memory];
+        }
+
+        // Handle filter case
+        const filter = idOrFilter || {};
         const memories = await this.storage.retrieveByFilter({
             ...filter,
             types: [MemoryType.WORKING]
         });
 
-        // Filter out expired memories
-        const now = new Date('2025-01-07T22:13:44+08:00').getTime();
-        return memories.filter(memory => {
-            const expiresAt = memory.metadata.get('expiresAt');
-            return !expiresAt || expiresAt > now;
-        });
-    }
-
-    async update(memory: IMemoryUnit): Promise<void> {
-        if (!memory.metadata.has('type')) {
-            memory.metadata.set('type', MemoryType.WORKING);
-        }
-        await this.storage.update(memory);
-        await this.index.update(memory);
-    }
-
-    async consolidate(): Promise<void> {
-        const now = new Date('2025-01-07T22:13:44+08:00').getTime();
-        const memories = await this.storage.retrieveByFilter({
-            types: [MemoryType.WORKING]
-        });
+        const now = Date.now();
+        const validMemories: IMemoryUnit[] = [];
 
         for (const memory of memories) {
             const expiresAt = memory.metadata.get('expiresAt');
-            if (expiresAt && expiresAt <= now) {
-                // Create a new long-term memory
-                const longTermMemory: IMemoryUnit = {
-                    ...memory,
-                    id: `lt_${memory.id}`,
-                    metadata: new Map([
-                        ...Array.from(memory.metadata.entries()),
-                        ['type', MemoryType.EPISODIC],
-                        ['originalId', memory.id],
-                        ['movedFromWorking', true]
-                    ])
-                };
-
-                // Store in long-term memory and remove from working memory
-                await this.storage.store(longTermMemory);
-                await this.index.index(longTermMemory);
-                await this.storage.delete(memory.id);
+            if (typeof expiresAt === 'number' && now > expiresAt) {
+                await this.moveToEpisodicMemory(memory);
+                continue;
             }
+            validMemories.push(memory);
         }
+
+        return validMemories;
     }
 
-    private async checkForConsolidation(memory: IMemoryUnit): Promise<void> {
-        const accessThreshold = 5;
-        const expiresAt = memory.metadata.get('expiresAt') as number;
+    /**
+     * Move a single memory to episodic storage immediately
+     * Used for immediate transitions (expiration, capacity)
+     */
+    private async moveToEpisodicMemory(memory: IMemoryUnit): Promise<void> {
+        const episodicMetadata = new Map(memory.metadata);
+        episodicMetadata.set('type', MemoryType.EPISODIC);
+        episodicMetadata.delete('expiresAt');  // Episodic memories don't expire
+        episodicMetadata.set('originalType', MemoryType.WORKING);
+        episodicMetadata.set('consolidationTime', Date.now());
+        episodicMetadata.set('transitionType', 'immediate');
 
-        if ((memory.accessCount || 0) >= accessThreshold || Date.now() >= expiresAt) {
-            await this.moveToLongTermMemory(memory);
-        }
-    }
-
-    private async moveToLongTermMemory(memory: IMemoryUnit): Promise<void> {
-        // Create a copy of the memory for long-term storage
-        const longTermMemory = {
-            ...memory,
-            metadata: new Map(memory.metadata)
+        const episodicMemory: IMemoryUnit = {
+            id: crypto.randomUUID(),
+            content: memory.content,
+            metadata: episodicMetadata,
+            timestamp: new Date()
         };
-        
-        // Update the memory type to EPISODIC for long-term storage
-        longTermMemory.metadata.set('type', MemoryType.EPISODIC);
-        
-        // Store in long-term memory
-        const ltm = new LongTermMemory(this.storage, this.index);
-        await ltm.store(longTermMemory.content, longTermMemory.metadata);
 
-        // Remove from working memory
+        await this.storage.store(episodicMemory);
+        await this.index.index(episodicMemory);
         await this.storage.delete(memory.id);
     }
 
-    private isExpired(memory: IMemoryUnit): boolean {
-        const expiresAt = memory.metadata.get('expiresAt') as number;
-        return Date.now() > expiresAt;
-    }
-
-    private async cleanup(): Promise<void> {
-        // Get all working memories directly from storage
+    /**
+     * Consolidate multiple memories to episodic storage in batch
+     * Used for context changes and periodic cleanup
+     */
+    public async consolidateToEpisodic(): Promise<void> {
         const memories = await this.storage.retrieveByFilter({
             types: [MemoryType.WORKING]
         });
 
+        // Group memories by context
+        const contextGroups = new Map<string, IMemoryUnit[]>();
         for (const memory of memories) {
-            if (this.isExpired(memory)) {
-                await this.moveToLongTermMemory(memory);
+            const context = memory.metadata.get('context') || 'default';
+            if (!contextGroups.has(context)) {
+                contextGroups.set(context, []);
             }
+            contextGroups.get(context)!.push(memory);
+        }
+
+        // Process each context group
+        for (const [context, groupMemories] of contextGroups) {
+            // Create consolidated episodic memory for the group
+            const consolidatedMetadata = new Map<string, any>();
+            consolidatedMetadata.set('type', MemoryType.EPISODIC);
+            consolidatedMetadata.set('context', context);
+            consolidatedMetadata.set('originalType', MemoryType.WORKING);
+            consolidatedMetadata.set('consolidationTime', Date.now());
+            consolidatedMetadata.set('transitionType', 'batch');
+            consolidatedMetadata.set('originalIds', groupMemories.map(m => m.id));
+
+            const consolidatedMemory: IMemoryUnit = {
+                id: crypto.randomUUID(),
+                content: {
+                    memories: groupMemories.map(m => m.content),
+                    context
+                },
+                metadata: consolidatedMetadata,
+                timestamp: new Date()
+            };
+
+            // Store consolidated memory and cleanup originals
+            await this.storage.store(consolidatedMemory);
+            await this.index.index(consolidatedMemory);
+            await Promise.all(groupMemories.map(m => this.storage.delete(m.id)));
         }
     }
 
-    private startCleanupTimer(): void {
-        if (this.cleanupTimer) {
-            clearInterval(this.cleanupTimer);
-        }
-        this.cleanupTimer = setInterval(() => {
-            this.cleanup().catch(console.error);
-        }, this.cleanupInterval);
+    /**
+     * Update a memory unit
+     */
+    public async update(memory: IMemoryUnit): Promise<void> {
+        await this.storage.update(memory);
+        await this.updateExpirationTimer(memory);
     }
 
-    public stopCleanupTimer(): void {
-        if (this.cleanupTimer) {
-            clearInterval(this.cleanupTimer);
-            this.cleanupTimer = null;
+    /**
+     * Delete a memory unit
+     */
+    public async delete(id: string): Promise<void> {
+        await this.storage.delete(id);
+        this.clearExpirationTimer(id);
+    }
+
+    /**
+     * Update memory unit
+     */
+    public async updateMemory(memory: IMemoryUnit): Promise<void> {
+        await this.update(memory);
+    }
+
+    /**
+     * Delete memory unit
+     */
+    public async deleteMemory(id: string): Promise<void> {
+        await this.delete(id);
+    }
+
+    /**
+     * Update expiration timer for a memory
+     */
+    private async updateExpirationTimer(memory: IMemoryUnit): Promise<void> {
+        const memoryId = memory.id;
+        
+        // Clear existing timer if any
+        const existingTimer = this.expirationTimers.get(memoryId);
+        if (existingTimer) {
+            clearTimeout(existingTimer);
+        }
+
+        // Set new timer
+        const expirationTime = memory.metadata.get('expiresAt');
+        if (expirationTime) {
+            const timer = setTimeout(async () => {
+                const currentMemory = await this.storage.retrieve(memoryId);
+                if (currentMemory) {
+                    await this.storage.delete(memoryId);
+                }
+                this.expirationTimers.delete(memoryId);
+            }, expirationTime - Date.now());
+
+            this.expirationTimers.set(memoryId, timer);
+        }
+    }
+
+    /**
+     * Clear expiration timer for a memory unit
+     */
+    private clearExpirationTimer(id: string): void {
+        const timer = this.expirationTimers.get(id);
+        if (timer) {
+            clearTimeout(timer);
+            this.expirationTimers.delete(id);
+        }
+    }
+
+    /**
+     * Check if memory needs consolidation
+     */
+    public isConsolidationNeeded(memory: IMemoryUnit): boolean {
+        const accessCount = memory.accessCount || 0;
+        const lastAccessed = memory.lastAccessed?.getTime() || 0;
+        const now = Date.now();
+
+        // Consolidate if:
+        // 1. Accessed frequently (more than 2 times)
+        // 2. Not accessed recently (more than 1 hour)
+        return accessCount >= 2 && (now - lastAccessed) > 60 * 60 * 1000;
+    }
+
+    /**
+     * Get memories that need consolidation
+     */
+    public async getConsolidationCandidates(): Promise<IMemoryUnit[]> {
+        const memories = await this.retrieve({});
+        return memories.filter(memory => this.isConsolidationNeeded(memory));
+    }
+
+    /**
+     * Cleanup expired memories
+     */
+    public async cleanupExpiredMemories(): Promise<void> {
+        const memories = await this.retrieve({});
+        const now = Date.now();
+
+        await Promise.all(memories.map(async memory => {
+            const expiresAt = memory.metadata.get('expiresAt');
+            if (expiresAt && now > expiresAt) {
+                await this.storage.delete(memory.id);
+            }
+        }));
+    }
+
+    /**
+     * Cleanup expired memories
+     */
+    public async cleanup(): Promise<void> {
+        const memories = await this.retrieve({});
+        const now = Date.now();
+
+        await Promise.all(memories.map(async memory => {
+            const expiresAt = memory.metadata.get('expiresAt');
+            if (expiresAt && now > expiresAt) {
+                await this.storage.delete(memory.id);
+            }
+        }));
+    }
+
+    /**
+     * Stop cleanup and clear timers
+     */
+    public override stopCleanupTimer(): void {
+        super.stopCleanupTimer();
+        
+        // Clear all expiration timers
+        for (const timer of this.expirationTimers.values()) {
+            clearTimeout(timer);
+        }
+        this.expirationTimers.clear();
+    }
+
+    /**
+     * Ensure working memory capacity
+     */
+    private async ensureCapacity(): Promise<void> {
+        const memories = await this.storage.retrieveByFilter({
+            types: [MemoryType.WORKING]
+        });
+
+        if (memories.length > this.MAX_WORKING_MEMORY_SIZE) {
+            // Move oldest or least relevant memories to episodic
+            const memoriesToMove = memories
+                .sort((a, b) => {
+                    const aRelevance = a.metadata.get('relevance') || 0;
+                    const bRelevance = b.metadata.get('relevance') || 0;
+                    if (aRelevance === bRelevance) {
+                        return (a.timestamp?.getTime() || 0) - (b.timestamp?.getTime() || 0);
+                    }
+                    return aRelevance - bRelevance;
+                })
+                .slice(0, memories.length - this.MAX_WORKING_MEMORY_SIZE);
+
+            await Promise.all(memoriesToMove.map(memory => 
+                this.moveToEpisodicMemory(memory)
+            ));
         }
     }
 }

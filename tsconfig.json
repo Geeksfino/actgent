@@ -7,7 +7,7 @@
     "module": "ESNext",            // Match your desired module system
     "target": "ESNext",            // Match your desired JS target
     "strict": true,                // Enable strict type checking
-    "moduleResolution": "node",    
+    "moduleResolution": "bundler",    
     "esModuleInterop": true,
     "allowJs": true,
     "resolveJsonModule": true,     // Allow importing JSON files
@@ -21,7 +21,11 @@
     "emitDecoratorMetadata": true,
     "incremental": true,
     "tsBuildInfoFile": "./dist/.tsbuildinfo",
-    "composite": true
+    "composite": true,
+    "paths": {
+      "@finogeeks/actgent": ["./src/index"],
+      "@finogeeks/actgent/*": ["./src/*"]
+    }
   },
   "include": ["src/**/*", "src/**/*.json"],
   "exclude": ["test/**/*", "node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]

@@ -45,11 +45,15 @@
   "scripts": {
     "build": "bun tsc && bun run build:assets",
     "build:assets": "bun cpx \"src/helpers/genesis/**/*.{md,json,yaml}\" dist/helpers/genesis/ --clean && bun cpx \"src/**/*.json\" dist/",
-    "build:test": "bun tsc -p test/tsconfig.json",
+    "build:test": "bun tsc -b test/tsconfig.json",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
     "watch:ts": "bun tsc-watch",
+    "watch:test": "bun tsc -b test/tsconfig.json --watch",
     "watch:resources": "bun cpx \"src/helpers/genesis/**/*.{md,json,yaml}\" dist/helpers/genesis/ --watch",
+    "watch:dev": "bun concurrently \"bun run watch:ts\" \"bun run watch:test\" \"bun run watch:resources\"",
     "watch": "bun concurrently \"bun run watch:ts\" \"bun run watch:resources\"",
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist dist-test",
     "rebuild": "bun run clean && bun run build && bun link @finogeeks/actgent"
   },
   "dependencies": {

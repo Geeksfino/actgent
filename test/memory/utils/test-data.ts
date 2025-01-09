@@ -5,7 +5,7 @@ export function createTestMemory(options?: Partial<IMemoryUnit>): IMemoryUnit {
         id: options?.id || Math.random().toString(36).substring(7),
         content: options?.content || { text: 'test memory' },
         metadata: options?.metadata || new Map(),
-        timestamp: options?.timestamp || new Date('2025-01-07T22:13:44+08:00'),
+        timestamp: options?.timestamp || new Date('2025-01-08T13:24:12+08:00'),
         priority: options?.priority,
         accessCount: options?.accessCount,
         lastAccessed: options?.lastAccessed,
@@ -13,24 +13,42 @@ export function createTestMemory(options?: Partial<IMemoryUnit>): IMemoryUnit {
     };
 }
 
-export function createWorkingMemory(content: any, expiresAt?: number, options?: Partial<IMemoryUnit>): IMemoryUnit {
-    return createTestMemory({
-        ...options,
+export function createWorkingMemory(content: any, expiresAt: number): IMemoryUnit {
+    const metadata = new Map<string, any>();
+    metadata.set('type', MemoryType.WORKING);
+    metadata.set('expiresAt', expiresAt);
+    metadata.set('timestamp', Date.now());
+
+    return {
+        id: crypto.randomUUID(),
         content,
-        metadata: new Map<string, any>([
-            ['type', MemoryType.WORKING],
-            ['expiresAt', expiresAt || new Date('2025-01-07T22:13:44+08:00').getTime() + 10000],
-            ...(options?.metadata ? Array.from(options.metadata.entries()) : [])
-        ])
-    });
+        metadata,
+        timestamp: new Date()
+    };
 }
 
-export function createContextualMemory(content: any, contextKey: string) {
-    return createTestMemory({
+export function createContextualMemory(content: any, context: string): IMemoryUnit {
+    return {
+        id: crypto.randomUUID(),
         content,
         metadata: new Map<string, any>([
             ['type', MemoryType.CONTEXTUAL],
-            ['contextKey', contextKey]
-        ])
-    });
+            ['context', context],
+            ['timestamp', Date.now()]
+        ]),
+        timestamp: new Date()
+    };
+}
+
+export function createEpisodicMemory(content: any, context: string): IMemoryUnit {
+    return {
+        id: crypto.randomUUID(),
+        content,
+        metadata: new Map<string, any>([
+            ['type', MemoryType.EPISODIC],
+            ['context', context],
+            ['timestamp', Date.now()]
+        ]),
+        timestamp: new Date()
+    };
 }

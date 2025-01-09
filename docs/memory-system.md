@@ -329,6 +329,87 @@ directAssociations = memory.associations;
 secondDegreeAssociations = directAssociations.flatMap(m => m.associations);
 ```
 
+## Memory Transitions
+
+The memory system implements sophisticated transition mechanisms between different memory types, particularly from Working Memory to Episodic Memory. These transitions are triggered by various conditions to ensure efficient memory management and optimal information retention.
+
+### Working to Episodic Memory Transitions
+
+Memories transition from Working Memory to Episodic Memory through four main triggers:
+
+1. **Time-based Triggers**
+   - **Expiration**: When a memory's Time-To-Live (TTL) is reached
+   - **Periodic Consolidation**: Automatic consolidation every 5 minutes (configurable)
+   - **Implementation**: Uses both immediate transition for expired items and batch processing for periodic consolidation
+
+2. **Access-based Triggers**
+   - **Frequency**: When memories are frequently accessed (high access count)
+   - **Relevance**: When memories maintain high relevance scores over time
+   - **Implementation**: Tracked through memory metadata and consolidated during periodic checks
+
+3. **Capacity-based Triggers**
+   - **Memory Limit**: When working memory reaches its capacity
+   - **Resource Management**: When system needs to free up space
+   - **Implementation**: Immediate transition of least relevant items when capacity is reached
+
+4. **Context-based Triggers**
+   - **Context Changes**: When the active context changes significantly
+   - **Task Completion**: When a conversation or task concludes
+   - **Implementation**: Batch transition during context switches or task boundaries
+
+### Implementation Mechanisms
+
+The system uses two distinct mechanisms for these transitions:
+
+1. **Immediate Transitions** (`moveToEpisodicMemory`)
+   ```typescript
+   // Used for:
+   - Expiration-based transitions
+   - Capacity management
+   - Immediate context switches
+   ```
+
+2. **Batch Transitions** (`consolidateToEpisodic`)
+   ```typescript
+   // Used for:
+   - Periodic consolidation
+   - Context-based batch transitions
+   - Access pattern-based transitions
+   ```
+
+### Memory Metadata During Transitions
+
+When a memory transitions from Working to Episodic, the following metadata changes occur:
+
+```typescript
+{
+    type: MemoryType.EPISODIC,        // Changed from WORKING
+    originalType: MemoryType.WORKING,  // Original type preserved
+    consolidationTime: timestamp,      // When the transition occurred
+    expiresAt: removed,               // Episodic memories don't expire
+    // ... other metadata preserved
+}
+
+#### Memory Transition Philosophy
+
+In human cognition, working memory (also known as short-term memory) is like your immediate consciousness - things you're actively thinking about or processing. For example, when someone tells you a phone number and you're trying to remember it long enough to write it down.
+
+There are two different ways information typically moves from working memory to long-term (episodic) memory:
+
+1. **Natural Consolidation**: When you deliberately process information (like studying or having meaningful experiences), it gradually transitions from working memory to long-term memory through a process called consolidation. This is like our "batch transition" where we periodically review memories and consolidate important ones.
+
+2. **Immediate Recording**: Sometimes, particularly intense or significant experiences bypass working memory and get recorded directly into long-term memory. For example:
+   - If you witness a car accident, that memory often gets stored directly as an episodic memory
+   - When you experience something highly emotional (like receiving important news)
+   - When you have an "aha!" moment of sudden understanding
+
+In our implementation, expired memories are simply removed from working memory (like natural forgetting). We only transition memories to episodic memory when:
+- The memory has been accessed/processed enough times (indicating importance)
+- The memory is part of a meaningful context or pattern (batch consolidation)
+- The memory has high relevance or emotional significance (immediate recording)
+
+This mirrors how human memory actually works - information that isn't reinforced simply fades from working memory, while important or meaningful information gets consolidated into long-term memory through either gradual processing or immediate recording of significant experiences.
+
 ## Context Management
 
 ### Features

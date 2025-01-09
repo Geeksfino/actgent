@@ -60,7 +60,7 @@ describe('SmartHistoryManager', () => {
             });
 
             expect(memories.length).toBe(1);
-            expect(memories[0].content).toEqual(message);
+            expect(memories[0].content).toEqual({ content: message.content, role: message.role });
         });
 
         test('should handle message metadata', async () => {

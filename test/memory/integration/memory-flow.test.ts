@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { WorkingMemory } from '../../../src/core/memory/WorkingMemory';
 import { LongTermMemory } from '../../../src/core/memory/LongTermMemory';
 import { MemoryContextManager } from '../../../src/core/memory/MemoryContextManager';
@@ -14,6 +14,8 @@ describe('Memory Flow Integration', () => {
     let longTermMemory: LongTermMemory;
     let contextManager: MemoryContextManager;
     let agentMemory: AgentMemorySystem;
+    let originalDateNow: () => number;
+    const mockNow = new Date('2025-01-08T13:47:17+08:00').getTime();
 
     beforeEach(() => {
         storage = new MockMemoryStorage();
@@ -22,14 +24,19 @@ describe('Memory Flow Integration', () => {
         longTermMemory = new LongTermMemory(storage, index);
         contextManager = new MemoryContextManager(storage, index);
         agentMemory = new AgentMemorySystem(storage, index);
+        originalDateNow = Date.now;
+        Date.now = () => mockNow;
+    });
+
+    afterEach(() => {
+        Date.now = originalDateNow;
     });
 
     test('should handle memory lifecycle from working to long-term', async () => {
-        const now = new Date('2025-01-07T22:13:44+08:00').getTime();
         const content = { text: 'test memory' };
         const metadata = new Map<string, any>([
             ['type', MemoryType.WORKING],
-            ['expiresAt', now - 2000] // Already expired
+            ['expiresAt', mockNow - 2000] // Already expired
         ]);
 
         // Store in working memory
@@ -97,15 +104,13 @@ describe('Memory Flow Integration', () => {
     });
 
     test('should handle complex memory interactions', async () => {
-        const now = new Date('2025-01-07T22:13:44+08:00').getTime();
-        
         // 1. Store working memory with context
         await agentMemory.store(
             { text: 'initial memory' },
             new Map<string, any>([
                 ['type', MemoryType.WORKING],
                 ['context', 'test'],
-                ['expiresAt', now - 2000] // Already expired
+                ['expiresAt', mockNow - 2000] // Already expired
             ])
         );
 
