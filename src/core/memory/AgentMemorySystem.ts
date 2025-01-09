@@ -14,7 +14,7 @@ import {
 import { BaseMemorySystem } from './BaseMemorySystem';
 import * as crypto from 'crypto';
 
-export class AgentMemorySystem {
+export class AgentMemorySystem extends BaseMemorySystem {
     protected workingMemory: WorkingMemory;
     protected episodicMemory: EpisodicMemory;
     protected longTermMemory: LongTermMemory;
@@ -28,6 +28,7 @@ export class AgentMemorySystem {
         index: IMemoryIndex,
         transitionInterval: number = 5 * 60 * 1000 // 5 minutes default
     ) {
+        super(storage, index);
         this.workingMemory = new WorkingMemory(storage, index);
         this.episodicMemory = new EpisodicMemory(storage, index);
         this.longTermMemory = new LongTermMemory(storage, index);
@@ -246,7 +247,7 @@ export class AgentMemorySystem {
         for (const memory of contextMemories) {
             const memoryId = memory.id;
             if (memoryId) {
-                await this.episodicMemory.delete(memoryId);
+                await this.delete(memoryId);
             }
         }
     }
@@ -263,5 +264,63 @@ export class AgentMemorySystem {
     // Alias for stopAllCleanupTimers for backward compatibility
     public stopAllTimers(): void {
         this.stopAllCleanupTimers();
+    }
+
+    public async store(content: any, metadata?: Map<string, any>): Promise<void> {
+        // Store in working memory by default
+        await this.workingMemory.store(content, metadata);
+    }
+
+    public async retrieve(idOrFilter: string | MemoryFilter): Promise<IMemoryUnit[]> {
+        if (typeof idOrFilter === 'string') {
+            const memory = await this.storage.retrieve(idOrFilter);
+            return memory ? [memory] : [];
+        }
+
+        // Search across all memory types by default
+        return this.storage.retrieveByFilter(idOrFilter);
+    }
+
+    protected async cleanup(): Promise<void> {
+        // Use public methods or create new public methods for cleanup
+        await Promise.all([
+            this.workingMemory.performCleanup(),  // New public method
+            this.episodicMemory.performCleanup(), // New public method
+            this.longTermMemory.performCleanup()  // New public method
+        ]);
+    }
+
+    async deleteMemory(id: string): Promise<void> {
+        const memory = await this.storage.retrieve(id);
+        if (!memory) {
+            throw new Error(`Memory with id ${id} not found`);
+        }
+
+        await this.delete(id);
+        
+        // Remove from working memory if present
+        await this.workingMemory.delete(id);
+        
+        // Update associations
+        if (memory.associations) {
+            for (const associatedId of memory.associations) {
+                const associatedMemory = await this.storage.retrieve(associatedId);
+                if (associatedMemory && associatedMemory.associations) {
+                    associatedMemory.associations = associatedMemory.associations.filter(aid => aid !== id);
+                    await this.storage.update(associatedMemory);
+                }
+            }
+        }
+    }
+
+    private async processMemoryUnit(memory: IMemoryUnit): Promise<void> {
+        await this.workingMemory.store(memory.content, memory.metadata);
+        await this.transitionManager.checkAndTransition(memory);
+    }
+
+    public async checkAndTransition(memory?: IMemoryUnit): Promise<void> {
+        if (memory) {
+            await this.transitionManager.checkAndTransition(memory);
+        }
     }
 }

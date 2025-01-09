@@ -14,6 +14,13 @@ export interface ConsolidationTrigger {
     lastCheck?: number;
 }
 
+export interface ConsolidationMetrics {
+    temporalProximity?: number;
+    sourceReliability?: number;
+    semanticSimilarity?: number;
+    confidenceScore?: number;
+}
+
 export class MemoryConsolidator implements IMemoryConsolidation {
     private storage: IMemoryStorage;
     private index: IMemoryIndex;
@@ -21,18 +28,21 @@ export class MemoryConsolidator implements IMemoryConsolidation {
     private maxWorkingMemorySize: number;
     private currentWorkingMemorySize: number = 0;
     private consolidationThreshold: number;
+    private nlpService?: any; // NLP service for semantic similarity calculation
 
     constructor(
         storage: IMemoryStorage,
         index: IMemoryIndex,
         maxWorkingMemorySize: number = 1000,
         triggers?: Map<string, ConsolidationTrigger>,
-        consolidationThreshold: number = 5
+        consolidationThreshold: number = 5,
+        nlpService?: any
     ) {
         this.storage = storage;
         this.index = index;
         this.maxWorkingMemorySize = maxWorkingMemorySize;
         this.consolidationThreshold = consolidationThreshold;
+        this.nlpService = nlpService;
         
         // Default consolidation triggers
         this.triggers = triggers || new Map([
@@ -118,28 +128,88 @@ export class MemoryConsolidator implements IMemoryConsolidation {
         return memories.filter((m): m is IMemoryUnit => m !== null);
     }
 
+    private async calculateConsolidationMetrics(memories: IMemoryUnit[]): Promise<ConsolidationMetrics> {
+        const metrics: ConsolidationMetrics = {};
+        
+        try {
+            // Calculate temporal proximity (0-1 score based on time difference)
+            const timestamps = memories.map(m => m.timestamp.getTime());
+            const timeRange = Math.max(...timestamps) - Math.min(...timestamps);
+            metrics.temporalProximity = Math.exp(-timeRange / (24 * 60 * 60 * 1000)); // Decay over 24 hours
+
+            // Calculate source reliability (based on memory metadata)
+            metrics.sourceReliability = memories.reduce((acc, m) => {
+                const reliability = m.metadata.get('sourceReliability') || 0.5;
+                return acc + reliability;
+            }, 0) / memories.length;
+
+            // Calculate semantic similarity if NLP service is available
+            if (this.nlpService) {
+                const contents = memories.map(m => JSON.stringify(m.content));
+                const similarities = await Promise.all(
+                    contents.map(async (c1, i) => {
+                        const scores = await Promise.all(
+                            contents.map(async (c2, j) => {
+                                if (i === j) return 1;
+                                return await this.nlpService.calculateSimilarity(c1, c2);
+                            })
+                        );
+                        return scores.reduce((a, b) => a + b, 0) / scores.length;
+                    })
+                );
+                metrics.semanticSimilarity = similarities.reduce((a, b) => a + b, 0) / similarities.length;
+            }
+
+            // Calculate overall confidence score
+            const weights = {
+                temporal: 0.2,
+                semantic: 0.4,
+                source: 0.4
+            };
+
+            metrics.confidenceScore = (
+                (metrics.temporalProximity || 0) * weights.temporal +
+                (metrics.semanticSimilarity || 0) * weights.semantic +
+                (metrics.sourceReliability || 0) * weights.source
+            );
+
+        } catch (error) {
+            console.error('Error calculating consolidation metrics:', error);
+            // Provide default metrics on error
+            metrics.confidenceScore = 0.5;
+        }
+
+        return metrics;
+    }
+
     private async consolidateGroup(memories: IMemoryUnit[]): Promise<void> {
         if (memories.length < 2) return;
 
-        // Get all related memories
-        const allRelatedIds = new Set<string>();
-        for (const memory of memories) {
-            const relatedIds = await this.index.search(JSON.stringify(memory.content));
-            relatedIds.forEach(id => allRelatedIds.add(id));
+        try {
+            // Calculate consolidation metrics
+            const metrics = await this.calculateConsolidationMetrics(memories);
+            
+            // Only proceed if confidence is high enough
+            if (metrics.confidenceScore && metrics.confidenceScore >= this.consolidationThreshold) {
+                // Create consolidated memory with metrics
+                const consolidated = await this.createConsolidatedMemory(memories);
+                consolidated.consolidationMetrics = metrics;
+
+                // Store the consolidated memory
+                await this.storage.store(consolidated);
+
+                // Update indices and clean up old memories
+                await Promise.all([
+                    this.index.add(consolidated),
+                    ...memories.map(m => this.storage.delete(m.id))
+                ]);
+
+                // Update working memory size
+                await this.updateWorkingMemorySize(-memories.length + 1);
+            }
+        } catch (error) {
+            console.error('Error during group consolidation:', error);
         }
-
-        // Retrieve all related memories
-        const relatedMemories = await this.storage.batchRetrieve(Array.from(allRelatedIds));
-        const validMemories = relatedMemories.filter((m): m is IMemoryUnit => m !== null);
-
-        // Create consolidated memory
-        const consolidatedMemory = await this.createConsolidatedMemory(validMemories);
-
-        // Store consolidated memory
-        await this.storage.store(consolidatedMemory);
-
-        // Delete original memories
-        await Promise.all(validMemories.map(m => this.storage.delete(m.id)));
     }
 
     private async createConsolidatedMemory(memories: IMemoryUnit[]): Promise<IMemoryUnit> {

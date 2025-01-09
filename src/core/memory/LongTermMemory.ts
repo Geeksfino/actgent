@@ -73,6 +73,10 @@ export class LongTermMemory extends BaseMemorySystem {
     /**
      * Clean up old or irrelevant memories
      */
+    public async performCleanup(): Promise<void> {
+        return this.cleanup();
+    }
+
     protected async cleanup(): Promise<void> {
         const types = [MemoryType.SEMANTIC, MemoryType.EPISODIC, MemoryType.PROCEDURAL];
         const now = Date.now();

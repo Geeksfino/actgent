@@ -1,26 +1,39 @@
 import { DeclarativeMemoryFactory } from './DeclarativeMemoryFactory';
-import { ISemanticMemoryUnit } from './types';
+import { ISemanticMemoryUnit, ConceptNode, ConceptRelation } from './types';
+import crypto from 'crypto';
 
 /**
  * Factory class for creating semantic memory units
  */
 export class SemanticMemoryFactory extends DeclarativeMemoryFactory {
     createMemoryUnit(content: any, metadata?: Map<string, any>): ISemanticMemoryUnit {
-        const defaultMetadata = new Map<string, any>([
-            ['type', 'semantic']
-        ]);
+        const conceptId = crypto.randomUUID();
+        const node: ConceptNode = {
+            id: conceptId,
+            name: typeof content === 'string' ? content : content.concept,
+            confidence: metadata?.get('confidence') || 0.5,
+            source: metadata?.get('source') || 'unknown',
+            lastVerified: new Date(),
+            properties: new Map(metadata?.get('properties') || [])
+        };
 
-        const mergedMetadata = this.mergeMetadata(defaultMetadata, metadata);
+        const conceptGraph = {
+            nodes: new Map([[conceptId, node]]),
+            relations: [] as ConceptRelation[]
+        };
 
         return {
-            id: crypto.randomUUID(),
-            timestamp: this.generateTimestamp(),
+            id: metadata?.get('id') || conceptId,
+            concept: typeof content === 'string' ? content : content.concept,
+            conceptGraph,
+            confidence: node.confidence,
+            source: node.source,
+            lastVerified: node.lastVerified,
             content,
-            metadata: mergedMetadata,
-            concept: metadata?.get('concept') || '',
-            relations: metadata?.get('relations') || new Map<string, string[]>(),
-            confidence: metadata?.get('confidence') || 1.0,
-            source: metadata?.get('source') || 'system'
+            metadata: metadata || new Map(),
+            timestamp: new Date(),
+            accessCount: 0,
+            lastAccessed: new Date()
         };
     }
 }

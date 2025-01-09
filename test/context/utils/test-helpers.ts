@@ -3,20 +3,24 @@ import { ConversationMessage, IHistoryManager, IContextOptimizer, IContextMetric
 export class MockHistoryManager implements IHistoryManager {
     private messages: ConversationMessage[] = [];
 
-    async addMessage(message: ConversationMessage): Promise<void> {
+    public addMessage(message: ConversationMessage): void {
         this.messages.push(message);
     }
 
-    async getContext(): Promise<string> {
-        return this.messages.map(m => m.content).join('\n');
+    public async getContext(): Promise<string> {
+        return this.messages.map(m => `${m.role}: ${m.content}`).join('\n');
     }
 
-    async optimize(): Promise<void> {
-        // Mock optimization
+    public async optimize(): Promise<void> {
+        // Mock implementation
     }
 
-    getMessages(): ConversationMessage[] {
-        return [...this.messages];
+    public addInteractionFlow(): void {
+        // Mock implementation
+    }
+
+    public async resolveReferences(): Promise<ConversationMessage[]> {
+        return this.messages;
     }
 }
 

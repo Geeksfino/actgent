@@ -10,6 +10,59 @@ export interface IMemoryUnit {
     accessCount?: number;
     lastAccessed?: Date;
     associations?: string[]; // IDs of related memories
+    consolidationMetrics?: ConsolidationMetrics;
+}
+
+/**
+ * Emotional context interface
+ */
+export interface EmotionalContext {
+    emotions: Map<string, number>;
+    valence: number;
+    arousal: number;
+    dominance: number;
+    confidence: number;
+    getSize(): number;
+}
+
+/**
+ * Emotional context implementation
+ */
+export class EmotionalContextImpl implements EmotionalContext {
+    constructor(
+        public emotions: Map<string, number> = new Map(),
+        public valence: number = 0.5,
+        public arousal: number = 0.5,
+        public dominance: number = 0.5,
+        public confidence: number = 0.5
+    ) {}
+
+    getSize(): number {
+        return this.emotions.size;
+    }
+}
+
+/**
+ * Memory context interface
+ */
+export interface MemoryContext {
+    emotionalState: EmotionalContext;
+    topicHistory: string[];
+    userPreferences: Map<string, any>;
+    interactionPhase: 'introduction' | 'main' | 'conclusion';
+}
+
+/**
+ * Enhanced memory context interface
+ */
+export interface EnhancedMemoryContext extends MemoryContext {
+    userGoals: Set<string>;
+    domainContext: Map<string, any>;
+    interactionHistory: string[];
+    emotionalTrends: Array<{
+        timestamp: Date;
+        emotions: EmotionalContext;
+    }>;
 }
 
 /**
@@ -21,7 +74,10 @@ export interface IEpisodicMemoryUnit extends IMemoryUnit {
         location: string;
         actors: string[];
         actions: string[];
-        emotions?: Map<string, number>;
+        emotions: EmotionalContext;
+        context: MemoryContext;
+        coherenceScore: number;
+        userInstruction?: string;
         consolidationStatus?: ConsolidationStatus;
         originalMemories?: string[];  // IDs of memories that were consolidated
         relatedTo?: string[];        // IDs of related memories
@@ -31,13 +87,40 @@ export interface IEpisodicMemoryUnit extends IMemoryUnit {
 }
 
 /**
+ * Concept node in semantic memory
+ */
+export interface ConceptNode {
+    id: string;
+    name: string;
+    confidence: number;
+    source: string;
+    lastVerified: Date;
+    properties: Map<string, any>;
+}
+
+/**
+ * Concept relation in semantic memory
+ */
+export interface ConceptRelation {
+    sourceId: string;
+    targetId: string;
+    type: string;
+    weight: number;
+    confidence: number;
+}
+
+/**
  * Interface for semantic memory units, representing knowledge and concepts
  */
 export interface ISemanticMemoryUnit extends IMemoryUnit {
     concept: string;
-    relations: Map<string, string[]>;
+    conceptGraph: {
+        nodes: Map<string, ConceptNode>;
+        relations: ConceptRelation[];
+    };
     confidence: number;
     source: string;
+    lastVerified: Date;
     consolidationStatus?: ConsolidationStatus;
 }
 
@@ -65,12 +148,107 @@ export enum ConsolidationStatus {
 }
 
 /**
- * Interface for emotional context
+ * Transition criteria for memory management
  */
-export interface EmotionalContext {
-    valence: number;      // -1 to 1, negative to positive
-    arousal: number;      // 0 to 1, calm to excited
-    dominance: number;    // 0 to 1, submissive to dominant
+export interface TransitionCriteria {
+    contextualCoherence: number;  // How well the memory fits in current context (0-1)
+    emotionalSalience: number;    // Emotional significance (0-1)
+    goalRelevance: number;        // Relevance to current goals (0-1)
+    generality: number;           // How general/abstract the information is (0-1)
+    consistency: number;          // Consistency with existing knowledge (0-1)
+}
+
+/**
+ * Base transition trigger interface
+ */
+export interface BaseTransitionTrigger {
+    type: 'context_change' | 'time_elapsed' | 'user_instruction' | 'emotional_peak' | 'goal_relevance';
+    condition: (memory: IMemoryUnit, context: MemoryContext) => Promise<boolean>;
+    priority: number;
+    threshold: number;
+    lastCheck: Date;
+}
+
+/**
+ * Enhanced transition trigger definition
+ */
+export interface EnhancedTransitionTrigger extends BaseTransitionTrigger {
+    metadata: {
+        userInstruction?: {
+            command: 'remember' | 'save' | 'forget';
+            target: string;
+        };
+        contextChange?: {
+            from: string;
+            to: string;
+            significance: number;
+        };
+        emotionalPeak?: {
+            emotion: string;
+            intensity: number;
+        };
+        goalRelevance?: {
+            goal: string;
+            relevanceScore: number;
+        };
+    };
+}
+
+/**
+ * Enhanced transition config
+ */
+export interface EnhancedTransitionConfig {
+    accessCountThreshold: number;
+    timeThresholdMs: number;
+    capacityThreshold: number;
+    importanceThreshold: number;
+    contextSwitchThreshold: number;
+    emotionalSalienceThreshold: number;
+    coherenceThreshold: number;
+    consistencyThreshold: number;
+    topicContinuityThreshold: number;
+    emotionalContinuityThreshold: number;
+    temporalProximityThreshold: number;
+    goalAlignmentThreshold: number;
+    emotionalIntensityThreshold: number;
+    emotionalNoveltyThreshold: number;
+    emotionalRelevanceThreshold: number;
+}
+
+/**
+ * Enhanced transition criteria
+ */
+export interface EnhancedTransitionCriteria extends TransitionCriteria {
+    topicContinuity: number;
+    emotionalContinuity: number;
+    temporalProximity: number;
+    goalAlignment: number;
+    emotionalFactors: {
+        intensity: number;
+        novelty: number;
+        relevance: number;
+    };
+}
+
+/**
+ * User instruction types
+ */
+export interface UserInstruction {
+    command: 'remember' | 'save' | 'forget';
+    target: string;
+    context?: string;
+    metadata?: Map<string, any>;
+}
+
+/**
+ * Transition trigger definition
+ */
+export interface TransitionTrigger {
+    type: 'context_change' | 'time_elapsed' | 'user_instruction' | 'repeated_mention' | 'emotional_significance';
+    threshold: number;
+    metadata: Map<string, any>;
+    lastCheck: Date;
+    priority: number;
 }
 
 /**
@@ -257,6 +435,27 @@ export interface IMemoryContextManager {
     getAllContext(): Promise<Map<string, any>>;
     clearContext(): Promise<void>;
     storeContextAsEpisodicMemory(context: Map<string, any>): Promise<void>;
+}
+
+/**
+ * Consolidation metrics
+ */
+export interface ConsolidationMetrics {
+    semanticSimilarity?: number;     // NLP-based similarity score
+    contextualOverlap?: number;      // Shared context score
+    temporalProximity?: number;      // Time-based relevance
+    sourceReliability?: number;      // Source credibility score
+    confidenceScore?: number;        // Overall confidence in the consolidation
+}
+
+/**
+ * Consolidation result
+ */
+export interface ConsolidationResult {
+    success: boolean;
+    metrics?: ConsolidationMetrics;
+    preservedRelations: string[];    // IDs of preserved relationships
+    mergedIds: string[];            // IDs of merged memory units
 }
 
 /**

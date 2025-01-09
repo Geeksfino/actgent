@@ -111,6 +111,15 @@ export class WorkingMemory extends BaseMemorySystem {
     }
 
     /**
+     * Retrieve all memories
+     */
+    public async retrieveAll(): Promise<IMemoryUnit[]> {
+        return this.storage.retrieveByFilter({
+            types: [MemoryType.WORKING]
+        });
+    }
+
+    /**
      * Move a single memory to episodic storage immediately
      * Used for immediate transitions (expiration, capacity)
      */
@@ -428,5 +437,11 @@ export class WorkingMemory extends BaseMemorySystem {
                 });
             }
         }
+    }
+
+    public async performCleanup(): Promise<void> {
+        await this.cleanup();
+        await this.cleanupExpiredMemories();
+        await this.ensureCapacity();
     }
 }
