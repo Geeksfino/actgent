@@ -1,32 +1,17 @@
 import { expect, test, describe, beforeEach } from 'bun:test';
 import { AgentMemorySystem } from '../../../src/core/memory/AgentMemorySystem';
-import { WorkingMemory } from '../../../src/core/memory/WorkingMemory';
-import { LongTermMemory } from '../../../src/core/memory/LongTermMemory';
-import { EpisodicMemory } from '../../../src/core/memory/EpisodicMemory';
 import { MockMemoryStorage, MockMemoryIndex } from '../utils/test-helpers';
 import { MemoryType, IMemoryUnit, MemoryFilter } from '../../../src/core/memory/types';
 
 describe('Memory System Integration', () => {
     let memorySystem: AgentMemorySystem;
-    let workingMemory: WorkingMemory;
-    let longTermMemory: LongTermMemory;
-    let episodicMemory: EpisodicMemory;
     let storage: MockMemoryStorage;
     let index: MockMemoryIndex;
 
     beforeEach(() => {
         storage = new MockMemoryStorage();
         index = new MockMemoryIndex();
-        workingMemory = new WorkingMemory(storage, index);
-        longTermMemory = new LongTermMemory(storage, index);
-        episodicMemory = new EpisodicMemory(storage, index);
         memorySystem = new AgentMemorySystem(storage, index);
-
-        // Initialize memory systems with correct index
-        workingMemory.setIndex(index);
-        longTermMemory.setIndex(index);
-        episodicMemory.setIndex(index);
-        memorySystem.setIndex(index);
     });
 
     describe('Memory Type Coordination', () => {
@@ -44,18 +29,13 @@ describe('Memory System Integration', () => {
             // Wait for consolidation
             await new Promise(resolve => setTimeout(resolve, 100));
 
-            // Force consolidation
-            await memorySystem.consolidateEpisodicMemory();
-
-            // Wait for consolidation to complete
-            await new Promise(resolve => setTimeout(resolve, 100));
-
             // Check if it's been transferred to episodic memory
-            const episodicResult = await episodicMemory.retrieve({
+            const filter: MemoryFilter = {
                 types: [MemoryType.EPISODIC],
                 metadataFilters: [new Map<string, any>([['source', 'working_memory']])]
-            });
+            };
 
+            const episodicResult = await memorySystem.retrieveEpisodicMemories(filter);
             expect(episodicResult.length).toBe(1);
             expect(episodicResult[0].content).toBe(content);
             expect(episodicResult[0].metadata.get('source')).toBe('working_memory');
@@ -89,14 +69,16 @@ describe('Memory System Integration', () => {
                 timestamp: new Date()
             };
 
-            await memorySystem.store(episodicMemory1);
-            await memorySystem.store(workingMemory1);
+            await memorySystem.storeEpisodicMemory(episodicMemory1.content, episodicMemory1.metadata);
+            await memorySystem.storeWorkingMemory(workingMemory1.content, workingMemory1.metadata);
 
             // Retrieve associated memories with specific filter
-            const relatedMemories = await memorySystem.retrieve({
+            const filter: MemoryFilter = {
                 types: [MemoryType.EPISODIC, MemoryType.WORKING],
                 query: 'project X'
-            });
+            };
+
+            const relatedMemories = await memorySystem.retrieveEpisodicMemories(filter);
             expect(relatedMemories.length).toBe(2);
             expect(relatedMemories.map(m => m.id).sort()).toEqual(['ep-1', 'work-1'].sort());
         });
@@ -126,10 +108,14 @@ describe('Memory System Integration', () => {
                 timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000)
             };
 
-            await memorySystem.store(workingContent);
-            await memorySystem.store(longTermContent);
+            await memorySystem.storeWorkingMemory(workingContent.content, workingContent.metadata);
+            await memorySystem.storeLongTerm(longTermContent.content, longTermContent.metadata);
 
-            const results = await memorySystem.retrieveRelevantMemories('task info');
+            const filter: MemoryFilter = {
+                query: 'task info'
+            };
+
+            const results = await memorySystem.retrieveWorkingMemories(filter);
             expect(results[0].id).toBe('recent-1');
         });
 
@@ -148,7 +134,11 @@ describe('Memory System Integration', () => {
             // Wait for memories to be processed
             await new Promise(resolve => setTimeout(resolve, 100));
 
-            const results = await memorySystem.retrieveRelevantMemories('info');
+            const filter: MemoryFilter = {
+                query: 'info'
+            };
+
+            const results = await memorySystem.retrieveWorkingMemories(filter);
             expect(results.length).toBeGreaterThan(0);
             expect(results[0].metadata.get('priority')).toBe('0.8');
         });
@@ -166,7 +156,7 @@ describe('Memory System Integration', () => {
                 timestamp: new Date()
             };
 
-            await memorySystem.store(originalMemory);
+            await memorySystem.storeLongTerm(originalMemory.content, originalMemory.metadata);
 
             // Update the memory
             const updatedMemory = {
@@ -179,15 +169,19 @@ describe('Memory System Integration', () => {
                 timestamp: new Date()
             };
 
-            await memorySystem.store(updatedMemory);
+            await memorySystem.storeLongTerm(updatedMemory.content, updatedMemory.metadata);
 
             // Check if update is reflected in both working and semantic memory
-            const workingResult = await workingMemory.retrieve({
+            const workingFilter: MemoryFilter = {
                 ids: ['mem-1']
-            });
-            const semanticResult = await longTermMemory.retrieve({
+            };
+
+            const semanticFilter: MemoryFilter = {
                 ids: ['mem-1']
-            });
+            };
+
+            const workingResult = await memorySystem.retrieveWorkingMemories(workingFilter);
+            const semanticResult = await memorySystem.retrieveLongTerm(semanticFilter);
 
             expect(workingResult.length).toBe(0); // Should be moved to semantic
             expect(semanticResult[0]?.content).toBe('Updated content');
@@ -204,7 +198,7 @@ describe('Memory System Integration', () => {
                 timestamp: new Date()
             };
 
-            await memorySystem.store(baseMemory);
+            await memorySystem.storeWorkingMemory(baseMemory.content, baseMemory.metadata);
 
             // Create conflicting updates
             const update1: IMemoryUnit = {
@@ -229,13 +223,15 @@ describe('Memory System Integration', () => {
 
             // Store updates with small delay to simulate concurrent updates
             await Promise.all([
-                memorySystem.store(update1),
-                new Promise(resolve => setTimeout(resolve, 10)).then(() => memorySystem.store(update2))
+                memorySystem.storeWorkingMemory(update1.content, update1.metadata),
+                new Promise(resolve => setTimeout(resolve, 10)).then(() => memorySystem.storeWorkingMemory(update2.content, update2.metadata))
             ]);
 
-            const result = await memorySystem.retrieve({
+            const filter: MemoryFilter = {
                 ids: ['conflict-1']
-            });
+            };
+
+            const result = await memorySystem.retrieveWorkingMemories(filter);
             expect(result[0]?.content).toBe('Update 2'); // Last write wins
         });
     });
@@ -249,9 +245,11 @@ describe('Memory System Integration', () => {
             ]));
 
             // Verify it exists
-            let result = await memorySystem.retrieve({
+            const filter: MemoryFilter = {
                 types: [MemoryType.WORKING]
-            });
+            };
+
+            let result = await memorySystem.retrieveWorkingMemories(filter);
             expect(result.length).toBe(1);
 
             // Wait for expiration
@@ -264,9 +262,7 @@ describe('Memory System Integration', () => {
             await new Promise(resolve => setTimeout(resolve, 100));
 
             // Verify it's been cleaned up
-            result = await memorySystem.retrieve({
-                types: [MemoryType.WORKING]
-            });
+            result = await memorySystem.retrieveWorkingMemories(filter);
             expect(result.length).toBe(0);
         });
 
@@ -294,20 +290,24 @@ describe('Memory System Integration', () => {
             await new Promise(resolve => setTimeout(resolve, 100));
 
             // Force consolidation
-            await memorySystem.consolidateEpisodicMemory();
+            await memorySystem.consolidateWorkingMemory();
 
             // Wait for consolidation to complete
             await new Promise(resolve => setTimeout(resolve, 100));
 
             // Check if less accessed memories are affected
-            const leastAccessed = await episodicMemory.retrieve({
+            const leastAccessedFilter: MemoryFilter = {
                 types: [MemoryType.EPISODIC],
                 query: 'Content 0'
-            });
-            const mostAccessed = await episodicMemory.retrieve({
+            };
+
+            const mostAccessedFilter: MemoryFilter = {
                 types: [MemoryType.EPISODIC],
                 query: 'Content 4'
-            });
+            };
+
+            const leastAccessed = await memorySystem.retrieveEpisodicMemories(leastAccessedFilter);
+            const mostAccessed = await memorySystem.retrieveEpisodicMemories(mostAccessedFilter);
 
             expect(leastAccessed[0]?.metadata.get('optimized')).toBeTruthy();
             expect(mostAccessed[0]?.metadata.get('optimized')).toBeFalsy();

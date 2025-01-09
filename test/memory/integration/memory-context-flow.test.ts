@@ -41,23 +41,20 @@ describe('Memory-Context Integration Flow', () => {
             await historyManager.addMessage(userMessage);
 
             // 2. Store some relevant memories
-            const projectMemory: IMemoryUnit = {
-                id: 'proj-x-1',
-                content: 'Project X is a software initiative focusing on AI',
-                type: MemoryType.SEMANTIC,
-                metadata: {
-                    relevance: 0.9,
-                    timestamp: Date.now(),
-                    tags: ['project-x', 'software']
-                }
-            };
-            await memorySystem.store(projectMemory);
+            const metadata = new Map<string, string>([
+                ['type', MemoryType.SEMANTIC],
+                ['tags', 'project-x,software']
+            ]);
+            await memorySystem.storeEpisodicMemory('Project X is a software initiative focusing on AI', metadata);
 
             // 3. Retrieve relevant context
-            const memories = await memorySystem.retrieveRelevantMemories('project X');
-            expect(memories).toContainEqual(expect.objectContaining({
-                id: 'proj-x-1'
-            }));
+            const filter = {
+                types: [MemoryType.SEMANTIC],
+                metadataFilters: [new Map([['tags', 'project-x']])]
+            };
+            const memories = await memorySystem.retrieveEpisodicMemories(filter);
+            expect(memories.length).toBe(1);
+            expect(memories[0].metadata.get('tags')).toBe('project-x,software');
 
             // 4. Construct context
             const context = await historyManager.getContext();
@@ -85,17 +82,11 @@ describe('Memory-Context Integration Flow', () => {
             await historyManager.addMessage(secondMessage);
 
             // Store additional context in memory
-            const goalsMemory: IMemoryUnit = {
-                id: 'proj-x-goals',
-                content: 'Project X aims to develop advanced AI systems',
-                type: MemoryType.SEMANTIC,
-                metadata: {
-                    relevance: 0.95,
-                    timestamp: Date.now(),
-                    tags: ['project-x', 'goals']
-                }
-            };
-            await memorySystem.store(goalsMemory);
+            const metadata = new Map<string, string>([
+                ['type', MemoryType.SEMANTIC],
+                ['tags', 'project-x,goals']
+            ]);
+            await memorySystem.storeEpisodicMemory('Project X aims to develop advanced AI systems', metadata);
 
             // 3. Verify context maintenance
             const context = await historyManager.getContext();
@@ -103,10 +94,12 @@ describe('Memory-Context Integration Flow', () => {
             expect(context).toContain('What were its main goals?');
 
             // 4. Verify memory integration
-            const relevantMemories = await memorySystem.retrieveRelevantMemories('project X goals');
-            expect(relevantMemories).toContainEqual(expect.objectContaining({
-                id: 'proj-x-goals'
-            }));
+            const filter = {
+                types: [MemoryType.SEMANTIC],
+                metadataFilters: [new Map([['tags', 'project-x']])]
+            };
+            const relevantMemories = await memorySystem.retrieveEpisodicMemories(filter);
+            expect(relevantMemories.length).toBe(2);
         });
 
         test('should handle memory consolidation and optimization', async () => {
@@ -129,22 +122,18 @@ describe('Memory-Context Integration Flow', () => {
             expect(context.split('\n').length).toBeLessThan(10); // Some messages should be filtered out
 
             // 5. Check memory consolidation
-            const consolidatedMemory: IMemoryUnit = {
-                id: 'consolidated-1',
-                content: 'Summary of previous discussion about project updates',
-                type: MemoryType.EPISODIC,
-                metadata: {
-                    relevance: 0.8,
-                    timestamp: Date.now(),
-                    tags: ['project-update', 'summary']
-                }
-            };
-            await memorySystem.store(consolidatedMemory);
+            const metadata = new Map<string, string>([
+                ['type', MemoryType.EPISODIC],
+                ['tags', 'project-update,summary']
+            ]);
+            await memorySystem.storeEpisodicMemory('Summary of previous discussion about project updates', metadata);
 
-            const memories = await memorySystem.retrieveRelevantMemories('project update');
-            expect(memories).toContainEqual(expect.objectContaining({
-                id: 'consolidated-1'
-            }));
+            const filter = {
+                types: [MemoryType.EPISODIC],
+                metadataFilters: [new Map([['tags', 'project-update']])]
+            };
+            const memories = await memorySystem.retrieveEpisodicMemories(filter);
+            expect(memories.length).toBe(1);
         });
     });
 });

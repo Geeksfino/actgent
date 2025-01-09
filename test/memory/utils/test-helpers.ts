@@ -1,4 +1,14 @@
 import { IMemoryStorage, IMemoryIndex, IMemoryUnit, MemoryFilter, MemoryType } from '../../../src/core/memory/types';
+import crypto from 'crypto';
+
+// Debug flag that can be controlled via environment variable
+const DEBUG = process.env.DEBUG === 'true';
+
+function debugLog(...args: any[]) {
+    if (DEBUG) {
+        console.log(...args);
+    }
+}
 
 export class MockMemoryStorage implements IMemoryStorage {
     private memories: Map<string, IMemoryUnit> = new Map();
@@ -7,13 +17,14 @@ export class MockMemoryStorage implements IMemoryStorage {
         // Deep clone memory to prevent reference issues
         const clonedMemory = {
             ...memory,
+            id: memory.id || crypto.randomUUID(),
             content: this.deepCloneWithMaps(memory.content),
             metadata: memory.metadata instanceof Map ? 
                 new Map(memory.metadata) : 
                 new Map(Object.entries(memory.metadata || {})),
-            timestamp: memory.timestamp,
-            accessCount: memory.accessCount,
-            lastAccessed: memory.lastAccessed
+            timestamp: memory.timestamp || new Date(),
+            accessCount: memory.accessCount || 0,
+            lastAccessed: memory.lastAccessed || new Date()
         };
         
         // Ensure metadata type is set
@@ -54,12 +65,12 @@ export class MockMemoryStorage implements IMemoryStorage {
     }
 
     async retrieveByFilter(filter: MemoryFilter): Promise<IMemoryUnit[]> {
-        console.log('Memories:', Array.from(this.memories.values()).map(m => ({
+        debugLog('Memories:', Array.from(this.memories.values()).map(m => ({
             id: m.id,
             content: m.content,
             metadata: Object.fromEntries(m.metadata.entries())
         })));
-        console.log('Filter:', filter);
+        debugLog('Filter:', filter);
         
         const memories = Array.from(this.memories.values()).filter(memory => {
             // Type check

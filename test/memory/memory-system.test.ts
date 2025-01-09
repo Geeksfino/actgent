@@ -1,6 +1,7 @@
 import { expect, test, describe, beforeEach, afterEach } from 'bun:test';
 import { AgentMemorySystem } from '../../src/core/memory/AgentMemorySystem';
 import { IMemoryStorage, IMemoryIndex, IMemoryUnit, MemoryFilter, MemoryType } from '../../src/core/memory/types';
+import crypto from 'crypto';
 
 // Mock LLM response for testing
 class MockLLM {
@@ -23,7 +24,9 @@ class MockMemoryCache {
         if (this.cache.size >= this.maxSize) {
             // Remove oldest entry
             const firstKey = this.cache.keys().next().value;
-            this.cache.delete(firstKey);
+            if (firstKey) {
+                this.cache.delete(firstKey);
+            }
         }
         this.cache.set(id, memory);
     }
@@ -47,14 +50,26 @@ class MockMemoryStorage implements IMemoryStorage {
     }
 
     async store(memory: IMemoryUnit): Promise<void> {
-        if (!memory.id) {
-            memory.id = crypto.randomUUID();
+        // Deep clone memory to prevent reference issues
+        const clonedMemory = {
+            ...memory,
+            id: memory.id || crypto.randomUUID(),
+            content: memory.content,
+            metadata: memory.metadata instanceof Map ? 
+                new Map(memory.metadata) : 
+                new Map(Object.entries(memory.metadata || {})),
+            timestamp: memory.timestamp || new Date(),
+            accessCount: memory.accessCount || 0,
+            lastAccessed: memory.lastAccessed || new Date()
+        };
+        
+        // Ensure metadata type is set
+        if (!clonedMemory.metadata.has('type')) {
+            clonedMemory.metadata.set('type', MemoryType.WORKING);
         }
-        if (!memory.lastAccessed) {
-            memory.lastAccessed = new Date();
-        }
-        this.storage.set(memory.id, memory);
-        this.cache.set(memory.id, memory);
+        
+        this.storage.set(clonedMemory.id, clonedMemory);
+        this.cache.set(clonedMemory.id, clonedMemory);
     }
 
     async retrieve(id: string): Promise<IMemoryUnit | null> {
@@ -65,12 +80,12 @@ class MockMemoryStorage implements IMemoryStorage {
         }
 
         const memory = this.storage.get(id);
-        if (memory) {
-            memory.lastAccessed = new Date();
-            this.cache.set(id, memory);
-            return memory;
+        if (!memory) {
+            return null;
         }
-        return null;
+        memory.lastAccessed = new Date();
+        this.cache.set(id, memory);
+        return memory;
     }
 
     async update(memory: IMemoryUnit): Promise<void> {
@@ -113,7 +128,7 @@ class MockMemoryStorage implements IMemoryStorage {
         return memories.filter(memory => {
             // Check if memory is expired
             const expiresAt = memory.metadata.get('expiresAt');
-            if (expiresAt && typeof expiresAt === 'number' && expiresAt < Date.now()) {
+            if (expiresAt && typeof expiresAt === 'string' && parseInt(expiresAt) < Date.now()) {
                 return false;
             }
 
@@ -234,63 +249,110 @@ describe('AgentMemorySystem', () => {
     });
 
     describe('Memory Storage Tests', () => {
-        test('should store and retrieve long-term memories', async () => {
-            const content = { text: 'test memory' };
-            const metadata = new Map<string, any>([
-                ['type', MemoryType.EPISODIC]
-            ]);
-            
-            await memorySystem.getLongTermMemory().store(content, metadata);
-            
-            const filter: MemoryFilter = {
-                types: [MemoryType.EPISODIC],
-                metadataFilters: [metadata]
-            };
-            
-            const memories = await memorySystem.getLongTermMemory().retrieve(filter);
-            expect(memories.length).toBe(1);
-            expect(memories[0].content).toEqual(content);
-        });
-
-        test('should store and retrieve working memories', async () => {
-            const content = { text: 'working memory' };
-            const metadata = new Map<string, any>([
+        test('should store and retrieve working memory', async () => {
+            const content = 'Test working memory';
+            const metadata = new Map<string, string>([
                 ['type', MemoryType.WORKING],
-                ['expiresAt', Date.now() + 10000]
+                ['tag', 'test']
             ]);
-            
-            await memorySystem.getWorkingMemory().store(content, metadata);
-            
+
+            await memorySystem.storeWorkingMemory(content, metadata);
+
             const filter: MemoryFilter = {
                 types: [MemoryType.WORKING],
-                metadataFilters: [metadata]
+                metadataFilters: [new Map([['tag', 'test']])]
             };
 
-            const memories = await memorySystem.getWorkingMemory().retrieve(filter);
+            const memories = await memorySystem.retrieveWorkingMemories(filter);
             expect(memories.length).toBe(1);
-            expect(memories[0].content).toEqual(content);
+            expect(memories[0].content).toBe(content);
         });
 
-        test('should consolidate working memories after threshold', async () => {
-            const content = { text: 'test memory' };
-            const metadata = new Map<string, any>([
-                ['type', MemoryType.WORKING],
-                ['expiresAt', Date.now() - 2000]
+        test('should store and retrieve episodic memory', async () => {
+            const content = 'Test episodic memory';
+            const metadata = new Map<string, string>([
+                ['type', MemoryType.EPISODIC],
+                ['tag', 'test']
             ]);
 
-            // Store working memory
-            await memorySystem.getWorkingMemory().store(content, metadata);
+            await memorySystem.storeEpisodicMemory(content, metadata);
+
+            const filter: MemoryFilter = {
+                types: [MemoryType.EPISODIC],
+                metadataFilters: [new Map([['tag', 'test']])]
+            };
+
+            const memories = await memorySystem.retrieveEpisodicMemories(filter);
+            expect(memories.length).toBe(1);
+            expect(memories[0].content).toBe(content);
+        });
+
+        test('should consolidate working memory to episodic', async () => {
+            const content = 'Memory to consolidate';
+            const metadata = new Map<string, string>([
+                ['type', MemoryType.WORKING],
+                ['tag', 'consolidate']
+            ]);
+
+            await memorySystem.storeWorkingMemory(content, metadata);
+            await memorySystem.consolidateWorkingMemory();
+
+            const workingFilter: MemoryFilter = {
+                types: [MemoryType.WORKING],
+                metadataFilters: [new Map([['tag', 'consolidate']])]
+            };
+
+            const episodicFilter: MemoryFilter = {
+                types: [MemoryType.EPISODIC],
+                metadataFilters: [new Map([['tag', 'consolidate']])]
+            };
+
+            const workingMemories = await memorySystem.retrieveWorkingMemories(workingFilter);
+            const episodicMemories = await memorySystem.retrieveEpisodicMemories(episodicFilter);
+
+            expect(workingMemories.length).toBe(0);
+            expect(episodicMemories.length).toBe(1);
+            expect(episodicMemories[0].content).toBe(content);
+        });
+
+        test('should handle cleanup timers', async () => {
+            // Create test memory with expiration
+            const content = 'Test memory';
+            const metadata = new Map<string, string>([
+                ['type', MemoryType.WORKING],
+                ['expiresAt', (Date.now() - 1000).toString()]
+            ]);
+
+            await memorySystem.storeWorkingMemory(content, metadata);
 
             // Wait for cleanup
             await new Promise(resolve => setTimeout(resolve, 100));
 
-            // Verify memory is cleaned up
-            const filter: MemoryFilter = {
+            // Verify working memory was consolidated
+            const workingFilter = {
                 types: [MemoryType.WORKING],
-                metadataFilters: [metadata]
+                metadataFilters: []
             };
 
-            const memories = await memorySystem.getWorkingMemory().retrieve(filter);
+            const workingMemories = await memorySystem.retrieveWorkingMemories(workingFilter);
+            expect(workingMemories.length).toBe(0);
+        });
+
+        test('should handle memory expiration', async () => {
+            const content = 'Test memory';
+            const metadata = new Map<string, string>([
+                ['type', MemoryType.WORKING],
+                ['expiresAt', (Date.now() - 1000).toString()]
+            ]);
+
+            await memorySystem.storeWorkingMemory(content, metadata);
+
+            const filter = {
+                types: [MemoryType.WORKING],
+                metadataFilters: []
+            };
+
+            const memories = await memorySystem.retrieveWorkingMemories(filter);
             expect(memories.length).toBe(0);
         });
     });
@@ -344,7 +406,7 @@ describe('AgentMemorySystem', () => {
                 text: 'test memory 1',
                 value: 'test'  // The value we want to set in context
             };
-            
+
             const metadata = new Map<string, any>([
                 ['type', MemoryType.CONTEXTUAL],
                 ['contextKey', 'memoryType'],
@@ -354,7 +416,7 @@ describe('AgentMemorySystem', () => {
 
             // Store the memory
             await memorySystem.storeWorkingMemory(contextualMemory, metadata);
-            
+
             // Explicitly set the context value
             await memorySystem.setContext('memoryType', 'test');
 
@@ -391,10 +453,12 @@ describe('AgentMemorySystem', () => {
             await new Promise(resolve => setTimeout(resolve, 100));
 
             // Verify working memory was consolidated
-            const workingMemories = await memorySystem.getWorkingMemory().retrieve({
+            const workingFilter: MemoryFilter = {
                 types: [MemoryType.WORKING],
                 metadataFilters: []
-            });
+            };
+
+            const workingMemories = await memorySystem.getWorkingMemory().retrieve(workingFilter);
 
             expect(workingMemories.length).toBe(0);
         });

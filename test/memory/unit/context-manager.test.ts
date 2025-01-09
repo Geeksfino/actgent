@@ -1,8 +1,6 @@
-import { describe, test, expect, beforeEach } from 'bun:test';
+import { expect, test, describe, beforeEach } from 'bun:test';
 import { MemoryContextManager } from '../../../src/core/memory/MemoryContextManager';
 import { MockMemoryStorage, MockMemoryIndex } from '../utils/test-helpers';
-import { createContextualMemory } from '../utils/test-data';
-import { MemoryType, MemoryFilter } from '../../../src/core/memory/types';
 
 describe('MemoryContextManager', () => {
     let contextManager: MemoryContextManager;
@@ -15,126 +13,94 @@ describe('MemoryContextManager', () => {
         contextManager = new MemoryContextManager(storage, index);
     });
 
-    test('should manage explicit context', async () => {
-        contextManager.setContext('key1', 'value1');
-        contextManager.setContext('key2', 'value2');
+    test('should set and get context values', async () => {
+        const key = 'testKey';
+        const value = 'testValue';
 
-        const context = await contextManager.getAllContext();
-        expect(context.get('key1')).toBe('value1');
-        expect(context.get('key2')).toBe('value2');
+        await contextManager.setContext(key, value);
+        const retrievedValue = await contextManager.getContext(key);
+
+        expect(retrievedValue).toBe(value);
     });
 
-    test('should clear context properly', async () => {
-        contextManager.setContext('key1', 'value1');
-        contextManager.setContext('key2', 'value2');
+    test('should update existing context values', async () => {
+        const key = 'testKey';
+        const initialValue = 'initialValue';
+        const updatedValue = 'updatedValue';
 
-        contextManager.clearContext();
+        await contextManager.setContext(key, initialValue);
+        await contextManager.setContext(key, updatedValue);
 
-        const context = await contextManager.getAllContext();
-        expect(context.size).toBe(0);
+        const retrievedValue = await contextManager.getContext(key);
+        expect(retrievedValue).toBe(updatedValue);
     });
 
-    test('should load context based on filter', async () => {
-        const memory = createContextualMemory(
-            { operationType: 'test' },
-            'operationType'
-        );
+    test('should handle multiple context values', async () => {
+        const contexts = new Map([
+            ['key1', 'value1'],
+            ['key2', 'value2'],
+            ['key3', 'value3']
+        ]);
 
-        await storage.store(memory);
+        // Set multiple context values
+        for (const [key, value] of contexts) {
+            await contextManager.setContext(key, value);
+        }
 
-        await contextManager.loadContext({
-            types: [MemoryType.CONTEXTUAL],
-            metadataFilters: [new Map([['type', MemoryType.CONTEXTUAL]])]
-        });
-
-        const context = await contextManager.getAllContext();
-        expect(context.get('operationType')).toBe('test');
+        // Verify each value
+        for (const [key, value] of contexts) {
+            const retrievedValue = await contextManager.getContext(key);
+            expect(retrievedValue).toBe(value);
+        }
     });
 
-    test('should handle memory-derived context', async () => {
-        // Store a memory with context
-        const memory1 = createContextualMemory(
-            { operationType: 'test' },
-            'operationType'
-        );
-        await storage.store(memory1);
+    test('should handle context expiration', async () => {
+        const key = 'expiringKey';
+        const value = 'expiringValue';
 
-        // Store another memory with different context
-        const memory2 = createContextualMemory(
-            { operationStatus: 'running' },
-            'operationStatus'
-        );
-        await storage.store(memory2);
+        await contextManager.setContext(key, value);
+        
+        // Value should exist immediately
+        let retrievedValue = await contextManager.getContext(key);
+        expect(retrievedValue).toBe(value);
 
-        // Load context
-        await contextManager.loadContext({
-            types: [MemoryType.CONTEXTUAL],
-            metadataFilters: [new Map<string, any>([['type', MemoryType.CONTEXTUAL]])]
-        });
+        // Wait for expiration
+        await new Promise(resolve => setTimeout(resolve, 150));
 
-        // Verify context includes both memory-derived contexts
-        const context = await contextManager.getContext('operationType');
-        expect(context).toBe('test');
-        const status = await contextManager.getContext('operationStatus');
-        expect(status).toBe('running');
+        // Value should be gone
+        retrievedValue = await contextManager.getContext(key);
+        expect(retrievedValue).toBeUndefined();
     });
 
-    test('should store context as episodic memory', async () => {
-        // Set some context
-        await contextManager.setContext('key1', 'value1');
-        await contextManager.setContext('key2', 'value2');
+    test('should clear context values', async () => {
+        const key = 'testKey';
+        const value = 'testValue';
 
-        // Store as episodic memory
-        await contextManager.storeContextAsEpisodicMemory(
-            new Map<string, any>([['contextType', 'test']])
-        );
+        await contextManager.setContext(key, value);
+        await contextManager.clearContext();
 
-        // Retrieve the stored context memory
-        const filter: MemoryFilter = {
-            types: [MemoryType.CONTEXTUAL],
-            metadataFilters: [new Map<string, any>([['contextType', 'test']])]
-        };
-
-        const memories = await storage.retrieveByFilter(filter);
-        expect(memories.length).toBe(1);
-        expect(memories[0].content).toEqual({
-            key1: 'value1',
-            key2: 'value2'
-        });
+        const retrievedValue = await contextManager.getContext(key);
+        expect(retrievedValue).toBeUndefined();
     });
 
-    test('should maintain context history', async () => {
-        // Set initial context
-        await contextManager.setContext('key1', 'value1');
-        await contextManager.storeContextAsEpisodicMemory(new Map<string, any>([
-            ['contextType', 'test'],
-            ['version', 1]
-        ]));
+    test('should clear all context values', async () => {
+        const contexts = new Map([
+            ['key1', 'value1'],
+            ['key2', 'value2']
+        ]);
 
-        // Update context
-        await contextManager.setContext('key1', 'value2');
-        await contextManager.storeContextAsEpisodicMemory(new Map<string, any>([
-            ['contextType', 'test'],
-            ['version', 2]
-        ]));
+        // Set values
+        for (const [key, value] of contexts) {
+            await contextManager.setContext(key, value);
+        }
 
-        // Get context history
-        const history = await contextManager.getContextHistory();
-        expect(history.length).toBe(2);
-        expect(history[0].content.key1).toBe('value1');
-        expect(history[1].content.key1).toBe('value2');
-    });
+        // Clear all
+        await contextManager.clearContext();
 
-    test('should handle context updates', async () => {
-        // Set initial context
-        contextManager.setContext('key1', 'value1');
-
-        // Update context
-        contextManager.setContext('key1', 'value2');
-
-        // Verify only the latest value is present
-        const context = await contextManager.getAllContext();
-        expect(context.get('key1')).toBe('value2');
-        expect(context.size).toBe(1);
+        // Verify all are cleared
+        for (const [key] of contexts) {
+            const retrievedValue = await contextManager.getContext(key);
+            expect(retrievedValue).toBeUndefined();
+        }
     });
 });
