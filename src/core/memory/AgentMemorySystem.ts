@@ -281,13 +281,15 @@ export class AgentMemorySystem extends BaseMemorySystem {
         return this.storage.retrieveByFilter(idOrFilter);
     }
 
-    protected async cleanup(): Promise<void> {
-        // Use public methods or create new public methods for cleanup
-        await Promise.all([
-            this.workingMemory.performCleanup(),  // New public method
-            this.episodicMemory.performCleanup(), // New public method
-            this.longTermMemory.performCleanup()  // New public method
-        ]);
+    public async cleanup(): Promise<void> {
+        // Clean up working memory
+        await this.workingMemory.cleanup();
+
+        // Clean up episodic memory
+        await this.episodicMemory.cleanup();
+
+        // Clean up long-term memory
+        await this.longTermMemory.cleanup();
     }
 
     async deleteMemory(id: string): Promise<void> {

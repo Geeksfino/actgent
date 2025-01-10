@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { LongTermMemory } from '../../../../src/core/memory/LongTermMemory';
-import { MockMemoryStorage, MockMemoryIndex } from '../../utils/test-helpers';
-import { MemoryType, MemoryFilter } from '../../../../src/core/memory/types';
+import { LongTermMemory } from '../../../src/core/memory/LongTermMemory';
+import { MockMemoryStorage, MockMemoryIndex } from '../utils/test-helpers';
+import { MemoryType, MemoryFilter } from '../../../src/core/memory/types';
 
 describe('Semantic Memory Features', () => {
     let storage: MockMemoryStorage;

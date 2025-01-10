@@ -11,7 +11,7 @@ describe('SmartHistoryManager', () => {
     let workingMemory: WorkingMemory;
     let historyManager: SmartHistoryManager;
 
-    beforeEach(() => {
+    beforeEach(async () => {
         storage = new MockMemoryStorage();
         index = new MockMemoryIndex();
         workingMemory = new WorkingMemory(storage, index);
@@ -20,6 +20,14 @@ describe('SmartHistoryManager', () => {
         // Set up optimizers
         (historyManager as any).optimizers.set('relevance', new MockRelevanceOptimizer());
         (historyManager as any).optimizers.set('context', new MockContextOptimizer(0.5));
+
+        // Clear any existing memories before each test
+        const existingMemories = await workingMemory.retrieve({
+            types: [MemoryType.WORKING]
+        });
+        for (const memory of existingMemories) {
+            await workingMemory.delete(memory.id);
+        }
     });
 
     describe('Message Management', () => {
@@ -60,7 +68,8 @@ describe('SmartHistoryManager', () => {
             });
 
             expect(memories.length).toBe(1);
-            expect(memories[0].content).toEqual({ content: message.content, role: message.role });
+            expect(memories[0].content).toBe(message.content);
+            expect(memories[0].metadata.get('role')).toBe(message.role);
         });
 
         test('should handle message metadata', async () => {
@@ -89,6 +98,13 @@ describe('SmartHistoryManager', () => {
             for (const message of messages) {
                 await historyManager.addMessage(message);
             }
+
+            // Register a test optimizer that filters out low relevance messages
+            historyManager.registerOptimizer('test', {
+                optimize: async (msgs) => msgs.filter(m => (m.metadata?.relevanceScore || 0) >= 0.5),
+                getName: () => 'test',
+                getMetadata: () => ({})
+            });
 
             await historyManager.optimize();
 

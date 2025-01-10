@@ -1,8 +1,8 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { LongTermMemory } from '../../../../src/core/memory/LongTermMemory';
-import { MockMemoryStorage, MockMemoryIndex } from '../../utils/test-helpers';
-import { MemoryType, MemoryFilter } from '../../../../src/core/memory/types';
-import { EpisodicMemory } from '../../../../src/core/memory/EpisodicMemory';
+import { LongTermMemory } from '../../../src/core/memory/LongTermMemory';
+import { MockMemoryStorage, MockMemoryIndex } from '../utils/test-helpers';
+import { MemoryType, MemoryFilter } from '../../..//src/core/memory/types';
+import { EpisodicMemory } from '../../../src/core/memory/EpisodicMemory';
 
 describe('Episodic Memory Features', () => {
     let storage: MockMemoryStorage;

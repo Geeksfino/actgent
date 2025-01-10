@@ -1,4 +1,4 @@
-import { ConversationMessage, UserGoal, DomainContext, InteractionFlow, InteractionFlowType } from './types';
+import { ConversationMessage, UserGoal, DomainContext, InteractionFlow } from './types';
 import { SmartHistoryManager } from './SmartHistoryManager';
 import { WorkingMemory } from '../memory/WorkingMemory';
 import { NLPService } from '../memory/semantic/nlp/NLPService';
@@ -28,6 +28,15 @@ export class ConversationContextManager {
     }
 
     public async addMessage(message: ConversationMessage): Promise<void> {
+        if (!message.content || typeof message.content !== 'string') {
+            throw new Error('Invalid message content');
+        }
+
+        message.content = message.content.trim();
+        if (!message.content) {
+            throw new Error('Empty message content');
+        }
+
         // Add domain and goals to message metadata
         if (this.currentDomain) {
             message.metadata = message.metadata || {};
@@ -51,37 +60,45 @@ export class ConversationContextManager {
             }
         }
 
+        // Add to history manager
         this.historyManager.addMessage(message);
+
+        // Update context with latest message
+        const history = await this.historyManager.getContext();
+        this.context.set('history', history);
     }
 
     public async getContext(): Promise<Map<string, any>> {
-        const historyContext = await this.historyManager.getContext();
-        this.context.set('history', historyContext);
-        this.context.set('goals', Array.from(this.activeGoals.values()));
-        this.context.set('domain', this.currentDomain ? this.domainContexts.get(this.currentDomain) : null);
+        // Update history from history manager
+        const history = await this.historyManager.getContext();
+        this.context.set('history', history);
         return this.context;
     }
 
-    public async optimize(): Promise<void> {
-        await this.historyManager.optimize();
-        this.cleanupGoals();
-        this.updateDomainConfidence();
+    public getContextValue(key: string): any {
+        return this.context.get(key);
     }
 
-    // Goal Management
+    public setContext(key: string, value: any): void {
+        this.context.set(key, value);
+    }
+
+    public clearContext(): void {
+        this.context.clear();
+    }
+
     public addUserGoal(goal: Partial<UserGoal>): string {
-        const id = crypto.randomUUID();
+        const id = goal.id || crypto.randomUUID();
         const newGoal: UserGoal = {
             id,
             description: goal.description || '',
             priority: goal.priority || 1,
             status: goal.status || 'active',
-            createdAt: new Date(),
-            updatedAt: new Date(),
+            createdAt: goal.createdAt || new Date(),
+            updatedAt: goal.updatedAt || new Date(),
             parentGoalId: goal.parentGoalId,
             metadata: goal.metadata || {}
         };
-
         this.activeGoals.set(id, newGoal);
         return id;
     }
@@ -104,157 +121,64 @@ export class ConversationContextManager {
             .sort((a, b) => b.priority - a.priority);
     }
 
-    // Domain Context Management
-    public setDomainContext(context: DomainContext): void {
-        this.domainContexts.set(context.domain, {
-            ...context,
-            activeSince: new Date()
-        });
-        this.currentDomain = context.domain;
+    public async findRelevantGoals(content: string): Promise<UserGoal[]> {
+        const contentConcepts = await this.getContentConcepts(content);
+        const goals = Array.from(this.activeGoals.values());
+        
+        return goals.filter(goal => {
+            const goalConcepts = this.goalConceptCache.get(goal.id)?.concepts || [];
+            return goalConcepts.some(concept => contentConcepts.includes(concept));
+        }).sort((a, b) => (b.metadata?.relevanceScore || 0) - (a.metadata?.relevanceScore || 0));
     }
 
-    public getDomainRules(): Map<string, any> {
-        if (!this.currentDomain) return new Map();
-        return this.domainContexts.get(this.currentDomain)?.rules || new Map();
+    public setDomainContext(domain: DomainContext): void {
+        this.domainContexts.set(domain.domain, domain);
+        this.currentDomain = domain.domain;
     }
 
     public getCurrentDomain(): DomainContext | undefined {
-        return this.currentDomain ? this.domainContexts.get(this.currentDomain) : undefined;
+        if (!this.currentDomain) return undefined;
+        return this.domainContexts.get(this.currentDomain);
     }
 
-    // Basic context operations
-    public setContext(key: string, value: any): void {
-        this.context.set(key, value);
+    public addInteractionFlow(flow: InteractionFlow): void {
+        this.historyManager.addInteractionFlow(flow);
     }
 
-    public getContextValue(key: string): any {
-        return this.context.get(key);
-    }
+    public async optimize(): Promise<void> {
+        // Optimize history
+        await this.historyManager.optimize();
 
-    public clearContext(): void {
-        this.context.clear();
-        // Don't clear goals and domains as they are managed separately
-    }
-
-    // Interaction Flow Management
-    public async addInteractionFlow(flow: InteractionFlow): Promise<void> {
-        // First get the goals if needed
-        const goals = flow.goals || (await this.findRelevantGoals('')).map(g => g.id);
-
-        const message: ConversationMessage = {
-            id: flow.messageId,
-            content: '',  // Will be set by addMessage
-            role: 'system',
-            timestamp: new Date(),
-            relevanceScore: 1,
-            importance: 1,
-            tokens: 0,
-            metadata: {
-                flow: flow.flow,
-                references: flow.references,
-                domain: flow.domain || this.currentDomain,
-                goals
-            }
-        };
-
-        this.historyManager.addMessage(message);
-    }
-
-    private async findRelevantGoals(content: string): Promise<UserGoal[]> {
-        if (!content.trim()) return [];
-        
-        const relevantGoals: UserGoal[] = [];
-        const messageConceptsResult = await this.nlpService.extractConcepts(content);
-        const messageConcepts = messageConceptsResult.concepts.map(concept => {
-            if (typeof concept === 'string') return concept;
-            return (concept as { text?: string }).text || '';
-        });
-
-        const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
-        const SIMILARITY_THRESHOLD = 0.7;
-
-        const activeGoals = this.getActiveGoals();
-        for (const goal of activeGoals) {
-            try {
-                // Check cache or extract concepts
-                let goalConcepts: string[];
-                const cached = this.goalConceptCache.get(goal.id);
-                
-                if (cached && (new Date().getTime() - cached.timestamp.getTime()) < CACHE_DURATION) {
-                    goalConcepts = cached.concepts;
-                } else {
-                    const goalConceptsResult = await this.nlpService.extractConcepts(goal.description);
-                    goalConcepts = goalConceptsResult.concepts.map(concept => {
-                        if (typeof concept === 'string') return concept;
-                        return (concept as { text?: string }).text || '';
-                    });
-                    this.goalConceptCache.set(goal.id, {
-                        concepts: goalConcepts,
-                        timestamp: new Date()
-                    });
+        // Decay domain confidence
+        if (this.currentDomain) {
+            const domain = this.domainContexts.get(this.currentDomain);
+            if (domain) {
+                domain.confidence *= 0.95; // Apply decay factor
+                if (domain.confidence < 0.3) {
+                    this.currentDomain = undefined;
                 }
-
-                // Calculate similarity between concepts
-                let totalSimilarity = 0;
-                let comparisonCount = 0;
-
-                for (const messageConcept of messageConcepts) {
-                    for (const goalConcept of goalConcepts) {
-                        const similarity = await this.nlpService.calculateSimilarity(
-                            messageConcept,
-                            goalConcept
-                        );
-                        totalSimilarity += similarity;
-                        comparisonCount++;
-                    }
-                }
-
-                // Calculate average similarity
-                const avgSimilarity = comparisonCount > 0 
-                    ? totalSimilarity / comparisonCount 
-                    : 0;
-
-                // If similarity is high enough, consider the goal relevant
-                if (avgSimilarity >= SIMILARITY_THRESHOLD) {
-                    // Add similarity score to goal metadata
-                    goal.metadata = goal.metadata || {};
-                    goal.metadata.lastSimilarityScore = avgSimilarity;
-                    relevantGoals.push(goal);
-                }
-            } catch (error) {
-                console.error(`Error calculating relevance for goal ${goal.id}:`, error);
             }
         }
 
-        // Sort by similarity score and priority
-        return relevantGoals.sort((a, b) => {
-            const scoreA = (a.metadata?.lastSimilarityScore as number || 0) * a.priority;
-            const scoreB = (b.metadata?.lastSimilarityScore as number || 0) * b.priority;
-            return scoreB - scoreA;
-        });
-    }
-
-    private cleanupGoals(): void {
+        // Clean up expired goal concepts
         const now = new Date();
-        for (const [id, goal] of this.activeGoals) {
-            if (goal.metadata?.deadline && new Date(goal.metadata.deadline) < now) {
-                this.updateUserGoal(id, { status: 'completed' });
+        for (const [id, cache] of this.goalConceptCache) {
+            if (now.getTime() - cache.timestamp.getTime() > 24 * 60 * 60 * 1000) {
+                this.goalConceptCache.delete(id);
             }
         }
     }
 
-    private updateDomainConfidence(): void {
-        if (!this.currentDomain) return;
-
-        const domain = this.domainContexts.get(this.currentDomain);
-        if (!domain) return;
-
-        // Decay confidence over time
-        const hoursSinceActive = (new Date().getTime() - domain.activeSince.getTime()) / (1000 * 60 * 60);
-        domain.confidence = Math.max(0.1, domain.confidence * Math.exp(-0.1 * hoursSinceActive));
-
-        if (domain.confidence < 0.3) {
-            this.currentDomain = undefined;
+    private async getContentConcepts(content: string): Promise<string[]> {
+        try {
+            const result = await this.nlpService.extractConcepts(content);
+            // Convert ConceptNode[] to string[] using the label field
+            return result.concepts.map(concept => 
+                typeof concept === 'string' ? concept : concept.label
+            );
+        } catch (error) {
+            console.error('Error extracting concepts:', error);
+            return [];
         }
     }
 }

@@ -1,7 +1,7 @@
 import { expect, test, describe, beforeEach } from 'bun:test';
-import { AgentMemorySystem } from '../../../src/core/memory/AgentMemorySystem';
-import { MockMemoryStorage, MockMemoryIndex } from '../utils/test-helpers';
-import { MemoryType, IMemoryUnit } from '../../../src/core/memory/types';
+import { AgentMemorySystem } from '../../src/core/memory/AgentMemorySystem';
+import { MockMemoryStorage, MockMemoryIndex } from './utils/test-helpers';
+import { MemoryType, IMemoryUnit } from '../../src/core/memory/types';
 
 describe('Memory Optimization Features', () => {
     let memorySystem: AgentMemorySystem;

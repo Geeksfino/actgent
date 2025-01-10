@@ -16,6 +16,20 @@ import {
 import { logger } from '../Logger';
 import crypto from 'crypto';
 
+class EmotionalContextImpl implements EmotionalContext {
+    constructor(
+        public emotions: Map<string, number>,
+        public valence: number,
+        public arousal: number,
+        public dominance: number,
+        public confidence: number
+    ) {}
+
+    public getSize(): number {
+        return this.emotions.size;
+    }
+}
+
 export class EpisodicMemory extends BaseMemorySystem {
     protected readonly MIN_IMPORTANCE_SCORE = 0.3;
     protected readonly MIN_EMOTIONAL_SIGNIFICANCE = 0.5;
@@ -35,40 +49,61 @@ export class EpisodicMemory extends BaseMemorySystem {
      * Store episodic memory with enhanced metadata
      */
     public async store(content: any, metadata?: Map<string, any>): Promise<void> {
-        const emotionalContext: EmotionalContext = metadata?.get('emotions') || {
-            valence: 0,
-            arousal: 0,
-            dominance: 0,
-            confidence: 0
-        };
+        metadata = metadata || new Map<string, any>();
+        
+        // Ensure we have basic metadata
+        if (!metadata.has('type')) {
+            metadata.set('type', MemoryType.EPISODIC);
+        }
 
-        const memoryContext: MemoryContext = metadata?.get('context') || {
-            emotionalState: emotionalContext,
-            topicHistory: [],
-            userPreferences: new Map(),
-            interactionPhase: 'introduction'
-        };
+        // Convert emotions Map to EmotionalContext if needed
+        if (content.emotions instanceof Map) {
+            content.emotions = this.createEmotionalContext(content.emotions);
+        }
 
-        const episodicMemory: IEpisodicMemoryUnit = {
-            id: metadata?.get('id') || crypto.randomUUID(),
-            content: {
-                timeSequence: Date.now(),
-                location: metadata?.get('location') || 'unknown',
-                actors: metadata?.get('actors') || [],
-                actions: metadata?.get('actions') || [],
-                emotions: emotionalContext,
-                context: memoryContext,
-                coherenceScore: metadata?.get('coherenceScore') || 0,
-                timestamp: new Date(),
-                relatedTo: metadata?.get('relatedTo') || []
+        // Calculate importance and emotional significance
+        const importanceScore = this.calculateImportanceScore(content);
+        const emotionalSignificance = content.emotions ? 
+            this.calculateEmotionalSignificance(content.emotions) : 0;
+
+        metadata.set('importanceScore', importanceScore);
+        metadata.set('emotionalSignificance', emotionalSignificance);
+        metadata.set('consolidationStatus', metadata.get('consolidationStatus') || 'unconsolidated');
+
+        // Ensure content has required fields
+        const episodicContent = {
+            timeSequence: content.timeSequence || Date.now(),
+            location: content.location || 'unknown',
+            actors: Array.isArray(content.actors) ? content.actors : [],
+            actions: Array.isArray(content.actions) ? content.actions : [],
+            emotions: content.emotions,
+            context: content.context || {
+                emotionalState: content.emotions,
+                topicHistory: [],
+                userPreferences: new Map()
             },
-            metadata: metadata || new Map(),
+            coherenceScore: content.coherenceScore || 0,
+            timestamp: content.timestamp || new Date(),
+            relatedTo: Array.isArray(content.relatedTo) ? content.relatedTo : []
+        };
+
+        // Store the memory
+        await this.storage.store({
+            id: metadata.get('id') || crypto.randomUUID(),
+            content: episodicContent,
+            metadata: metadata,
             timestamp: new Date(),
             accessCount: 0,
             lastAccessed: new Date()
-        };
+        });
 
-        await this.storeWithType(episodicMemory.content, episodicMemory.metadata, MemoryType.EPISODIC);
+        // Index the memory for search
+        await this.index.add({
+            id: metadata.get('id'),
+            content: episodicContent,
+            metadata: metadata,
+            timestamp: new Date()
+        });
     }
 
     /**
@@ -87,249 +122,280 @@ export class EpisodicMemory extends BaseMemorySystem {
             return [memory];
         }
 
-        return this.retrieveWithType(idOrFilter, MemoryType.EPISODIC);
+        const memories = await this.retrieveWithType(idOrFilter, MemoryType.EPISODIC);
+        
+        // Update access counts for all retrieved memories
+        for (const memory of memories) {
+            const accessCount = (memory.metadata.get('accessCount') as number) || 0;
+            memory.metadata.set('accessCount', accessCount + 1);
+            memory.metadata.set('lastAccessed', new Date());
+            await this.update(memory);
+        }
+
+        return memories;
     }
 
     /**
      * Find similar experiences with enhanced similarity scoring
      */
     public async findSimilarExperiences(memory: IEpisodicMemoryUnit): Promise<IEpisodicMemoryUnit[]> {
-        const allMemories = await this.retrieve({ types: [MemoryType.EPISODIC] });
-        
-        logger.debug('Finding similar experiences for: %o', JSON.stringify(memory, null, 2));
-        logger.debug('All memories: %o', JSON.stringify(allMemories, null, 2));
-        
-        // Ensure memory has required properties
-        if (!memory?.content?.location || !memory?.content?.actors || !memory?.content?.actions) {
-            logger.debug('Memory missing required properties');
-            return [];
-        }
-        
-        return allMemories.filter(existingMemory => {
-            if (existingMemory.id === memory.id) {
-                logger.debug('Skipping same memory');
-                return false;
-            }
-            
-            // Calculate similarity based on location, actors, and actions
-            let similarityScore = 0;
-            
-            // Location similarity (40%)
-            const locationMatch = existingMemory.content.location === memory.content.location;
-            if (locationMatch) {
-                similarityScore += 0.4;
-                logger.debug('Location match: %s', existingMemory.content.location);
-            }
-            
-            // Actor overlap (30%)
-            const actorOverlap = memory.content.actors.filter(actor => 
-                existingMemory.content.actors.includes(actor)
-            ).length / Math.max(memory.content.actors.length, existingMemory.content.actors.length);
-            similarityScore += 0.3 * actorOverlap;
-            logger.debug('Actor overlap: %s', actorOverlap);
-            
-            // Action overlap (30%)
-            const actionOverlap = this.calculateSetOverlap(
-                new Set(memory.content.actions),
-                new Set(existingMemory.content.actions)
-            );
-            similarityScore += 0.3 * actionOverlap;
-            logger.debug('Action overlap: %s', actionOverlap);
-            
-            const hasCommonAction = memory.content.actions.some(action => 
-                existingMemory.content.actions.includes(action)
-            );
-            
-            logger.debug('Memory comparison: %o', {
-                id: existingMemory.id,
-                location: existingMemory.content.location,
-                locationMatch,
-                hasCommonAction,
-                similarityScore
-            });
-            
-            // Consider similar if either:
-            // 1. Same location and at least one common action
-            // 2. Overall similarity score > 0.3
-            const isSimilar = (locationMatch && hasCommonAction) || similarityScore > 0.3;
-            logger.debug('Is similar: %s', isSimilar);
-            return isSimilar;
+        const memories = await this.retrieve({
+            types: [MemoryType.EPISODIC]
         });
+
+        // Don't compare with self
+        const otherMemories = memories.filter(m => m.id !== memory.id);
+
+        // Calculate similarity scores
+        const similarityScores = await Promise.all(otherMemories.map(async m => {
+            const score = await this.calculateSimilarity(memory, m);
+            return { memory: m, score };
+        }));
+
+        // Sort by similarity score and return top matches
+        return similarityScores
+            .filter(({ score }) => score > 0.5) // Only return memories with significant similarity
+            .sort((a, b) => b.score - a.score)
+            .map(({ memory }) => memory);
     }
 
-    private calculateExperienceSimilarity(exp1: IEpisodicMemoryUnit, exp2: IEpisodicMemoryUnit): number {
-        let similarityScore = 0;
-        let totalWeight = 0;
+    private async calculateSimilarity(memory1: IEpisodicMemoryUnit, memory2: IEpisodicMemoryUnit): Promise<number> {
+        // Location similarity
+        const locationSimilarity = memory1.content.location === memory2.content.location ? 1 : 0;
 
-        // Location similarity (20%)
-        if (exp1.content.location === exp2.content.location) {
-            similarityScore += 0.2;
-        }
-        totalWeight += 0.2;
+        // Action similarity
+        const actions1 = new Set(memory1.content.actions);
+        const actions2 = new Set(memory2.content.actions);
+        const actionIntersection = new Set([...actions1].filter(x => actions2.has(x)));
+        const actionUnion = new Set([...actions1, ...actions2]);
+        const actionSimilarity = actionIntersection.size / actionUnion.size;
 
-        // Actor overlap (20%)
-        const actorOverlap = this.calculateSetOverlap(
-            new Set(exp1.content.actors),
-            new Set(exp2.content.actors)
+        // Actor similarity
+        const actors1 = new Set(memory1.content.actors);
+        const actors2 = new Set(memory2.content.actors);
+        const actorIntersection = new Set([...actors1].filter(x => actors2.has(x)));
+        const actorUnion = new Set([...actors1, ...actors2]);
+        const actorSimilarity = actorIntersection.size / actorUnion.size;
+
+        // Temporal proximity
+        const temporalSimilarity = this.calculateTemporalProximity(
+            memory1.content.timestamp,
+            memory2.content.timestamp
         );
-        similarityScore += actorOverlap * 0.2;
-        totalWeight += 0.2;
 
-        // Action overlap (20%)
-        const actionOverlap = this.calculateSetOverlap(
-            new Set(exp1.content.actions),
-            new Set(exp2.content.actions)
+        // Emotional similarity
+        const emotionalSimilarity = this.calculateEmotionalOverlap(
+            memory1.content.emotions,
+            memory2.content.emotions
         );
-        similarityScore += actionOverlap * 0.2;
-        totalWeight += 0.2;
 
-        // Emotional similarity (20%)
-        if (exp1.content.emotions && exp2.content.emotions) {
-            const emotionalSimilarity = this.calculateEmotionalOverlap(
-                exp1.content.emotions,
-                exp2.content.emotions
-            );
-            similarityScore += emotionalSimilarity * 0.2;
-            totalWeight += 0.2;
-        }
+        // Weight the different factors
+        const weights = {
+            location: 0.3,
+            action: 0.25,
+            actor: 0.2,
+            temporal: 0.15,
+            emotional: 0.1
+        };
 
-        // Temporal proximity (20%)
-        const timeDiff = Math.abs(exp1.content.timeSequence - exp2.content.timeSequence);
-        const maxTimeDiff = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
-        const temporalSimilarity = Math.max(0, 1 - timeDiff / maxTimeDiff);
-        similarityScore += temporalSimilarity * 0.2;
-        totalWeight += 0.2;
-
-        return totalWeight > 0 ? similarityScore / totalWeight : 0;
-    }
-
-    private calculateSetOverlap(set1: Set<string>, set2: Set<string>): number {
-        if (set1.size === 0 && set2.size === 0) return 1;
-        if (set1.size === 0 || set2.size === 0) return 0;
-
-        const intersection = new Set([...set1].filter(x => set2.has(x)));
-        const union = new Set([...set1, ...set2]);
-
-        return intersection.size / union.size;
-    }
-
-    /**
-     * Calculate similarity score between two experiences
-     */
-    private calculateSimilarityScore(exp1: IEpisodicMemoryUnit, exp2: IEpisodicMemoryUnit): number {
-        // Ensure both memories have content
-        if (!exp1?.content || !exp2?.content) {
-            return 0;
-        }
-
-        let score = 0;
-        let weightSum = 0;
-
-        // Location similarity (30%)
-        if (exp1.content.location && exp2.content.location) {
-            score += (exp1.content.location === exp2.content.location ? 0.3 : 0);
-            weightSum += 0.3;
-        }
-        
-        // Actor overlap (20%)
-        if (exp1.content.actors?.length && exp2.content.actors?.length) {
-            const actorOverlap = this.calculateSetOverlap(
-                new Set(exp1.content.actors),
-                new Set(exp2.content.actors)
-            );
-            score += actorOverlap * 0.2;
-            weightSum += 0.2;
-        }
-        
-        // Action overlap (20%)
-        if (exp1.content.actions?.length && exp2.content.actions?.length) {
-            const actionOverlap = this.calculateSetOverlap(
-                new Set(exp1.content.actions.map(action => JSON.stringify(action))),
-                new Set(exp2.content.actions.map(action => JSON.stringify(action)))
-            );
-            score += actionOverlap * 0.2;
-            weightSum += 0.2;
-        }
-        
-        // Emotional similarity (20%)
-        if (exp1.content.emotions?.getSize() && exp2.content.emotions?.getSize()) {
-            const emotionalSimilarity = this.calculateEmotionalOverlap(
-                exp1.content.emotions,
-                exp2.content.emotions
-            );
-            score += emotionalSimilarity * 0.2;
-            weightSum += 0.2;
-        }
-
-        // Temporal proximity (10%)
-        if (exp1.content.timestamp && exp2.content.timestamp) {
-            const temporalProximity = this.calculateTemporalProximity(
-                exp1.content.timestamp,
-                exp2.content.timestamp
-            );
-            score += temporalProximity * 0.1;
-            weightSum += 0.1;
-        }
-
-        // Lower the similarity threshold and normalize scores
-        const finalScore = weightSum === 0 ? 0 : score / weightSum;
-        return finalScore; // Remove minimum threshold check
+        return (
+            weights.location * locationSimilarity +
+            weights.action * actionSimilarity +
+            weights.actor * actorSimilarity +
+            weights.temporal * temporalSimilarity +
+            weights.emotional * emotionalSimilarity
+        );
     }
 
     /**
      * Calculate emotional overlap between two experiences
      */
-    private calculateEmotionalOverlap(emotions1: EmotionalContext, emotions2: EmotionalContext): number {
-        if (!emotions1?.emotions || !emotions2?.emotions) return 0;
+    private calculateEmotionalOverlap(emotions1: EmotionalContext | Map<string, number>, emotions2: EmotionalContext | Map<string, number>): number {
+        if (!emotions1 || !emotions2) return 0;
+
+        // Convert to EmotionalContext if needed
+        const context1 = emotions1 instanceof Map ? this.createEmotionalContext(emotions1) : emotions1;
+        const context2 = emotions2 instanceof Map ? this.createEmotionalContext(emotions2) : emotions2;
         
-        const set1 = new Set(emotions1.emotions.keys());
-        const set2 = new Set(emotions2.emotions.keys());
+        const set1 = new Set(context1.emotions.keys());
+        const set2 = new Set(context2.emotions.keys());
         
         const intersection = new Set([...set1].filter(x => set2.has(x)));
         const union = new Set([...set1, ...set2]);
         
-        // Calculate average intensity difference for overlapping emotions
         let totalDiff = 0;
         let count = 0;
         
         for (const emotion of intersection) {
-            const intensity1 = emotions1.emotions.get(emotion) || 0;
-            const intensity2 = emotions2.emotions.get(emotion) || 0;
+            const intensity1 = context1.emotions.get(emotion) || 0;
+            const intensity2 = context2.emotions.get(emotion) || 0;
             totalDiff += Math.abs(intensity1 - intensity2);
             count++;
         }
         
-        const overlapScore = intersection.size / union.size;
-        const intensityScore = count > 0 ? 1 - (totalDiff / count) : 0;
+        if (count === 0) return 0;
         
-        return (overlapScore + intensityScore) / 2;
+        const overlapRatio = intersection.size / union.size;
+        const intensitySimilarity = 1 - (totalDiff / count);
+        
+        return (overlapRatio + intensitySimilarity) / 2;
     }
 
     /**
      * Calculate temporal proximity between two timestamps
      */
     private calculateTemporalProximity(time1: Date, time2: Date): number {
-        if (!time1 || !time2) return 0;
-        const diff = Math.abs(time1.getTime() - time2.getTime());
-        const DAY = 24 * 60 * 60 * 1000;
-        return Math.max(0, 1 - diff / (7 * DAY)); // Full score if within same day, decreasing over a week
+        const timeDiff = Math.abs(time1.getTime() - time2.getTime());
+        const maxTimeDiff = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+        return Math.max(0, 1 - timeDiff / maxTimeDiff);
+    }
+
+    protected async performCleanup(): Promise<void> {
+        const memories = await this.retrieve({
+            types: [MemoryType.EPISODIC]
+        });
+
+        // First, find and consolidate similar memories
+        const consolidationGroups = new Map<string, IEpisodicMemoryUnit[]>();
+        
+        // Group memories by location first
+        memories.forEach(memory => {
+            const location = memory.content.location;
+            if (!consolidationGroups.has(location)) {
+                consolidationGroups.set(location, []);
+            }
+            consolidationGroups.get(location)?.push(memory);
+        });
+
+        // For each location group, consolidate similar memories
+        for (const group of consolidationGroups.values()) {
+            if (group.length < 2) continue;
+
+            // Find similar memories within the group
+            const consolidated = new Set<string>();
+            for (let i = 0; i < group.length; i++) {
+                if (consolidated.has(group[i].id)) continue;
+                
+                const similarMemories = [group[i]];
+                for (let j = i + 1; j < group.length; j++) {
+                    if (consolidated.has(group[j].id)) continue;
+                    
+                    const similarity = await this.calculateSimilarity(group[i], group[j]);
+                    if (similarity > 0.7) { // High similarity threshold for consolidation
+                        similarMemories.push(group[j]);
+                        consolidated.add(group[j].id);
+                    }
+                }
+
+                if (similarMemories.length > 1) {
+                    await this.consolidateMemories(similarMemories);
+                    consolidated.add(group[i].id);
+                }
+            }
+        }
+
+        // Then clean up remaining memories based on importance
+        const remainingMemories = await this.retrieve({
+            types: [MemoryType.EPISODIC]
+        });
+
+        for (const memory of remainingMemories) {
+            // Calculate importance score
+            const accessCount = memory.accessCount || 0;
+            const emotionalSignificance = memory.metadata.get('emotionalSignificance') as number || 0;
+            const lastAccessed = memory.lastAccessed || memory.timestamp;
+            const age = (Date.now() - lastAccessed.getTime()) / (1000 * 60 * 60 * 24); // Age in days
+
+            // Keep memories that are:
+            // 1. Frequently accessed (high access count)
+            // 2. Emotionally significant
+            // 3. Recently accessed
+            // 4. Part of consolidated memories
+            const consolidationStatus = memory.metadata.get('consolidationStatus');
+            const shouldKeep = 
+                accessCount > 5 ||
+                emotionalSignificance > this.MIN_EMOTIONAL_SIGNIFICANCE ||
+                age < 7 || // Keep memories from last week
+                consolidationStatus === 'consolidated';
+
+            if (!shouldKeep) {
+                await this.delete(memory.id);
+            }
+        }
+    }
+
+    private createEmotionalContext(emotions: Map<string, number>): EmotionalContext {
+        // Calculate emotional dimensions based on the emotions
+        let valence = 0.5;
+        let arousal = 0.5;
+        let dominance = 0.5;
+        let confidence = 0.5;
+
+        // If we have emotions, calculate dimensions
+        if (emotions.size > 0) {
+            // Simple mapping of common emotions to dimensions
+            emotions.forEach((intensity, emotion) => {
+                switch(emotion.toLowerCase()) {
+                    case 'happy':
+                    case 'excited':
+                    case 'proud':
+                        valence += intensity * 0.3;
+                        arousal += intensity * 0.2;
+                        dominance += intensity * 0.2;
+                        break;
+                    case 'sad':
+                    case 'afraid':
+                    case 'anxious':
+                        valence -= intensity * 0.3;
+                        arousal += intensity * 0.2;
+                        dominance -= intensity * 0.2;
+                        break;
+                    case 'angry':
+                    case 'frustrated':
+                        valence -= intensity * 0.3;
+                        arousal += intensity * 0.3;
+                        dominance += intensity * 0.1;
+                        break;
+                    case 'calm':
+                    case 'relaxed':
+                        valence += intensity * 0.2;
+                        arousal -= intensity * 0.3;
+                        dominance += intensity * 0.1;
+                        break;
+                }
+                confidence = Math.min(1, confidence + intensity * 0.1);
+            });
+
+            // Normalize values to [0,1] range
+            valence = Math.max(0, Math.min(1, valence));
+            arousal = Math.max(0, Math.min(1, arousal));
+            dominance = Math.max(0, Math.min(1, dominance));
+        }
+
+        return new EmotionalContextImpl(
+            emotions,
+            valence,
+            arousal,
+            dominance,
+            confidence
+        );
     }
 
     /**
      * Calculate importance score for a memory
      */
     private calculateImportanceScore(content: any): number {
-        let score = 0;
+        let score = 0.5; // Base score
 
-        // Base importance from content properties
+        // Add points for completeness
         if (content.actors?.length) score += 0.2;
         if (content.actions?.length) score += 0.2;
         if (content.location) score += 0.1;
-        if (content.emotions?.size) score += 0.2;
+        if (content.emotions?.getSize()) score += 0.2;
 
         // Additional importance from emotional intensity
         if (content.emotions instanceof Object) {
-            const emotionValues = Object.values(content.emotions) as number[];
+            const emotionValues = Array.from(content.emotions.emotions.values()) as number[];
             const maxEmotion = Math.max(...emotionValues);
             score += maxEmotion * 0.3;
         }
@@ -340,70 +406,110 @@ export class EpisodicMemory extends BaseMemorySystem {
     /**
      * Calculate emotional significance of a memory
      */
-    private calculateEmotionalSignificance(emotions: EmotionalContext): number {
-        if (!emotions?.emotions) return 0;
-        
-        const emotionsMap = emotions.emotions;
-        if (emotions.getSize() === 0) return 0;
+    private calculateEmotionalSignificance(emotions: EmotionalContext | Map<string, number>): number {
+        if (!emotions) return 0;
+
+        // Convert to EmotionalContext if needed
+        const emotionalContext = emotions instanceof Map ? 
+            this.createEmotionalContext(emotions) : emotions;
+
+        if (emotionalContext.emotions.size === 0) return 0;
         
         // Calculate average emotional intensity
         let totalIntensity = 0;
-        for (const intensity of emotionsMap.values()) {
+        emotionalContext.emotions.forEach(intensity => {
             totalIntensity += intensity;
-        }
+        });
         
-        return totalIntensity / emotions.getSize();
+        return totalIntensity / emotionalContext.emotions.size;
     }
 
     /**
      * Check if memory should be consolidated with others
      */
-    private async checkForConsolidation(content: IEpisodicMemoryUnit): Promise<void> {
-        const allMemories = await this.retrieve({
-            types: [MemoryType.EPISODIC]
-        });
-
-        const similarMemories = allMemories.filter(memory => {
-            if (memory.metadata.get('consolidationStatus') === ConsolidationStatus.CONSOLIDATED) {
-                return false;
-            }
-            const similarity = this.calculateSimilarityScore(content, memory);
-            return similarity > 0.7;
-        });
-
-        if (similarMemories.length >= 3) {
-            await this.consolidateMemories(similarMemories);
+    public async checkForConsolidation(memory: IEpisodicMemoryUnit): Promise<void> {
+        const similarMemories = await this.findSimilarExperiences(memory);
+        
+        if (similarMemories.length >= this.MIN_RELATIONSHIP_DENSITY) {
+            await this.consolidateMemories([memory, ...similarMemories]);
         }
     }
 
-    /**
-     * Consolidate multiple similar memories into a higher-level memory
-     */
-    private async consolidateMemories(memories: IEpisodicMemoryUnit[]): Promise<void> {
+    public async cleanup(): Promise<void> {
+        await this.performCleanup();
+    }
+
+    protected async consolidateMemories(memories: IEpisodicMemoryUnit[]): Promise<void> {
         if (memories.length < 2) return;
-        
-        // Sort by importance score
-        memories.sort((a, b) => 
-            (b.metadata.get('importanceScore') as number) - 
-            (a.metadata.get('importanceScore') as number)
-        );
-        
-        // Use the most important memory as the base
-        const baseMemory = memories[0];
-        const baseMetadata = new Map(baseMemory.metadata);
-        baseMetadata.set('consolidationStatus', ConsolidationStatus.CONSOLIDATED);
-        baseMemory.metadata = baseMetadata;
-        await this.update(baseMemory);
-        
-        // Mark others as consolidated and link to base memory
-        for (let i = 1; i < memories.length; i++) {
-            const memory = memories[i];
+
+        // Create consolidated memory
+        const consolidatedMemory: IEpisodicMemoryUnit = {
+            id: crypto.randomUUID(),
+            content: {
+                timeSequence: Math.min(...memories.map(m => m.content.timeSequence)),
+                location: this.getMostFrequent(memories.map(m => m.content.location)),
+                actors: Array.from(new Set(memories.flatMap(m => m.content.actors))),
+                actions: Array.from(new Set(memories.flatMap(m => m.content.actions))),
+                emotions: this.createEmotionalContext(
+                    new Map(Array.from(memories.reduce((acc, m) => {
+                        if (m.content.emotions instanceof Map) {
+                            m.content.emotions.forEach((v, k) => acc.set(k, (acc.get(k) || 0) + v));
+                        } else if (m.content.emotions?.emotions) {
+                            m.content.emotions.emotions.forEach((v, k) => acc.set(k, (acc.get(k) || 0) + v));
+                        }
+                        return acc;
+                    }, new Map<string, number>())).map(([k, v]) => [k, v / memories.length]))
+                ),
+                context: memories[0].content.context,
+                coherenceScore: memories[0].content.coherenceScore,
+                timestamp: new Date(Math.min(...memories.map(m => m.content.timestamp.getTime()))),
+                relatedTo: Array.from(new Set(memories.flatMap(m => m.content.relatedTo || [])))
+            },
+            metadata: new Map(),
+            timestamp: new Date(),
+            accessCount: memories.reduce((sum, m) => sum + (m.accessCount || 0), 0),
+            lastAccessed: new Date(Math.max(...memories.map(m => (m.lastAccessed || m.timestamp).getTime())))
+        };
+
+        // Set metadata
+        consolidatedMemory.metadata.set('type', MemoryType.EPISODIC);
+        consolidatedMemory.metadata.set('consolidationStatus', 'consolidated');
+        consolidatedMemory.metadata.set('consolidatedFrom', memories.map(m => m.id));
+        consolidatedMemory.metadata.set('emotionalSignificance', 
+            Math.max(...memories.map(m => m.metadata.get('emotionalSignificance') as number || 0)));
+
+        // Store consolidated memory
+        await this.store(consolidatedMemory.content, consolidatedMemory.metadata);
+
+        // Mark original memories as consolidated
+        for (const memory of memories) {
             const metadata = new Map(memory.metadata);
-            metadata.set('consolidationStatus', ConsolidationStatus.CONSOLIDATED);
-            metadata.set('consolidatedInto', baseMemory.id);
-            memory.metadata = metadata;
-            await this.update(memory);
+            metadata.set('consolidationStatus', 'consolidated');
+            metadata.set('consolidatedInto', consolidatedMemory.id);
+            await this.update({
+                ...memory,
+                metadata
+            });
         }
+    }
+
+    public async update(memory: IMemoryUnit): Promise<void> {
+        // Ensure emotions are properly converted to EmotionalContext
+        if (memory.content.emotions instanceof Map) {
+            memory.content.emotions = this.createEmotionalContext(memory.content.emotions);
+        }
+
+        // Recalculate emotional significance
+        const emotionalSignificance = this.calculateEmotionalSignificance(memory.content.emotions);
+        memory.metadata.set('emotionalSignificance', emotionalSignificance);
+
+        await this.storage.update(memory);
+        await this.index.update(memory);
+    }
+
+    public async delete(id: string): Promise<void> {
+        await this.storage.delete(id);
+        await this.index.remove(id);
     }
 
     private getMostFrequent<T>(arr: T[]): T {
@@ -420,71 +526,5 @@ export class EpisodicMemory extends BaseMemorySystem {
         });
         
         return mostFrequent;
-    }
-
-    /**
-     * Enhanced cleanup considering importance, emotional significance, and relationships
-     */
-    protected async cleanup(): Promise<void> {
-        const allMemories = await this.retrieve({ types: [MemoryType.EPISODIC] });
-        
-        for (const memory of allMemories) {
-            const importanceScore = memory.metadata.get('importanceScore') as number;
-            const emotionalSignificance = memory.metadata.get('emotionalSignificance') as number;
-            const accessCount = memory.metadata.get('accessCount') as number || 0;
-            const consolidationStatus = memory.metadata.get('consolidationStatus');
-            
-            // Keep if:
-            // 1. High importance or emotional significance
-            // 2. Frequently accessed
-            // 3. Is a consolidated memory (base memory)
-            const shouldKeep = 
-                importanceScore > this.MIN_IMPORTANCE_SCORE ||
-                emotionalSignificance > this.MIN_EMOTIONAL_SIGNIFICANCE ||
-                accessCount >= 3 ||
-                consolidationStatus === ConsolidationStatus.CONSOLIDATED;
-                
-            if (!shouldKeep) {
-                await this.delete(memory.id);
-            }
-        }
-    }
-
-    public async update(memory: IMemoryUnit): Promise<void> {
-        // Update access metrics
-        memory.accessCount = (memory.accessCount || 0) + 1;
-        memory.lastAccessed = new Date();
-
-        // Recalculate emotional significance if emotions have changed
-        const emotions = memory.content.emotions;
-        if (emotions) {
-            memory.metadata.set('emotionalSignificance', 
-                this.calculateEmotionalSignificance(emotions));
-        }
-
-        await this.storage.update(memory);
-        await this.index.update(memory);
-    }
-
-    public async delete(id: string): Promise<void> {
-        await this.storage.delete(id);
-        await this.index.remove(id);
-    }
-
-    public async performCleanup(): Promise<void> {
-        return this.cleanup();
-    }
-
-    private calculateEmotionalSalience(memory: IMemoryUnit): number {
-        const emotions = memory.metadata.get('emotions') as EmotionalContext;
-        if (!emotions?.emotions) return 0;
-        
-        // Calculate average emotional intensity from the emotions map
-        let totalIntensity = 0;
-        for (const intensity of emotions.emotions.values()) {
-            totalIntensity += intensity;
-        }
-        
-        return emotions.getSize() > 0 ? totalIntensity / emotions.getSize() : 0;
     }
 }

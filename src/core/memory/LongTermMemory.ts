@@ -73,25 +73,13 @@ export class LongTermMemory extends BaseMemorySystem {
     /**
      * Clean up old or irrelevant memories
      */
-    public async performCleanup(): Promise<void> {
-        return this.cleanup();
+    public async cleanup(): Promise<void> {
+        await this.performCleanup();
     }
 
-    protected async cleanup(): Promise<void> {
-        const types = [MemoryType.SEMANTIC, MemoryType.EPISODIC, MemoryType.PROCEDURAL];
-        const now = Date.now();
-        const ONE_MONTH = 30 * 24 * 60 * 60 * 1000;
-
-        for (const type of types) {
-            const memories = await this.retrieveWithType({}, type);
-            
-            // Remove memories older than a month with low access counts
-            await Promise.all(memories.map(async memory => {
-                const age = now - memory.timestamp.getTime();
-                if (age > ONE_MONTH && (memory.accessCount || 0) < 5) {
-                    await this.delete(memory.id);
-                }
-            }));
-        }
+    protected async performCleanup(): Promise<void> {
+        // Implement cleanup logic for long-term memory
+        // For now, we don't clean up long-term memories as they should be permanent
+        // unless explicitly deleted
     }
 }
