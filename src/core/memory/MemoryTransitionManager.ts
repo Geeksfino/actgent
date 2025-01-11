@@ -1,193 +1,223 @@
 import { 
     IMemoryUnit, 
-    MemoryType,
-    EnhancedTransitionTrigger,
-    EnhancedTransitionConfig,
-    EnhancedMemoryContext,
-    EmotionalContextImpl
+    MemoryType, 
+    ConsolidationStatus,
+    TransitionTrigger,
+    SessionMemoryContext,
+    EmotionalState,
+    EmotionalContext
 } from './types';
 import { WorkingMemory } from './WorkingMemory';
 import { EpisodicMemory } from './EpisodicMemory';
 
-export { EnhancedTransitionConfig };
-
+/**
+ * Manages the transition of memories between different memory stores
+ * based on various triggers and conditions.
+ */
 export class MemoryTransitionManager {
-    private config: EnhancedTransitionConfig;
-    private currentContext: EnhancedMemoryContext;
+    private workingMemory: WorkingMemory;
+    private episodicMemory: EpisodicMemory;
+    private lastCheck: Date;
+    private currentContext?: SessionMemoryContext;
 
-    constructor(
-        private workingMemory: WorkingMemory,
-        private episodicMemory: EpisodicMemory,
-        config?: Partial<EnhancedTransitionConfig>
-    ) {
-        // Default configuration
-        this.config = {
-            accessCountThreshold: 5,
-            timeThresholdMs: 5 * 60 * 1000, // 5 minutes
-            capacityThreshold: 100,
-            importanceThreshold: 0.7,
-            contextSwitchThreshold: 0.6,
-            emotionalSalienceThreshold: 0.7,
-            coherenceThreshold: 0.6,
-            consistencyThreshold: 0.7,
-            topicContinuityThreshold: 0.6,
-            emotionalContinuityThreshold: 0.6,
-            temporalProximityThreshold: 0.7,
-            goalAlignmentThreshold: 0.7,
-            emotionalIntensityThreshold: 0.7,
-            emotionalNoveltyThreshold: 0.6,
-            emotionalRelevanceThreshold: 0.7,
-            ...config
-        };
-
-        this.currentContext = {
-            userGoals: new Set<string>(),
-            domainContext: new Map<string, any>(),
-            interactionHistory: [],
-            emotionalTrends: [],
-            emotionalState: new EmotionalContextImpl(),
-            topicHistory: [],
-            userPreferences: new Map(),
-            interactionPhase: 'introduction'
-        };
+    constructor(workingMemory: WorkingMemory, episodicMemory: EpisodicMemory) {
+        this.workingMemory = workingMemory;
+        this.episodicMemory = episodicMemory;
+        this.lastCheck = new Date();
     }
 
-    public async checkAndTransition(memory?: IMemoryUnit): Promise<void> {
-        if (memory) {
-            const triggers = await this.generateTriggers(memory);
-            for (const trigger of triggers) {
-                await this.processTrigger(trigger, memory);
-            }
-        } else {
-            // When no memory is provided, check all working memories
-            const workingMemories = await this.workingMemory.retrieveAll();
-            for (const memory of workingMemories) {
-                const triggers = await this.generateTriggers(memory);
-                for (const trigger of triggers) {
-                    await this.processTrigger(trigger, memory);
-                }
-            }
-        }
+    /**
+     * Update the current context used for memory transitions
+     */
+    public updateContext(context: SessionMemoryContext): void {
+        this.currentContext = context;
     }
 
-    private async generateTriggers(memory: IMemoryUnit): Promise<EnhancedTransitionTrigger[]> {
-        const triggers: EnhancedTransitionTrigger[] = [];
-
-        // User instruction trigger
-        triggers.push({
-            type: 'user_instruction',
-            condition: async () => true,
-            priority: 1,
-            threshold: 1.0,
-            lastCheck: new Date(),
-            metadata: {
-                userInstruction: {
-                    command: 'remember',
-                    target: memory.metadata.get('topic') || ''
-                }
-            }
+    /**
+     * Check for memories that need to be transitioned and handle them
+     */
+    public async checkAndTransition(): Promise<void> {
+        const now = new Date();
+        
+        // Get all memories from working memory
+        const memories = await this.workingMemory.retrieve({
+            types: [MemoryType.EPISODIC, MemoryType.CONTEXTUAL]
         });
 
-        // Add other triggers based on context, time, emotions, etc.
-        return triggers;
-    }
-
-    protected async processTrigger(trigger: EnhancedTransitionTrigger, memory: IMemoryUnit): Promise<void> {
-        if (await trigger.condition(memory, this.currentContext)) {
-            switch (trigger.type) {
-                case 'user_instruction':
-                    await this.handleUserInstruction(trigger, memory);
-                    break;
-                case 'emotional_peak':
-                    await this.handleEmotionalPeak(trigger, memory);
-                    break;
-                case 'goal_relevance':
-                    await this.handleGoalRelevance(trigger, memory);
-                    break;
-                // Add other cases as needed
+        for (const memory of memories) {
+            const shouldTransition = await this.shouldTransitionMemory(memory);
+            if (shouldTransition) {
+                await this.transitionMemory(memory);
             }
         }
+
+        this.lastCheck = now;
     }
 
-    private async handleUserInstruction(trigger: EnhancedTransitionTrigger, memory: IMemoryUnit): Promise<void> {
-        const instruction = trigger.metadata.userInstruction;
-        if (!instruction) return;
+    /**
+     * Determine if a memory should be transitioned based on various triggers
+     */
+    private async shouldTransitionMemory(memory: IMemoryUnit): Promise<boolean> {
+        if (!this.currentContext) return false;
 
-        switch (instruction.command) {
-            case 'remember':
-            case 'save':
-                await this.transitionToEpisodic(memory);
-                break;
-            case 'forget':
-                await this.workingMemory.delete(memory.id);
-                break;
-        }
+        // Check time-based trigger
+        const timeTrigger = await this.checkTimeTrigger(memory);
+        if (timeTrigger) return true;
+
+        // Check context-based trigger
+        const contextTrigger = await this.checkContextTrigger(memory);
+        if (contextTrigger) return true;
+
+        // Check emotion-based trigger
+        const emotionTrigger = await this.checkEmotionTrigger(memory);
+        if (emotionTrigger) return true;
+
+        // Check consolidation trigger
+        const consolidationTrigger = await this.checkConsolidationTrigger(memory);
+        if (consolidationTrigger) return true;
+
+        return false;
     }
 
-    private async handleEmotionalPeak(trigger: EnhancedTransitionTrigger, memory: IMemoryUnit): Promise<void> {
-        const emotionalPeak = trigger.metadata.emotionalPeak;
-        if (!emotionalPeak) return;
-
-        if (emotionalPeak.intensity >= this.config.emotionalIntensityThreshold) {
-            await this.transitionToEpisodic(memory);
-        }
-    }
-
-    private async handleGoalRelevance(trigger: EnhancedTransitionTrigger, memory: IMemoryUnit): Promise<void> {
-        const goalRelevance = trigger.metadata.goalRelevance;
-        if (!goalRelevance) return;
-
-        if (goalRelevance.relevanceScore >= this.config.goalAlignmentThreshold) {
-            await this.transitionToEpisodic(memory);
-        }
-    }
-
-    private async transitionToEpisodic(memory: IMemoryUnit): Promise<void> {
-        const coherenceScore = await this.calculateContextualCoherence(memory);
+    /**
+     * Check if memory should transition based on time
+     */
+    private async checkTimeTrigger(memory: IMemoryUnit): Promise<boolean> {
+        const timeThreshold = 30 * 60 * 1000; // 30 minutes
+        const now = new Date();
+        const memoryAge = now.getTime() - memory.timestamp.getTime();
         
-        if (coherenceScore >= this.config.coherenceThreshold) {
-            await this.episodicMemory.store(memory.content, memory.metadata);
-            await this.workingMemory.delete(memory.id);
+        return memoryAge > timeThreshold;
+    }
+
+    /**
+     * Check if memory should transition based on context changes
+     */
+    private async checkContextTrigger(memory: IMemoryUnit): Promise<boolean> {
+        if (!this.currentContext) return false;
+
+        const memoryContext = memory.metadata.get('context') as SessionMemoryContext | undefined;
+        if (!memoryContext) return false;
+
+        // Calculate context overlap score
+        const contextScore = this.calculateContextOverlap(memoryContext, this.currentContext);
+        
+        // If context overlap is low, consider transitioning
+        return contextScore < 0.3; // Threshold for context relevance
+    }
+
+    /**
+     * Check if memory should transition based on emotional state
+     */
+    private async checkEmotionTrigger(memory: IMemoryUnit): Promise<boolean> {
+        if (!this.currentContext) return false;
+
+        const memoryContext = memory.metadata.get('context') as SessionMemoryContext | undefined;
+        if (!memoryContext?.emotionalState) return false;
+
+        // Calculate emotional state difference
+        const emotionalScore = this.calculateEmotionalAlignment(
+            memoryContext.emotionalState,
+            this.currentContext.emotionalState
+        );
+
+        // If emotional alignment is low, consider transitioning
+        return emotionalScore < 0.3; // Threshold for emotional relevance
+    }
+
+    /**
+     * Check if memory should transition based on consolidation status
+     */
+    private async checkConsolidationTrigger(memory: IMemoryUnit): Promise<boolean> {
+        const consolidationStatus = memory.metadata.get('consolidationStatus') as ConsolidationStatus | undefined;
+        return consolidationStatus === ConsolidationStatus.CONSOLIDATED;
+    }
+
+    /**
+     * Calculate how well two contexts overlap
+     */
+    private calculateContextOverlap(context1: SessionMemoryContext, context2: SessionMemoryContext): number {
+        let totalScore = 0;
+        let weights = 0;
+
+        // Compare topics (30% weight)
+        if (context1.topicHistory.length > 0 && context2.topicHistory.length > 0) {
+            const topicScore = context1.topicHistory
+                .map((topic: string, index: number) => {
+                    const position = context2.topicHistory.indexOf(topic);
+                    if (position === -1) return 0;
+                    return 1 - (Math.abs(position - index) / Math.max(context1.topicHistory.length, context2.topicHistory.length));
+                })
+                .reduce((sum: number, score: number) => sum + score, 0) / context1.topicHistory.length;
+
+            totalScore += topicScore * 0.3;
+            weights += 0.3;
         }
+
+        // Compare goals (40% weight)
+        if (context1.userGoals.size > 0 && context2.userGoals.size > 0) {
+            const goals1 = Array.from(context1.userGoals);
+            const goals2 = Array.from(context2.userGoals);
+            const commonGoals = goals1.filter(goal => goals2.includes(goal));
+            const goalScore = commonGoals.length / Math.max(goals1.length, goals2.length);
+
+            totalScore += goalScore * 0.4;
+            weights += 0.4;
+        }
+
+        // Compare emotional states (30% weight)
+        if (context1.emotionalState && context2.emotionalState) {
+            const emotionScore = context1.emotionalTrends
+                .map((emotion: EmotionalState, index: number) => {
+                    const other = context2.emotionalTrends[index];
+                    if (!other) return 0;
+                    const valenceDiff = Math.abs(emotion.valence - other.valence);
+                    const arousalDiff = Math.abs(emotion.arousal - other.arousal);
+                    return 1 - ((valenceDiff + arousalDiff) / 4); // Normalize to 0-1
+                })
+                .reduce((sum: number, score: number) => sum + score, 0) / context1.emotionalTrends.length;
+
+            totalScore += emotionScore * 0.3;
+            weights += 0.3;
+        }
+
+        return weights > 0 ? totalScore / weights : 0;
     }
 
-    private async calculateContextualCoherence(memory: IMemoryUnit): Promise<number> {
-        const weights = {
-            topicContinuity: 0.3,
-            emotionalContinuity: 0.3,
-            temporalProximity: 0.2,
-            goalAlignment: 0.2
-        };
-
-        const scores = {
-            topicContinuity: await this.calculateTopicContinuity(memory),
-            emotionalContinuity: await this.calculateEmotionalContinuity(memory),
-            temporalProximity: this.calculateTemporalProximity(memory),
-            goalAlignment: this.calculateGoalAlignment(memory)
-        };
-
-        return Object.entries(weights).reduce((total, [key, weight]) => {
-            return total + (scores[key as keyof typeof scores] * weight);
-        }, 0);
+    /**
+     * Calculate emotional alignment between two emotional states
+     */
+    private calculateEmotionalAlignment(emotion1: EmotionalContext, emotion2: EmotionalContext): number {
+        const e1 = emotion1.getCurrentEmotion();
+        const e2 = emotion2.getCurrentEmotion();
+        
+        if (!e1 || !e2) return 0;
+        
+        const valenceDiff = Math.abs(e1.valence - e2.valence);
+        const arousalDiff = Math.abs(e1.arousal - e2.arousal);
+        
+        // Normalize differences to 0-1 scale
+        return 1 - ((valenceDiff + arousalDiff) / 4);
     }
 
-    private async calculateTopicContinuity(memory: IMemoryUnit): Promise<number> {
-        // Implementation for topic continuity calculation
-        return 0.8; // Placeholder
-    }
+    /**
+     * Handle the transition of a memory between stores
+     */
+    private async transitionMemory(memory: IMemoryUnit): Promise<void> {
+        try {
+            // Add transition metadata
+            memory.metadata.set('transitionType', TransitionTrigger.TIME_BASED);
+            memory.metadata.set('transitionTimestamp', new Date());
 
-    private async calculateEmotionalContinuity(memory: IMemoryUnit): Promise<number> {
-        // Implementation for emotional continuity calculation
-        return 0.7; // Placeholder
-    }
+            // Store in episodic memory
+            await this.episodicMemory.store(memory);
 
-    private calculateTemporalProximity(memory: IMemoryUnit): number {
-        // Implementation for temporal proximity calculation
-        return 0.6; // Placeholder
-    }
+            // Remove from working memory
+            await this.workingMemory.delete(memory.id);
 
-    private calculateGoalAlignment(memory: IMemoryUnit): number {
-        // Implementation for goal alignment calculation
-        return 0.8; // Placeholder
+        } catch (error) {
+            console.error('Error transitioning memory:', error);
+            // Consider adding retry logic or error handling here
+        }
     }
 }

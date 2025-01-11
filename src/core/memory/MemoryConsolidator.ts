@@ -127,7 +127,13 @@ export class MemoryConsolidator implements IMemoryConsolidation {
     }
 
     private async calculateConsolidationMetrics(memories: IMemoryUnit[]): Promise<ConsolidationMetrics> {
+        // Initialize all required metrics
         const metrics: ConsolidationMetrics = {
+            semanticSimilarity: 0,
+            contextualOverlap: 0,
+            temporalProximity: 0,
+            sourceReliability: 0,
+            confidenceScore: 0,
             accessCount: 0,
             lastAccessed: new Date(),
             createdAt: new Date(),
@@ -139,16 +145,15 @@ export class MemoryConsolidator implements IMemoryConsolidation {
             // Calculate temporal proximity (0-1 score based on time difference)
             const timestamps = memories.map(m => m.timestamp.getTime());
             const timeRange = Math.max(...timestamps) - Math.min(...timestamps);
-            const temporalProximity = Math.exp(-timeRange / (24 * 60 * 60 * 1000)); // Decay over 24 hours
+            metrics.temporalProximity = Math.exp(-timeRange / (24 * 60 * 60 * 1000)); // Decay over 24 hours
 
             // Calculate source reliability (based on memory metadata)
-            const sourceReliability = memories.reduce((acc, m) => {
+            metrics.sourceReliability = memories.reduce((acc, m) => {
                 const reliability = m.metadata.get('sourceReliability') || 0.5;
                 return acc + reliability;
             }, 0) / memories.length;
 
             // Calculate semantic similarity if NLP service is available
-            let semanticSimilarity = 0;
             if (this.nlpService) {
                 const contents = memories.map(m => JSON.stringify(m.content));
                 const similarities = await Promise.all(
@@ -162,26 +167,69 @@ export class MemoryConsolidator implements IMemoryConsolidation {
                         return scores.reduce((a, b) => a + b, 0) / scores.length;
                     })
                 );
-                semanticSimilarity = similarities.reduce((a, b) => a + b, 0) / similarities.length;
+                metrics.semanticSimilarity = similarities.reduce((a, b) => a + b, 0) / similarities.length;
             }
 
-            // Calculate importance based on access patterns and age
+            // Calculate contextual overlap based on metadata
+            metrics.contextualOverlap = memories.reduce((acc, m1, i) => {
+                const overlaps = memories.map((m2, j) => {
+                    if (i === j) return 1;
+                    return this.calculateContextOverlap(m1, m2);
+                });
+                return acc + (overlaps.reduce((a, b) => a + b, 0) / overlaps.length);
+            }, 0) / memories.length;
+
+            // Calculate confidence score based on source reliability and semantic similarity
+            metrics.confidenceScore = (metrics.sourceReliability + metrics.semanticSimilarity) / 2;
+
+            // Calculate access patterns
             metrics.accessCount = memories.reduce((acc, m) => acc + (m.consolidationMetrics?.accessCount || 0), 0);
             metrics.lastAccessed = new Date(Math.max(...memories.map(m => m.consolidationMetrics?.lastAccessed?.getTime() || 0)));
             metrics.createdAt = new Date(Math.min(...memories.map(m => m.consolidationMetrics?.createdAt?.getTime() || Date.now())));
 
             // Calculate importance and relevance
             metrics.importance = memories.reduce((acc, m) => acc + (m.priority || 0), 0) / memories.length;
-            metrics.relevance = (temporalProximity + sourceReliability + semanticSimilarity) / 3;
+            metrics.relevance = (metrics.temporalProximity + metrics.sourceReliability + metrics.semanticSimilarity + metrics.contextualOverlap) / 4;
 
         } catch (error) {
             console.error('Error calculating consolidation metrics:', error);
-            // Provide default metrics on error
+            // On error, ensure all metrics have valid default values
+            metrics.semanticSimilarity = 0.5;
+            metrics.contextualOverlap = 0.5;
+            metrics.temporalProximity = 0.5;
+            metrics.sourceReliability = 0.5;
+            metrics.confidenceScore = 0.5;
             metrics.importance = 0.5;
             metrics.relevance = 0.5;
         }
 
         return metrics;
+    }
+
+    private calculateContextOverlap(m1: IMemoryUnit, m2: IMemoryUnit): number {
+        // Get context from metadata
+        const c1 = m1.metadata.get('context');
+        const c2 = m2.metadata.get('context');
+        
+        if (!c1 || !c2) return 0;
+
+        // Calculate overlap based on common keys and values
+        const keys1 = Object.keys(c1);
+        const keys2 = Object.keys(c2);
+        const commonKeys = keys1.filter(k => keys2.includes(k));
+        
+        if (commonKeys.length === 0) return 0;
+
+        // Calculate value similarity for common keys
+        const similarity = commonKeys.reduce((acc, key) => {
+            if (c1[key] === c2[key]) return acc + 1;
+            if (typeof c1[key] === 'number' && typeof c2[key] === 'number') {
+                return acc + (1 - Math.abs(c1[key] - c2[key]));
+            }
+            return acc;
+        }, 0);
+
+        return similarity / commonKeys.length;
     }
 
     private async consolidateGroup(memories: IMemoryUnit[]): Promise<void> {

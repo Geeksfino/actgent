@@ -1,5 +1,5 @@
 import { expect, test, describe, beforeEach } from 'bun:test';
-import { MemoryContextManager } from '../../../src/core/memory/MemoryContextManager';
+import { MemoryContextManager } from '../../../src/core/memory/SessionMemoryContextManager';
 import { MockMemoryStorage, MockMemoryIndex } from '../utils/test-helpers';
 
 describe('MemoryContextManager', () => {

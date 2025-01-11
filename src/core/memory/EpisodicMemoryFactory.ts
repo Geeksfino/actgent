@@ -1,49 +1,65 @@
-import { IEpisodicMemoryUnit, EmotionalContext, MemoryContext } from './types';
+import { 
+    IMemoryUnit, 
+    MemoryType, 
+    SessionMemoryContext,
+    EmotionalState,
+    EmotionalContextImpl
+} from './types';
 import crypto from 'crypto';
 
 /**
- * Factory class for creating episodic memory units
+ * Factory for creating episodic memory units with proper metadata
  */
 export class EpisodicMemoryFactory {
     /**
-     * Creates a new episodic memory unit
-     * 
-     * @param content The content of the memory unit
-     * @param metadata Optional metadata for the memory unit
-     * @returns A new episodic memory unit
+     * Create an episodic memory unit with the given content and context
      */
-    public createMemoryUnit(content: any, metadata?: Map<string, any>): IEpisodicMemoryUnit {
-        const emotions: EmotionalContext = metadata?.get('emotions') || {
-            valence: 0,
-            arousal: 0,
-            dominance: 0,
-            confidence: 0
-        };
+    static createMemory(
+        content: any,
+        context: SessionMemoryContext,
+        metadata?: Map<string, any>
+    ): IMemoryUnit {
+        const memoryMetadata = new Map<string, any>(metadata || []);
+        
+        // Set basic metadata
+        memoryMetadata.set('type', MemoryType.EPISODIC);
+        memoryMetadata.set('timestamp', Date.now());
+        memoryMetadata.set('context', context);
 
-        const context: MemoryContext = metadata?.get('context') || {
-            emotionalState: emotions,
-            topicHistory: [],
-            userPreferences: new Map(),
-            interactionPhase: 'introduction'
-        };
+        // Extract emotional state if present
+        if (context.emotionalState) {
+            memoryMetadata.set('emotion', context.emotionalState.getCurrentEmotion());
+        }
+
+        // Extract topics if present
+        if (context.topicHistory.length > 0) {
+            memoryMetadata.set('topics', [...context.topicHistory]);
+        }
+
+        // Extract goals if present
+        if (context.userGoals.size > 0) {
+            memoryMetadata.set('goals', Array.from(context.userGoals));
+        }
 
         return {
-            id: metadata?.get('id') || crypto.randomUUID(),
-            content: {
-                timeSequence: Date.now(),
-                location: metadata?.get('location') || 'unknown',
-                actors: metadata?.get('actors') || [],
-                actions: metadata?.get('actions') || [],
-                emotions,
-                context,
-                coherenceScore: metadata?.get('coherenceScore') || 0,
-                timestamp: new Date(),
-                relatedTo: metadata?.get('relatedTo') || []
-            },
-            metadata: metadata || new Map(),
+            id: crypto.randomUUID(),
+            content,
+            metadata: memoryMetadata,
             timestamp: new Date(),
-            accessCount: 0,
-            lastAccessed: new Date()
+            priority: 1.0,
+            consolidationMetrics: {
+                semanticSimilarity: 0,
+                contextualOverlap: 0,
+                temporalProximity: 0,
+                sourceReliability: 0,
+                confidenceScore: 0,
+                accessCount: 0,
+                lastAccessed: new Date(),
+                createdAt: new Date(),
+                importance: 1.0,
+                relevance: 1.0
+            },
+            associations: new Set<string>()
         };
     }
 }

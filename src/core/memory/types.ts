@@ -14,14 +14,52 @@ export interface IMemoryUnit {
 }
 
 /**
+ * Emotional state
+ */
+export interface EmotionalState {
+    valence: number;  // -1 to 1, negative to positive
+    arousal: number;  // 0 to 1, calm to excited
+    dominance?: number;  // 0 to 1, submissive to dominant
+    category?: string;  // e.g., 'joy', 'sadness', 'anger', etc.
+}
+
+/**
  * Emotional context interface
  */
 export interface EmotionalContext {
-    emotions: Map<string, number>;
-    valence: number;
-    arousal: number;
-    dominance: number;
-    confidence: number;
+    /**
+     * Get current emotional state
+     */
+    getCurrentEmotion(): EmotionalState | null;
+
+    /**
+     * Get emotional trend over time
+     */
+    getEmotionalTrend(): EmotionalState[];
+
+    /**
+     * Add a new emotional state
+     */
+    addEmotion(emotion: EmotionalState): void;
+
+    /**
+     * Get average valence across emotional history
+     */
+    getAverageValence(): number;
+
+    /**
+     * Get average arousal across emotional history
+     */
+    getAverageArousal(): number;
+
+    /**
+     * Clear emotional history
+     */
+    clear(): void;
+
+    /**
+     * Get number of emotional states in history
+     */
     getSize(): number;
 }
 
@@ -29,40 +67,110 @@ export interface EmotionalContext {
  * Emotional context implementation
  */
 export class EmotionalContextImpl implements EmotionalContext {
-    constructor(
-        public emotions: Map<string, number> = new Map(),
-        public valence: number = 0.5,
-        public arousal: number = 0.5,
-        public dominance: number = 0.5,
-        public confidence: number = 0.5
-    ) {}
+    private emotions: EmotionalState[] = [];
+    private maxHistory: number = 10;
+
+    addEmotion(emotion: EmotionalState): void {
+        this.emotions.push(emotion);
+        if (this.emotions.length > this.maxHistory) {
+            this.emotions.shift();
+        }
+    }
+
+    getCurrentEmotion(): EmotionalState | null {
+        return this.emotions[this.emotions.length - 1] || null;
+    }
+
+    getEmotionalTrend(): EmotionalState[] {
+        return [...this.emotions];
+    }
+
+    getAverageValence(): number {
+        if (this.emotions.length === 0) return 0;
+        return this.emotions.reduce((sum, e) => sum + e.valence, 0) / this.emotions.length;
+    }
+
+    getAverageArousal(): number {
+        if (this.emotions.length === 0) return 0;
+        return this.emotions.reduce((sum, e) => sum + e.arousal, 0) / this.emotions.length;
+    }
+
+    clear(): void {
+        this.emotions = [];
+    }
 
     getSize(): number {
-        return this.emotions.size;
+        return this.emotions.length;
     }
 }
 
 /**
- * Memory context interface
+ * Session context interface representing the agent's current state
+ * during an interaction session.
  */
-export interface MemoryContext {
+export interface SessionMemoryContext {
+    /** Active goals for the current session */
+    userGoals: Set<string>;
+    
+    /** Domain-specific context information */
+    domainContext: Map<string, any>;
+    
+    /** History of interactions in the current session */
+    interactionHistory: string[];
+    
+    /** Recent emotional states */
+    emotionalTrends: EmotionalState[];
+    
+    /** Current emotional context */
     emotionalState: EmotionalContext;
+    
+    /** History of topics discussed in the session */
     topicHistory: string[];
+    
+    /** User preferences for the current session */
     userPreferences: Map<string, any>;
+    
+    /** Current phase of the interaction */
     interactionPhase: 'introduction' | 'main' | 'conclusion';
 }
 
 /**
- * Enhanced memory context interface
+ * Interface for memory context management operations
  */
-export interface EnhancedMemoryContext extends MemoryContext {
-    userGoals: Set<string>;
-    domainContext: Map<string, any>;
-    interactionHistory: string[];
-    emotionalTrends: Array<{
-        timestamp: Date;
-        emotions: EmotionalContext;
-    }>;
+export interface IMemoryContextManager {
+    /**
+     * Set a context value for a specific key
+     * @param key The context key (e.g., 'goal', 'emotion', 'topic')
+     * @param value The value to set
+     */
+    setContext(key: string, value: any): Promise<void>;
+
+    /**
+     * Get context value for a specific key
+     * @param key The context key or 'all' for entire context
+     */
+    getContext(key: string): Promise<any>;
+
+    /**
+     * Clear all context and working memory context
+     */
+    clearContext(): Promise<void>;
+
+    /**
+     * Load context from working memory
+     */
+    loadContextFromWorkingMemory(): Promise<void>;
+
+    /**
+     * Register a listener for context changes
+     * @param listener Function to call when context changes
+     */
+    onContextChange(listener: (context: SessionMemoryContext) => void): void;
+
+    /**
+     * Get current context state
+     */
+    getCurrentContext(): SessionMemoryContext;
 }
 
 /**
@@ -75,7 +183,7 @@ export interface IEpisodicMemoryUnit extends IMemoryUnit {
         actors: string[];
         actions: string[];
         emotions: EmotionalContext;
-        context: MemoryContext;
+        context: SessionMemoryContext;
         coherenceScore: number;
         userInstruction?: string;
         consolidationStatus?: ConsolidationStatus;
@@ -87,19 +195,127 @@ export interface IEpisodicMemoryUnit extends IMemoryUnit {
 }
 
 /**
- * Enum for relation types in semantic memory
+ * Memory Types
  */
-export enum RelationType {
-    IS_A = 'is_a',
-    HAS_A = 'has_a',
-    PART_OF = 'part_of',
-    SIMILAR_TO = 'similar_to',
-    RELATED_TO = 'related_to',
-    CAUSES = 'causes',
-    FOLLOWS = 'follows',
-    USED_FOR = 'used_for',
-    LOCATED_IN = 'located_in',
-    MEMBER_OF = 'member_of'
+export enum MemoryType {
+    WORKING = 'working',
+    LONG_TERM = 'long_term',
+    DECLARATIVE = 'declarative',
+    SEMANTIC = 'semantic',
+    EPISODIC = 'episodic',
+    PROCEDURAL = 'procedural',
+    CONTEXTUAL = 'contextual'
+}
+
+/**
+ * Memory Status
+ */
+export enum ConsolidationStatus {
+    NEW = 'new',
+    PROCESSING = 'processing',
+    CONSOLIDATED = 'consolidated',
+    FAILED = 'failed'
+}
+
+/**
+ * Memory Transition
+ */
+export enum TransitionTrigger {
+    TIME_BASED = 'time_based',
+    CONTEXT_BASED = 'context_based',
+    EMOTION_BASED = 'emotion_based',
+    CAPACITY_BASED = 'capacity_based',
+    USER_INSTRUCTED = 'user_instructed',
+    CONSOLIDATION_BASED = 'consolidation_based'
+}
+
+/**
+ * Transition metadata
+ */
+export interface TransitionMetadata {
+    userInstruction?: {
+        command: string;
+        target: string;
+    };
+    emotionalPeak?: {
+        intensity: number;
+        emotion: EmotionalState;
+    };
+    goalRelevance?: {
+        score: number;
+        goals: string[];
+    };
+    timeThreshold?: {
+        elapsed: number;
+        timestamp: Date;
+    };
+    capacityLimit?: {
+        current: number;
+        max: number;
+    };
+}
+
+/**
+ * Transition configuration
+ */
+export interface TransitionConfig {
+    trigger: TransitionTrigger;
+    condition: (memory: IMemoryUnit, context: SessionMemoryContext) => Promise<boolean>;
+    priority: number;
+    threshold: number;
+    metadata?: TransitionMetadata;
+}
+
+/**
+ * Transition criteria
+ */
+export interface TransitionCriteria {
+    contextualCoherence: number;  // How well memory fits current context (0-1)
+    emotionalSalience: number;    // Emotional significance (0-1)
+    goalRelevance: number;        // Relevance to current goals (0-1)
+    topicContinuity: number;      // Continuity with current topics (0-1)
+    temporalProximity: number;    // Time-based relevance (0-1)
+}
+
+/**
+ * Memory Consolidation
+ */
+export interface ConsolidationMetrics {
+    semanticSimilarity: number;    // Semantic similarity with existing memories (0-1)
+    contextualOverlap: number;     // Overlap with current context (0-1)
+    temporalProximity: number;     // Time-based relevance (0-1)
+    sourceReliability: number;     // Reliability of memory source (0-1)
+    confidenceScore: number;       // Confidence in memory accuracy (0-1)
+    accessCount: number;           // Number of times accessed
+    lastAccessed: Date;           // Last access timestamp
+    createdAt: Date;              // Creation timestamp
+    importance: number;           // Overall importance score (0-1)
+    relevance: number;            // Current relevance score (0-1)
+}
+
+/**
+ * Consolidation result
+ */
+export interface ConsolidationResult {
+    success: boolean;
+    metrics: ConsolidationMetrics;
+    preservedRelations: string[];  // IDs of preserved memory relations
+    mergedIds: string[];          // IDs of merged memories
+}
+
+/**
+ * Interface for semantic memory units, representing knowledge and concepts
+ */
+export interface ISemanticMemoryUnit extends IMemoryUnit {
+    concept: string;
+    conceptGraph: {
+        nodes: Map<string, ConceptNode>;
+        relations: ConceptRelation[];
+    };
+    confidence: number;
+    source: string;
+    lastVerified: Date;
+    consolidationStatus?: ConsolidationStatus;
 }
 
 /**
@@ -128,144 +344,19 @@ export interface ConceptRelation {
 }
 
 /**
- * Interface for semantic memory units, representing knowledge and concepts
+ * Relation types
  */
-export interface ISemanticMemoryUnit extends IMemoryUnit {
-    concept: string;
-    conceptGraph: {
-        nodes: Map<string, ConceptNode>;
-        relations: ConceptRelation[];
-    };
-    confidence: number;
-    source: string;
-    lastVerified: Date;
-    consolidationStatus?: ConsolidationStatus;
-}
-
-/**
- * Enum for different types of memory
- */
-export enum MemoryType {
-    WORKING = 'working',
-    LONG_TERM = 'long_term',
-    DECLARATIVE = 'declarative',
-    SEMANTIC = 'semantic',
-    EPISODIC = 'episodic',
-    PROCEDURAL = 'procedural',
-    CONTEXTUAL = 'contextual'
-}
-
-/**
- * Enum for memory consolidation status
- */
-export enum ConsolidationStatus {
-    NEW = 'new',
-    CONSOLIDATED = 'consolidated',
-    ABSTRACT = 'abstract'
-}
-
-/**
- * Transition criteria for memory management
- */
-export interface TransitionCriteria {
-    contextualCoherence: number;  // How well the memory fits in current context (0-1)
-    emotionalSalience: number;    // Emotional significance (0-1)
-    goalRelevance: number;        // Relevance to current goals (0-1)
-    generality: number;           // How general/abstract the information is (0-1)
-    consistency: number;          // Consistency with existing knowledge (0-1)
-}
-
-/**
- * Base transition trigger interface
- */
-export interface BaseTransitionTrigger {
-    type: 'context_change' | 'time_elapsed' | 'user_instruction' | 'emotional_peak' | 'goal_relevance';
-    condition: (memory: IMemoryUnit, context: MemoryContext) => Promise<boolean>;
-    priority: number;
-    threshold: number;
-    lastCheck: Date;
-}
-
-/**
- * Enhanced transition trigger definition
- */
-export interface EnhancedTransitionTrigger extends BaseTransitionTrigger {
-    metadata: {
-        userInstruction?: {
-            command: 'remember' | 'save' | 'forget';
-            target: string;
-        };
-        contextChange?: {
-            from: string;
-            to: string;
-            significance: number;
-        };
-        emotionalPeak?: {
-            emotion: string;
-            intensity: number;
-        };
-        goalRelevance?: {
-            goal: string;
-            relevanceScore: number;
-        };
-    };
-}
-
-/**
- * Enhanced transition config
- */
-export interface EnhancedTransitionConfig {
-    accessCountThreshold: number;
-    timeThresholdMs: number;
-    capacityThreshold: number;
-    importanceThreshold: number;
-    contextSwitchThreshold: number;
-    emotionalSalienceThreshold: number;
-    coherenceThreshold: number;
-    consistencyThreshold: number;
-    topicContinuityThreshold: number;
-    emotionalContinuityThreshold: number;
-    temporalProximityThreshold: number;
-    goalAlignmentThreshold: number;
-    emotionalIntensityThreshold: number;
-    emotionalNoveltyThreshold: number;
-    emotionalRelevanceThreshold: number;
-}
-
-/**
- * Enhanced transition criteria
- */
-export interface EnhancedTransitionCriteria extends TransitionCriteria {
-    topicContinuity: number;
-    emotionalContinuity: number;
-    temporalProximity: number;
-    goalAlignment: number;
-    emotionalFactors: {
-        intensity: number;
-        novelty: number;
-        relevance: number;
-    };
-}
-
-/**
- * User instruction types
- */
-export interface UserInstruction {
-    command: 'remember' | 'save' | 'forget';
-    target: string;
-    context?: string;
-    metadata?: Map<string, any>;
-}
-
-/**
- * Transition trigger definition
- */
-export interface TransitionTrigger {
-    type: 'context_change' | 'time_elapsed' | 'user_instruction' | 'repeated_mention' | 'emotional_significance';
-    threshold: number;
-    metadata: Map<string, any>;
-    lastCheck: Date;
-    priority: number;
+export enum RelationType {
+    IS_A = 'is_a',
+    HAS_A = 'has_a',
+    PART_OF = 'part_of',
+    SIMILAR_TO = 'similar_to',
+    RELATED_TO = 'related_to',
+    CAUSES = 'causes',
+    FOLLOWS = 'follows',
+    USED_FOR = 'used_for',
+    LOCATED_IN = 'located_in',
+    MEMBER_OF = 'member_of'
 }
 
 /**
@@ -435,43 +526,6 @@ export interface IMemoryAssociation {
 }
 
 /**
- * Interface for memory context management operations
- */
-export interface IMemoryContextManager {
-    setContext(key: string, value: any): Promise<void>;
-    getContext(key: string): Promise<any>;
-    getAllContext(): Promise<Map<string, any>>;
-    clearContext(): Promise<void>;
-    storeContextAsEpisodicMemory(context: Map<string, any>): Promise<void>;
-}
-
-/**
- * Consolidation metrics
- */
-export interface ConsolidationMetrics {
-    semanticSimilarity?: number;
-    contextualOverlap?: number;
-    temporalProximity?: number;
-    sourceReliability?: number;
-    confidenceScore?: number;
-    accessCount?: number;
-    lastAccessed?: Date;
-    createdAt?: Date;
-    importance?: number;
-    relevance?: number;
-}
-
-/**
- * Consolidation result
- */
-export interface ConsolidationResult {
-    success: boolean;
-    metrics?: ConsolidationMetrics;
-    preservedRelations: string[];    // IDs of preserved relationships
-    mergedIds: string[];            // IDs of merged memory units
-}
-
-/**
  * Helper function to build query string from memory filter
  */
 export function buildQueryFromFilter(filter: MemoryFilter): string {
@@ -515,4 +569,14 @@ export function buildQueryFromFilter(filter: MemoryFilter): string {
     }
 
     return queryParts.join(' AND ');
+}
+
+/**
+ * User instruction types
+ */
+export interface UserInstruction {
+    command: 'remember' | 'save' | 'forget';
+    target: string;
+    context?: string;
+    metadata?: Map<string, any>;
 }
