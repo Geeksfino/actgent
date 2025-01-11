@@ -1,167 +1,96 @@
-import { describe, test, expect, beforeEach } from 'bun:test';
+import { expect, test, describe, beforeEach, afterEach } from 'bun:test';
 import { SemanticMemory } from '../../../src/core/memory/semantic/SemanticMemory';
-import { ConceptGraph } from '../../../src/core/memory/semantic/ConceptGraph';
-import { IMemoryUnit, MemoryType } from '../../../src/core/memory/types';
-import crypto from 'crypto';
+import { MockMemoryStorage } from '../mocks/MockMemoryStorage';
+import { MockMemoryIndex } from '../mocks/MockMemoryIndex';
+import { MockConceptGraph } from '../mocks/MockConceptGraph';
+import { MemoryType } from '../../../src/core/memory/types';
 
 describe('SemanticMemory', () => {
     let semanticMemory: SemanticMemory;
-    let conceptGraph: ConceptGraph;
+    let mockStorage: MockMemoryStorage;
+    let mockIndex: MockMemoryIndex;
+    let mockGraph: MockConceptGraph;
 
     beforeEach(() => {
-        conceptGraph = new ConceptGraph();
-        semanticMemory = new SemanticMemory(conceptGraph);
+        mockStorage = new MockMemoryStorage();
+        mockIndex = new MockMemoryIndex();
+        mockGraph = new MockConceptGraph();
+        semanticMemory = new SemanticMemory(mockStorage, mockIndex, mockGraph);
     });
 
-    test('should extract concepts from text memory', async () => {
-        const memory: IMemoryUnit = {
-            id: crypto.randomUUID(),
-            content: 'The quick brown fox jumps over the lazy dog',
-            metadata: new Map([['type', MemoryType.SEMANTIC]]),
-            timestamp: new Date(),
-            accessCount: 0,
-            lastAccessed: new Date()
-        };
-
-        await semanticMemory.store(memory);
-        const concepts = await semanticMemory.findConcepts('fox');
-        expect(concepts).toHaveLength(1);
-        expect(concepts[0].label).toBe('fox');
+    afterEach(async () => {
+        await semanticMemory.cleanup();
     });
 
-    test('should extract concepts from structured memory', async () => {
-        const memory: IMemoryUnit = {
-            id: crypto.randomUUID(),
-            content: {
-                text: 'The weather is sunny today',
-                properties: { temperature: 25 }
-            },
-            metadata: new Map([['type', MemoryType.SEMANTIC]]),
-            timestamp: new Date(),
-            accessCount: 0,
-            lastAccessed: new Date()
-        };
+    test('should add and retrieve concepts', async () => {
+        const concept = 'dog';
+        const properties = new Map([
+            ['type', 'animal'],
+            ['size', 'medium']
+        ]);
 
-        await semanticMemory.store(memory);
-        const concepts = await semanticMemory.findConcepts('weather');
-        expect(concepts).toHaveLength(1);
-        expect(concepts[0].label).toBe('weather');
-    });
-
-    test('should merge similar concepts', async () => {
-        const memory1: IMemoryUnit = {
-            id: crypto.randomUUID(),
-            content: 'The cat is sleeping',
-            metadata: new Map([['type', MemoryType.SEMANTIC]]),
-            timestamp: new Date(),
-            accessCount: 0,
-            lastAccessed: new Date()
-        };
-
-        const memory2: IMemoryUnit = {
-            id: crypto.randomUUID(),
-            content: 'The kitten is playing',
-            metadata: new Map([['type', MemoryType.SEMANTIC]]),
-            timestamp: new Date(),
-            accessCount: 0,
-            lastAccessed: new Date()
-        };
-
-        await semanticMemory.store(memory1);
-        await semanticMemory.store(memory2);
-
-        // Find both concepts
-        const cats = await semanticMemory.findConcepts('cat');
-        const kittens = await semanticMemory.findConcepts('kitten');
+        await semanticMemory.addConcept(concept, properties);
+        const concepts = await mockGraph.findConcepts('dog');
         
-        // They should be separate initially
-        expect(cats).toHaveLength(1);
-        expect(kittens).toHaveLength(1);
-
-        // Merge them
-        await semanticMemory.mergeConcepts(cats[0].id, kittens[0].id);
-
-        // After merging, searching for either should return the merged concept
-        const afterMergeCats = await semanticMemory.findConcepts('cat');
-        const afterMergeKittens = await semanticMemory.findConcepts('kitten');
-        expect(afterMergeCats[0].id).toBe(afterMergeKittens[0].id);
+        expect(concepts.length).toBe(1);
+        expect(concepts[0].name).toBe(concept);
+        expect(concepts[0].properties).toEqual(properties);
     });
 
-    test('should establish relations between concepts', async () => {
-        const memory: IMemoryUnit = {
-            id: crypto.randomUUID(),
-            content: 'Dogs and cats are both animals',
-            metadata: new Map([['type', MemoryType.SEMANTIC]]),
-            timestamp: new Date(),
-            accessCount: 0,
-            lastAccessed: new Date()
-        };
+    test('should add and retrieve relations', async () => {
+        await semanticMemory.addConcept('dog', new Map([['type', 'animal']]));
+        await semanticMemory.addConcept('cat', new Map([['type', 'animal']]));
+        await semanticMemory.addRelation('dog', 'cat', 'chases');
 
-        await semanticMemory.store(memory);
-
-        // Check that concepts were created
-        const dogs = await semanticMemory.findConcepts('dog');
-        const cats = await semanticMemory.findConcepts('cat');
-        const animals = await semanticMemory.findConcepts('animal');
-
-        expect(dogs).toHaveLength(1);
-        expect(cats).toHaveLength(1);
-        expect(animals).toHaveLength(1);
-
-        // Check relations
-        const dogRelations = await semanticMemory.findRelations(dogs[0].id);
-        const catRelations = await semanticMemory.findRelations(cats[0].id);
-
-        expect(dogRelations.length).toBeGreaterThan(0);
-        expect(catRelations.length).toBeGreaterThan(0);
+        const relations = await mockGraph.findRelations({ type: 'chases' });
+        expect(relations.length).toBe(1);
+        expect(relations[0].sourceId).toBe('dog');
+        expect(relations[0].targetId).toBe('cat');
     });
 
-    test('should retrieve memories by query', async () => {
-        const memory: IMemoryUnit = {
-            id: crypto.randomUUID(),
-            content: 'Elephants are the largest land animals',
-            metadata: new Map([['type', MemoryType.SEMANTIC]]),
-            timestamp: new Date(),
-            accessCount: 0,
-            lastAccessed: new Date()
-        };
+    test('should get related concepts', async () => {
+        await semanticMemory.addConcept('dog', new Map([['type', 'animal']]));
+        await semanticMemory.addConcept('bone', new Map([['type', 'object']]));
+        await semanticMemory.addRelation('dog', 'bone', 'likes');
 
-        await semanticMemory.store(memory);
-        const retrieved = await semanticMemory.retrieve('elephant');
-        expect(retrieved).toHaveLength(1);
-        expect(retrieved[0].content.text).toContain('elephant');
+        const related = await semanticMemory.getRelated('dog');
+        expect(related.length).toBe(1);
+        expect(related[0].name).toBe('bone');
     });
 
-    test('should maintain confidence scores', async () => {
-        const memory1: IMemoryUnit = {
-            id: crypto.randomUUID(),
-            content: 'A dolphin is a mammal',
-            metadata: new Map([
-                ['type', MemoryType.SEMANTIC],
-                ['confidence', '0.9']
-            ]),
-            timestamp: new Date(),
-            accessCount: 0,
-            lastAccessed: new Date()
+    test('should store and retrieve semantic memories', async () => {
+        const content = {
+            concept: 'dog',
+            fact: 'Dogs are loyal animals'
         };
+        const metadata = new Map([
+            ['confidence', 0.9],
+            ['source', 'observation']
+        ]);
 
-        const memory2: IMemoryUnit = {
-            id: crypto.randomUUID(),
-            content: 'A dolphin is a fish',
-            metadata: new Map([
-                ['type', MemoryType.SEMANTIC],
-                ['confidence', '0.3']
-            ]),
-            timestamp: new Date(),
-            accessCount: 0,
-            lastAccessed: new Date()
-        };
+        const stored = await semanticMemory.store(content, metadata);
+        const retrieved = await semanticMemory.retrieve({
+            type: MemoryType.SEMANTIC,
+            metadata: new Map([['concept', 'dog']])
+        });
 
-        await semanticMemory.store(memory1);
-        await semanticMemory.store(memory2);
+        expect(retrieved.length).toBe(1);
+        expect(retrieved[0].content).toEqual(content);
+        expect(retrieved[0].metadata.get('confidence')).toBe(0.9);
+    });
 
-        const dolphins = await semanticMemory.findConcepts('dolphin');
-        expect(dolphins).toHaveLength(1);
-        expect(dolphins[0].confidence).toBeGreaterThan(0.8); // Should keep the higher confidence
+    test('should store and retrieve semantic memories', async () => {
+        const content = 'Test semantic memory';
+        const metadata = new Map([
+            ['type', MemoryType.SEMANTIC],
+            ['importance', 0.8]
+        ]);
+
+        await semanticMemory.store(content, metadata);
+        const memories = await semanticMemory.retrieve({ type: MemoryType.SEMANTIC });
+        
+        expect(memories).toHaveLength(1);
+        expect(memories[0].content).toBe(content);
+        expect(memories[0].metadata.get('importance')).toBe(0.8);
     });
 });

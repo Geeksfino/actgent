@@ -1,67 +1,55 @@
 import { IMemoryUnit, MemoryFilter, MemoryType } from './types';
-import { BaseMemorySystem } from './BaseMemorySystem';
+import { AbstractMemory } from './AbstractMemory';
 import { IMemoryStorage, IMemoryIndex } from './types';
 import { logger } from '../Logger';
+import crypto from 'crypto';
 
-export class WorkingMemory extends BaseMemorySystem {
+export class WorkingMemory extends AbstractMemory {
     protected readonly MAX_WORKING_MEMORY_SIZE = 100;
     protected readonly DEFAULT_TTL = 30 * 60 * 1000; // 30 minutes
     protected readonly expirationTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 
     constructor(storage: IMemoryStorage, index: IMemoryIndex) {
-        super(storage, index);
-        this.startCleanupTimer();
+        super(storage, index, MemoryType.WORKING);
     }
 
     /**
      * Store content in working memory
      */
-    public async store(content: any, metadata: any = {}): Promise<void> {
-        const memoryId = crypto.randomUUID();
+    public override async store(content: any, metadata: any = {}): Promise<IMemoryUnit> {
         const metadataMap = metadata instanceof Map ? metadata : new Map(Object.entries(metadata || {}));
-        metadataMap.set('id', memoryId);
-        metadataMap.set('type', MemoryType.WORKING);
-
-        // Store the memory
-        const memory: IMemoryUnit = {
-            id: memoryId,
-            content,
-            metadata: metadataMap,
-            timestamp: new Date()
-        };
-
-        // Check if already expired - if so, just skip storing
-        const expiresAt = metadataMap.get('expiresAt');
-        if (expiresAt && Date.now() > expiresAt) {
-            logger.debug('Memory already expired, skipping store: %o', memory);
-            return;
+        
+        // Set working memory specific metadata
+        if (!metadataMap.has('expiresAt')) {
+            metadataMap.set('expiresAt', Date.now() + this.DEFAULT_TTL);
         }
 
-        // Store in working memory
-        await this.storage.store(memory);
-        await this.index.index(memory);
-        logger.debug('Stored memory: %o', memory);
+        // Store using parent class method
+        const memory = await super.store(content, metadataMap);
 
         // Check capacity after storing
         await this.ensureCapacity();
 
         // Set expiration timer
+        const expiresAt = metadataMap.get('expiresAt');
         if (expiresAt) {
             const timeout = setTimeout(async () => {
-                const currentMemory = await this.storage.retrieve(memoryId);
+                const currentMemory = await this.storage.retrieve(memory.id);
                 if (currentMemory) {
                     await this.moveToEpisodicMemory(currentMemory);
                 }
-                this.expirationTimers.delete(memoryId);
+                this.expirationTimers.delete(memory.id);
             }, expiresAt - Date.now());
-            this.expirationTimers.set(memoryId, timeout);
+            this.expirationTimers.set(memory.id, timeout);
         }
+
+        return memory;
     }
 
     /**
      * Retrieve memories by filter or id
      */
-    public async retrieve(idOrFilter: string | MemoryFilter): Promise<IMemoryUnit[]> {
+    public override async retrieve(idOrFilter: string | MemoryFilter): Promise<IMemoryUnit[]> {
         // Handle string ID case
         if (typeof idOrFilter === 'string') {
             const memory = await this.storage.retrieve(idOrFilter);
@@ -82,22 +70,11 @@ export class WorkingMemory extends BaseMemorySystem {
         }
 
         // Handle filter case
-        const filter = idOrFilter || {};
-        const types = filter.types || [MemoryType.WORKING];
-        if (!types.includes(MemoryType.WORKING)) {
-            logger.debug('Filter does not include working memories: %o', filter);
-            return [];
-        }
-
-        const memories = await this.storage.retrieveByFilter(filter);
+        const memories = await super.retrieve(idOrFilter);
         const now = Date.now();
         const validMemories: IMemoryUnit[] = [];
 
         for (const memory of memories) {
-            if (memory.metadata.get('type') !== MemoryType.WORKING) {
-                continue;
-            }
-
             const expiresAt = memory.metadata.get('expiresAt');
             if (typeof expiresAt === 'number' && now > expiresAt) {
                 logger.debug('Memory expired, moving to episodic: %o', memory);
@@ -114,7 +91,7 @@ export class WorkingMemory extends BaseMemorySystem {
      * Retrieve all memories
      */
     public async retrieveAll(): Promise<IMemoryUnit[]> {
-        return this.storage.retrieveByFilter({
+        return this.retrieve({
             types: [MemoryType.WORKING]
         });
     }
@@ -153,7 +130,7 @@ export class WorkingMemory extends BaseMemorySystem {
 
         logger.debug('Moving memory to episodic: %o', episodicMemory);
         await this.storage.store(episodicMemory);
-        await this.index.index(episodicMemory);
+        await this.index.add(episodicMemory);
         await this.storage.delete(memory.id);
     }
 
@@ -162,7 +139,7 @@ export class WorkingMemory extends BaseMemorySystem {
      * Used for context changes and periodic cleanup
      */
     public async consolidateToEpisodic(): Promise<void> {
-        const memories = await this.storage.retrieveByFilter({
+        const memories = await this.retrieve({
             types: [MemoryType.WORKING]
         });
 
@@ -199,108 +176,67 @@ export class WorkingMemory extends BaseMemorySystem {
                         // For numeric values, take the maximum
                         consolidatedMetadata.set(key, Math.max(...values.map(v => Number(v))));
                     } else if (key === 'tags' || key === 'category') {
-                        // For arrays or sets, combine unique values
+                        // For arrays/sets, combine unique values
                         const uniqueValues = new Set(values.flat());
                         consolidatedMetadata.set(key, Array.from(uniqueValues));
                     } else {
-                        // For other values, take the most common
-                        const valueCounts = new Map<any, number>();
-                        values.forEach(v => valueCounts.set(v, (valueCounts.get(v) || 0) + 1));
-                        const [mostCommon] = Array.from(valueCounts.entries())
-                            .sort((a, b) => b[1] - a[1])[0];
-                        consolidatedMetadata.set(key, mostCommon);
+                        // For other values, take the most recent
+                        consolidatedMetadata.set(key, values[values.length - 1]);
                     }
                 }
             }
 
-            // Create consolidated memory
-            const consolidatedMemory: IMemoryUnit = {
+            // Create consolidated episodic memory
+            const episodicMemory: IMemoryUnit = {
                 id: crypto.randomUUID(),
-                content: {
-                    memories: groupMemories.map(m => ({
-                        id: m.id,
-                        content: m.content,
-                        metadata: Object.fromEntries(m.metadata),
-                        timestamp: m.timestamp
-                    })),
-                    context
-                },
+                content: groupMemories.map(m => m.content),
                 metadata: consolidatedMetadata,
                 timestamp: new Date(Math.max(...groupMemories.map(m => m.timestamp.getTime())))
             };
 
-            // Store consolidated memory and cleanup originals
-            logger.debug('Storing consolidated memory: %o', consolidatedMemory);
-            await this.storage.store(consolidatedMemory);
-            await this.index.index(consolidatedMemory);
+            // Store consolidated memory and clean up originals
+            logger.debug('Storing consolidated episodic memory: %o', episodicMemory);
+            await this.storage.store(episodicMemory);
+            await this.index.add(episodicMemory);
 
-            // Clear expiration timers and delete originals
+            // Delete original memories and clear timers
             for (const memory of groupMemories) {
                 this.clearExpirationTimer(memory.id);
                 await this.storage.delete(memory.id);
+                await this.index.delete(memory.id);
             }
         }
     }
 
     /**
-     * Update a memory unit
+     * Ensure working memory stays within capacity
      */
-    public async update(memory: IMemoryUnit): Promise<void> {
-        await this.storage.update(memory);
-        await this.updateExpirationTimer(memory);
-    }
+    private async ensureCapacity(): Promise<void> {
+        const memories = await this.retrieve({
+            types: [MemoryType.WORKING]
+        });
 
-    /**
-     * Delete a memory unit
-     */
-    public async delete(id: string): Promise<void> {
-        await this.storage.delete(id);
-        this.clearExpirationTimer(id);
-    }
-
-    /**
-     * Update memory unit
-     */
-    public async updateMemory(memory: IMemoryUnit): Promise<void> {
-        await this.update(memory);
-    }
-
-    /**
-     * Delete memory unit
-     */
-    public async deleteMemory(id: string): Promise<void> {
-        await this.delete(id);
-    }
-
-    /**
-     * Update expiration timer for a memory
-     */
-    private async updateExpirationTimer(memory: IMemoryUnit): Promise<void> {
-        const memoryId = memory.id;
-        
-        // Clear existing timer if any
-        const existingTimer = this.expirationTimers.get(memoryId);
-        if (existingTimer) {
-            clearTimeout(existingTimer);
-        }
-
-        // Set new timer
-        const expirationTime = memory.metadata.get('expiresAt');
-        if (expirationTime) {
-            const timer = setTimeout(async () => {
-                const currentMemory = await this.storage.retrieve(memoryId);
-                if (currentMemory) {
-                    await this.moveToEpisodicMemory(currentMemory);
+        if (memories.length > this.MAX_WORKING_MEMORY_SIZE) {
+            // Sort by priority and recency
+            const sortedMemories = memories.sort((a, b) => {
+                const aPriority = a.metadata.get('priority') || 0;
+                const bPriority = b.metadata.get('priority') || 0;
+                if (aPriority !== bPriority) {
+                    return bPriority - aPriority;
                 }
-                this.expirationTimers.delete(memoryId);
-            }, expirationTime - Date.now());
+                return b.timestamp.getTime() - a.timestamp.getTime();
+            });
 
-            this.expirationTimers.set(memoryId, timer);
+            // Move excess memories to episodic
+            const excessMemories = sortedMemories.slice(this.MAX_WORKING_MEMORY_SIZE);
+            for (const memory of excessMemories) {
+                await this.moveToEpisodicMemory(memory);
+            }
         }
     }
 
     /**
-     * Clear expiration timer for a memory unit
+     * Clear expiration timer for a memory
      */
     private clearExpirationTimer(id: string): void {
         const timer = this.expirationTimers.get(id);
@@ -311,137 +247,19 @@ export class WorkingMemory extends BaseMemorySystem {
     }
 
     /**
-     * Check if memory needs consolidation
-     */
-    public isConsolidationNeeded(memory: IMemoryUnit): boolean {
-        const accessCount = memory.accessCount || 0;
-        const lastAccessed = memory.lastAccessed?.getTime() || 0;
-        const now = Date.now();
-
-        // Consolidate if:
-        // 1. Accessed frequently (more than 2 times)
-        // 2. Not accessed recently (more than 1 hour)
-        return accessCount >= 2 && (now - lastAccessed) > 60 * 60 * 1000;
-    }
-
-    /**
-     * Get memories that need consolidation
-     */
-    public async getConsolidationCandidates(): Promise<IMemoryUnit[]> {
-        const memories = await this.retrieve({});
-        return memories.filter(memory => this.isConsolidationNeeded(memory));
-    }
-
-    /**
-     * Cleanup expired memories
-     */
-    public async cleanupExpiredMemories(): Promise<void> {
-        const memories = await this.retrieve({});
-        const now = Date.now();
-
-        await Promise.all(memories.map(async memory => {
-            const expiresAt = memory.metadata.get('expiresAt');
-            if (expiresAt && now > expiresAt) {
-                await this.storage.delete(memory.id);
-            }
-        }));
-    }
-
-    /**
      * Cleanup expired memories
      */
     public async cleanup(): Promise<void> {
-        const memories = await this.retrieve({});
-        const now = Date.now();
-
-        await Promise.all(memories.map(async memory => {
-            const expiresAt = memory.metadata.get('expiresAt');
-            if (expiresAt && now > expiresAt) {
-                await this.storage.delete(memory.id);
-            }
-        }));
-    }
-
-    /**
-     * Stop cleanup and clear timers
-     */
-    public override stopCleanupTimer(): void {
-        super.stopCleanupTimer();
-        
-        // Clear all expiration timers
-        for (const timer of this.expirationTimers.values()) {
-            clearTimeout(timer);
-        }
-        this.expirationTimers.clear();
-    }
-
-    /**
-     * Ensure working memory capacity
-     */
-    private async ensureCapacity(): Promise<void> {
-        const memories = await this.storage.retrieveByFilter({
+        const memories = await this.retrieve({
             types: [MemoryType.WORKING]
         });
 
-        if (memories.length > this.MAX_WORKING_MEMORY_SIZE) {
-            // Move oldest or least relevant memories to episodic
-            const memoriesToMove = memories
-                .sort((a, b) => {
-                    const aRelevance = a.metadata.get('relevance') || 0;
-                    const bRelevance = b.metadata.get('relevance') || 0;
-                    if (aRelevance === bRelevance) {
-                        return (a.timestamp?.getTime() || 0) - (b.timestamp?.getTime() || 0);
-                    }
-                    return aRelevance - bRelevance;
-                })
-                .slice(0, memories.length - this.MAX_WORKING_MEMORY_SIZE);
-
-            await Promise.all(memoriesToMove.map(memory => 
-                this.moveToEpisodicMemory(memory)
-            ));
-        }
-    }
-
-    /**
-     * Get statistics about the working memory state
-     */
-    async getStats(): Promise<{ capacityUsage: number; totalMemories: number }> {
-        const memories = await this.retrieve({ types: [MemoryType.WORKING] });
-        return {
-            totalMemories: memories.length,
-            capacityUsage: memories.length / this.MAX_WORKING_MEMORY_SIZE
-        };
-    }
-
-    /**
-     * Update context
-     */
-    public async updateContext(newContext: string): Promise<void> {
-        const memories = await this.retrieve({ types: [MemoryType.WORKING] });
-        
+        const now = Date.now();
         for (const memory of memories) {
-            const metadata = new Map(memory.metadata);
-            const currentContext = metadata.get('context');
-            
-            if (currentContext && currentContext !== newContext) {
-                // Increment context switch count
-                const switches = (metadata.get('contextSwitches') || 0) + 1;
-                metadata.set('contextSwitches', switches);
-                
-                // Update context
-                metadata.set('context', newContext);
-                
-                await this.update({
-                    ...memory,
-                    metadata
-                });
+            const expiresAt = memory.metadata.get('expiresAt');
+            if (typeof expiresAt === 'number' && now > expiresAt) {
+                await this.moveToEpisodicMemory(memory);
             }
         }
-    }
-
-    public async performCleanup(): Promise<void> {
-        await this.cleanup();
-        await this.cleanupExpiredMemories();
-        await this.ensureCapacity();
     }
 }

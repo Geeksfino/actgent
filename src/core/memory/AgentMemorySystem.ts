@@ -1,328 +1,154 @@
-import { WorkingMemory } from './WorkingMemory';
-import { EpisodicMemory } from './EpisodicMemory';
-import { LongTermMemory } from './LongTermMemory';
-import { MemoryContextManager } from './MemoryContextManager';
-import { MemoryAssociator } from './MemoryAssociator';
-import { MemoryTransitionManager } from './MemoryTransitionManager';
 import { 
     IMemoryStorage, 
     IMemoryIndex, 
     IMemoryUnit, 
-    MemoryType, 
+    MemoryType,
     MemoryFilter 
 } from './types';
-import { BaseMemorySystem } from './BaseMemorySystem';
-import * as crypto from 'crypto';
+import { MemoryRegistry } from './MemoryRegistry';
+import { MemoryContextManager } from './MemoryContextManager';
+import { MemoryAssociator } from './MemoryAssociator';
+import { MemoryTransitionManager } from './MemoryTransitionManager';
 
-export class AgentMemorySystem extends BaseMemorySystem {
-    protected workingMemory: WorkingMemory;
-    protected episodicMemory: EpisodicMemory;
-    protected longTermMemory: LongTermMemory;
-    protected contextManager: MemoryContextManager;
-    protected transitionManager: MemoryTransitionManager;
-    protected associator: MemoryAssociator;
+/**
+ * Main entry point for the agent's memory system.
+ * Provides a simple interface for agents to store and retrieve memories,
+ * while handling the complexity of memory management internally.
+ */
+export class AgentMemorySystem {
+    private registry: MemoryRegistry;
+    private contextManager: MemoryContextManager;
+    private associator: MemoryAssociator;
+    private transitionManager: MemoryTransitionManager;
     private transitionTimer: NodeJS.Timer | null = null;
 
     constructor(
-        storage: IMemoryStorage, 
+        storage: IMemoryStorage,
         index: IMemoryIndex,
         transitionInterval: number = 5 * 60 * 1000 // 5 minutes default
     ) {
-        super(storage, index);
-        this.workingMemory = new WorkingMemory(storage, index);
-        this.episodicMemory = new EpisodicMemory(storage, index);
-        this.longTermMemory = new LongTermMemory(storage, index);
+        this.registry = MemoryRegistry.initialize(storage, index);
         this.contextManager = new MemoryContextManager(storage, index);
         this.associator = new MemoryAssociator(storage, index);
         
         // Initialize transition manager
         this.transitionManager = new MemoryTransitionManager(
-            this.workingMemory,
-            this.episodicMemory,
-            this.longTermMemory
+            this.registry.getWorkingMemory(),
+            this.registry.getEpisodicMemory()
         );
 
-        // Start transition timer
-        this.transitionTimer = setInterval(() => {
-            this.transitionManager.checkAndTransition().catch(console.error);
-        }, transitionInterval);
+        // Start automatic memory management
+        this.startMemoryManagement(transitionInterval);
     }
 
-    // Memory access methods
-    public getWorkingMemory(): WorkingMemory {
-        return this.workingMemory;
+    /**
+     * Remember something. The memory system will automatically determine
+     * where and how to store it based on its characteristics.
+     */
+    public async remember(content: any, metadata?: Map<string, any>): Promise<void> {
+        // Store initially in working memory
+        await this.registry.getWorkingMemory().store(content, metadata);
     }
 
-    public getEpisodicMemory(): EpisodicMemory {
-        return this.episodicMemory;
-    }
+    /**
+     * Recall memories based on a query. The memory system will search
+     * across all relevant memory stores.
+     */
+    public async recall(query: string | MemoryFilter): Promise<IMemoryUnit[]> {
+        const filter: MemoryFilter = typeof query === 'string' 
+            ? { query }  // Use query field for string searches
+            : query;     // Use provided filter directly
 
-    public getLongTermMemory(): LongTermMemory {
-        return this.longTermMemory;
-    }
-
-    public getTransitionManager(): MemoryTransitionManager {
-        return this.transitionManager;
-    }
-
-    public getContextManager(): MemoryContextManager {
-        return this.contextManager;
-    }
-
-    public getAssociator(): MemoryAssociator {
-        return this.associator;
-    }
-
-    // Memory operations
-    public async storeWorkingMemory(content: string, metadata?: Map<string, any>): Promise<IMemoryUnit> {
-        const memoryId = crypto.randomUUID();
-        const metadataMap = metadata || new Map<string, any>();
-        metadataMap.set('id', memoryId);
-        metadataMap.set('type', MemoryType.WORKING);
-
-        const memory: IMemoryUnit = {
-            id: memoryId,
-            content,
-            metadata: metadataMap,
-            timestamp: new Date()
-        };
-
-        await this.workingMemory.store(content, metadataMap);
-        return memory;
-    }
-
-    public async updateWorkingMemory(memory: IMemoryUnit): Promise<void> {
-        await this.workingMemory.update(memory);
-    }
-
-    public async retrieveWorkingMemories(filter: MemoryFilter): Promise<IMemoryUnit[]> {
-        return this.workingMemory.retrieve(filter);
-    }
-
-    // Episodic Memory Methods
-    public async storeEpisodicMemory(content: string, metadata?: Map<string, any>): Promise<IMemoryUnit> {
-        const memoryId = crypto.randomUUID();
-        const metadataMap = metadata || new Map<string, any>();
-        metadataMap.set('id', memoryId);
-        metadataMap.set('type', MemoryType.EPISODIC);
-
-        const memory: IMemoryUnit = {
-            id: memoryId,
-            content,
-            metadata: metadataMap,
-            timestamp: new Date()
-        };
-
-        await this.episodicMemory.store(content, metadataMap);
-        return memory;
-    }
-
-    public async retrieveEpisodicMemories(filter: MemoryFilter): Promise<IMemoryUnit[]> {
-        return this.episodicMemory.retrieve(filter);
-    }
-
-    // Long-term Memory Methods
-    public async storeLongTerm(content: string, metadata?: Map<string, any>): Promise<IMemoryUnit> {
-        const memoryId = crypto.randomUUID();
-        const metadataMap = metadata || new Map<string, any>();
-        metadataMap.set('id', memoryId);
-        metadataMap.set('type', MemoryType.LONG_TERM);
-
-        const memory: IMemoryUnit = {
-            id: memoryId,
-            content,
-            metadata: metadataMap,
-            timestamp: new Date()
-        };
-
-        await this.longTermMemory.store(content, metadataMap);
-        return memory;
-    }
-
-    public async retrieveLongTerm(filter: MemoryFilter): Promise<IMemoryUnit[]> {
-        return this.longTermMemory.retrieve(filter);
-    }
-
-    // Context Management Methods
-    public async setContext(key: string, value: any): Promise<void> {
-        // Store in context manager
-        await this.contextManager.setContext(key, value);
-
-        // Store as contextual memory
-        const metadata = new Map<string, any>([
-            ['type', MemoryType.CONTEXTUAL],
-            ['contextSnapshot', true],
-            ['contextKey', key],
-            ['timestamp', Date.now()]
+        // Search across all memory types
+        const memories = await Promise.all([
+            this.registry.getWorkingMemory().retrieve(filter),
+            this.registry.getEpisodicMemory().retrieve(filter),
+            this.registry.getSemanticMemory().retrieve(filter),
+            this.registry.getProceduralMemory().retrieve(filter)
         ]);
 
-        await this.episodicMemory.store({ key, value }, metadata);
+        // Get all memories
+        const allMemories = memories.flat();
 
-        // Update relevant working memories with new context
-        const workingMemories = await this.workingMemory.retrieve({
-            types: [MemoryType.WORKING],
-            metadataFilters: [new Map<string, any>([['contextKey', key]])]
+        // If we have a specific memory ID, also get related memories
+        if (filter.ids && filter.ids.length === 1) {
+            const relatedMemories = await this.findRelatedMemories(filter.ids[0]);
+            allMemories.push(...relatedMemories);
+        }
+
+        // Remove duplicates and sort by relevance/recency
+        const uniqueMemories = Array.from(new Set(allMemories));
+        return this.rankMemories(uniqueMemories);
+    }
+
+    /**
+     * Rank memories by their relevance and recency
+     */
+    private rankMemories(memories: IMemoryUnit[]): IMemoryUnit[] {
+        return memories.sort((a, b) => {
+            // Get relevance scores (default to 0 if not set)
+            const relevanceA = a.metadata.get('relevance') as number || 0;
+            const relevanceB = b.metadata.get('relevance') as number || 0;
+
+            // Get timestamps (default to 0 if not set)
+            const timeA = a.metadata.get('timestamp') as number || 0;
+            const timeB = b.metadata.get('timestamp') as number || 0;
+
+            // Combine relevance and recency (weighted)
+            const scoreA = (relevanceA * 0.7) + (timeA * 0.3);
+            const scoreB = (relevanceB * 0.7) + (timeB * 0.3);
+
+            return scoreB - scoreA;  // Sort in descending order
         });
-
-        for (const memory of workingMemories) {
-            const metadata = new Map(memory.metadata);
-            metadata.set('context', value);
-            await this.workingMemory.update({
-                ...memory,
-                metadata
-            });
-        }
     }
 
-    public async setContextBatch(context: Map<string, any>): Promise<void> {
-        // Store each context value
-        for (const [key, value] of context) {
-            await this.setContext(key, value);
-        }
+    /**
+     * Associate two memories together
+     */
+    public async associate(memoryId1: string, memoryId2: string): Promise<void> {
+        await this.associator.associate(memoryId1, memoryId2);
     }
 
-    public async getContext(key: string): Promise<any> {
-        return this.contextManager.getContext(key);
+    /**
+     * Remove association between two memories
+     */
+    public async dissociate(memoryId1: string, memoryId2: string): Promise<void> {
+        await this.associator.dissociate(memoryId1, memoryId2);
     }
 
-    public async getAllContext(): Promise<Map<string, any>> {
-        const combinedContext = new Map<string, any>();
-        
-        // Get context from context manager (most recent values)
-        const currentContext = await this.contextManager.getAllContext();
-        for (const [key, value] of currentContext) {
-            combinedContext.set(key, value);
-        }
-        
-        // Get context from contextual memories
-        const relevantMemories = await this.episodicMemory.retrieve({
-            types: [MemoryType.CONTEXTUAL],
-            metadataFilters: [
-                new Map<string, any>([['contextSnapshot', true]])
-            ]
-        });
-
-        // Add memory-derived context, but don't override current context
-        for (const memory of relevantMemories) {
-            const { key, value } = memory.content;
-            if (!combinedContext.has(key)) {
-                combinedContext.set(key, value);
-            }
-        }
-
-        return combinedContext;
+    /**
+     * Find memories related to a given memory
+     */
+    public async findRelatedMemories(memoryId: string, maxResults: number = 10): Promise<IMemoryUnit[]> {
+        return this.associator.findRelatedMemories(memoryId, maxResults);
     }
 
-    public async loadContext(filter: MemoryFilter): Promise<void> {
-        const memories = await this.episodicMemory.retrieve({
-            ...filter,
-            types: [MemoryType.EPISODIC],
-            metadataFilters: [...(filter.metadataFilters || []), new Map<string, any>([['contextSnapshot', true]])]
-        });
+    /**
+     * Forget a specific memory or set of memories
+     */
+    public async forget(idOrFilter: string | MemoryFilter): Promise<void> {
+        const filter: MemoryFilter = typeof idOrFilter === 'string'
+            ? { ids: [idOrFilter] }
+            : idOrFilter;
 
-        // Load each memory's content as context
-        for (const memory of memories) {
-            const { key, value } = memory.content;
-            if (key && value !== undefined) {
-                await this.setContext(key, value);
-            }
-        }
+        // For each memory ID, remove from all memory stores
+        const ids = filter.ids || [];
+        await Promise.all(ids.map(async id => {
+            await Promise.all([
+                this.registry.getWorkingMemory().delete(id),
+                this.registry.getEpisodicMemory().delete(id),
+                this.registry.getSemanticMemory().delete(id),
+                this.registry.getProceduralMemory().delete(id)
+            ]);
+        }));
     }
 
-    // For backward compatibility
-    public async storeContextAsEpisodicMemory(context: Map<string, any>): Promise<void> {
-        await this.setContextBatch(context);
-    }
-
-    public async clearContext(): Promise<void> {
-        // Clear context from context manager
-        await this.contextManager.clearContext();
-        
-        // Clear context from episodic memories
-        const contextMemories = await this.episodicMemory.retrieve({
-            types: [MemoryType.EPISODIC],
-            metadataFilters: [new Map<string, any>([['contextSnapshot', true]])]
-        });
-
-        for (const memory of contextMemories) {
-            const memoryId = memory.id;
-            if (memoryId) {
-                await this.delete(memoryId);
-            }
-        }
-    }
-
-    // Cleanup resources
-    public stopAllCleanupTimers(): void {
-        if (this.transitionTimer) {
-            clearInterval(this.transitionTimer);
-            this.transitionTimer = null;
-        }
-        this.workingMemory.stopCleanupTimer();
-    }
-
-    // Alias for stopAllCleanupTimers for backward compatibility
-    public stopAllTimers(): void {
-        this.stopAllCleanupTimers();
-    }
-
-    public async store(content: any, metadata?: Map<string, any>): Promise<void> {
-        // Store in working memory by default
-        await this.workingMemory.store(content, metadata);
-    }
-
-    public async retrieve(idOrFilter: string | MemoryFilter): Promise<IMemoryUnit[]> {
-        if (typeof idOrFilter === 'string') {
-            const memory = await this.storage.retrieve(idOrFilter);
-            return memory ? [memory] : [];
-        }
-
-        // Search across all memory types by default
-        return this.storage.retrieveByFilter(idOrFilter);
-    }
-
-    public async cleanup(): Promise<void> {
-        // Clean up working memory
-        await this.workingMemory.cleanup();
-
-        // Clean up episodic memory
-        await this.episodicMemory.cleanup();
-
-        // Clean up long-term memory
-        await this.longTermMemory.cleanup();
-    }
-
-    async deleteMemory(id: string): Promise<void> {
-        const memory = await this.storage.retrieve(id);
-        if (!memory) {
-            throw new Error(`Memory with id ${id} not found`);
-        }
-
-        await this.delete(id);
-        
-        // Remove from working memory if present
-        await this.workingMemory.delete(id);
-        
-        // Update associations
-        if (memory.associations) {
-            for (const associatedId of memory.associations) {
-                const associatedMemory = await this.storage.retrieve(associatedId);
-                if (associatedMemory && associatedMemory.associations) {
-                    associatedMemory.associations = associatedMemory.associations.filter(aid => aid !== id);
-                    await this.storage.update(associatedMemory);
-                }
-            }
-        }
-    }
-
-    private async processMemoryUnit(memory: IMemoryUnit): Promise<void> {
-        await this.workingMemory.store(memory.content, memory.metadata);
-        await this.transitionManager.checkAndTransition(memory);
-    }
-
-    public async checkAndTransition(memory?: IMemoryUnit): Promise<void> {
-        if (memory) {
-            await this.transitionManager.checkAndTransition(memory);
-        }
+    private startMemoryManagement(interval: number): void {
+        this.transitionTimer = setInterval(() => {
+            // Periodically check for memories that need to be moved or consolidated
+            Promise.all([
+                this.transitionManager.checkAndTransition(),
+            ]).catch(console.error);
+        }, interval);
     }
 }

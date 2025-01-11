@@ -1,4 +1,5 @@
-import { IConceptGraph, ConceptNode, ConceptRelation, RelationType } from './types';
+import { IConceptGraph } from './IConceptGraph';
+import { ConceptNode, ConceptRelation, RelationType } from '../types';
 import crypto from 'crypto';
 
 /**
@@ -51,7 +52,34 @@ export class ConceptGraph implements IConceptGraph {
         return this.nodes.get(id) || null;
     }
 
-    async getRelations(nodeId: string): Promise<ConceptRelation[]> {
+    async getRelation(sourceId: string, targetId: string): Promise<ConceptRelation | null> {
+        for (const relation of this.relations.values()) {
+            if (relation.sourceId === sourceId && relation.targetId === targetId) {
+                return relation;
+            }
+        }
+        return null;
+    }
+
+    async getNeighbors(concept: string): Promise<ConceptNode[]> {
+        const neighbors: ConceptNode[] = [];
+        const neighborIds = this.adjacencyList.get(concept);
+        if (neighborIds) {
+            for (const id of neighborIds) {
+                const node = await this.getNode(id);
+                if (node) {
+                    neighbors.push(node);
+                }
+            }
+        }
+        return neighbors;
+    }
+
+    async getRelations(concept: string): Promise<ConceptRelation[]> {
+        return this.getNodeRelations(concept);
+    }
+
+    async getNodeRelations(nodeId: string): Promise<ConceptRelation[]> {
         const relations: ConceptRelation[] = [];
         for (const relation of this.relations.values()) {
             if (relation.sourceId === nodeId || relation.targetId === nodeId) {
@@ -61,27 +89,72 @@ export class ConceptGraph implements IConceptGraph {
         return relations;
     }
 
-    async updateNode(node: ConceptNode): Promise<void> {
-        if (!this.nodes.has(node.id)) {
-            throw new Error(`Node with id ${node.id} not found`);
-        }
-        this.nodes.set(node.id, { ...node });
+    async findConcepts(pattern: string): Promise<ConceptNode[]> {
+        const regex = new RegExp(pattern, 'i');
+        return Array.from(this.nodes.values()).filter(
+            node => regex.test(node.name) || (node.label && regex.test(node.label))
+        );
     }
 
-    async updateRelation(relation: ConceptRelation): Promise<void> {
-        if (!this.relations.has(relation.id)) {
-            throw new Error(`Relation with id ${relation.id} not found`);
+    async findRelations(criteria: {
+        type?: string;
+        source?: string;
+        target?: string;
+    }): Promise<ConceptRelation[]> {
+        return Array.from(this.relations.values()).filter(relation => {
+            if (criteria.type && relation.type !== criteria.type) return false;
+            if (criteria.source && relation.sourceId !== criteria.source) return false;
+            if (criteria.target && relation.targetId !== criteria.target) return false;
+            return true;
+        });
+    }
+
+    async getAllNodes(): Promise<ConceptNode[]> {
+        return Array.from(this.nodes.values());
+    }
+
+    async getAllRelations(): Promise<ConceptRelation[]> {
+        return Array.from(this.relations.values());
+    }
+
+    async findPath(source: string, target: string): Promise<ConceptNode[]> {
+        // Simple BFS implementation
+        const queue: string[] = [source];
+        const visited = new Set<string>();
+        const parent = new Map<string, string>();
+
+        while (queue.length > 0) {
+            const current = queue.shift()!;
+            if (current === target) {
+                // Reconstruct path
+                const path: string[] = [current];
+                let node = current;
+                while (parent.has(node)) {
+                    node = parent.get(node)!;
+                    path.unshift(node);
+                }
+                return Promise.all(path.map(id => this.getNode(id))).then(
+                    nodes => nodes.filter((n): n is ConceptNode => n !== null)
+                );
+            }
+
+            visited.add(current);
+            const neighbors = this.adjacencyList.get(current) || new Set();
+            for (const neighbor of neighbors) {
+                if (!visited.has(neighbor)) {
+                    queue.push(neighbor);
+                    parent.set(neighbor, current);
+                }
+            }
         }
-        this.relations.set(relation.id, { ...relation });
+
+        return [];
     }
 
     async deleteNode(id: string): Promise<void> {
         // Remove all relations involving this node
-        for (const relation of this.relations.values()) {
-            if (relation.sourceId === id || relation.targetId === id) {
-                await this.deleteRelation(relation.id);
-            }
-        }
+        const relations = await this.getNodeRelations(id);
+        await Promise.all(relations.map(relation => this.deleteRelation(relation)));
 
         // Remove from adjacency list
         this.adjacencyList.delete(id);
@@ -93,125 +166,20 @@ export class ConceptGraph implements IConceptGraph {
         this.nodes.delete(id);
     }
 
-    async deleteRelation(id: string): Promise<void> {
-        const relation = this.relations.get(id);
-        if (relation) {
-            // Update adjacency list
-            this.adjacencyList.get(relation.sourceId)?.delete(relation.targetId);
-            if (relation.type === RelationType.SIMILAR_TO || 
-                relation.type === RelationType.RELATED_TO) {
-                this.adjacencyList.get(relation.targetId)?.delete(relation.sourceId);
-            }
+    async deleteRelation(relation: ConceptRelation): Promise<void> {
+        this.relations.delete(relation.id);
+        
+        // Update adjacency list
+        this.adjacencyList.get(relation.sourceId)?.delete(relation.targetId);
+        if (relation.type === RelationType.SIMILAR_TO || 
+            relation.type === RelationType.RELATED_TO) {
+            this.adjacencyList.get(relation.targetId)?.delete(relation.sourceId);
         }
-        this.relations.delete(id);
     }
 
-    async findNodes(query: string): Promise<ConceptNode[]> {
-        const results: ConceptNode[] = [];
-        const queryLower = query.toLowerCase();
-
-        for (const node of this.nodes.values()) {
-            if (node.label.toLowerCase().includes(queryLower) ||
-                node.type.toLowerCase().includes(queryLower)) {
-                results.push({ ...node });
-            }
-        }
-
-        return results;
-    }
-
-    async findPath(sourceId: string, targetId: string): Promise<ConceptRelation[]> {
-        if (!this.nodes.has(sourceId) || !this.nodes.has(targetId)) {
-            throw new Error('Source or target node does not exist');
-        }
-
-        // Use BFS to find shortest path
-        const queue: { nodeId: string; path: ConceptRelation[] }[] = [{ nodeId: sourceId, path: [] }];
-        const visited = new Set<string>([sourceId]);
-
-        while (queue.length > 0) {
-            const { nodeId, path } = queue.shift()!;
-
-            // Check all relations from this node
-            const neighbors = this.adjacencyList.get(nodeId) || new Set();
-            for (const neighborId of neighbors) {
-                if (neighborId === targetId) {
-                    // Found the target, construct the final path
-                    const relation = Array.from(this.relations.values())
-                        .find(r => r.sourceId === nodeId && r.targetId === neighborId);
-                    return [...path, relation!];
-                }
-
-                if (!visited.has(neighborId)) {
-                    visited.add(neighborId);
-                    const relation = Array.from(this.relations.values())
-                        .find(r => r.sourceId === nodeId && r.targetId === neighborId);
-                    queue.push({
-                        nodeId: neighborId,
-                        path: [...path, relation!]
-                    });
-                }
-            }
-        }
-
-        return []; // No path found
-    }
-
-    async getMostConfident(nodeIds: string[]): Promise<ConceptNode> {
-        let mostConfident: ConceptNode | null = null;
-
-        for (const id of nodeIds) {
-            const node = await this.getNode(id);
-            if (node && (!mostConfident || node.confidence > mostConfident.confidence)) {
-                mostConfident = node;
-            }
-        }
-
-        if (!mostConfident) {
-            throw new Error('No valid nodes found');
-        }
-
-        return mostConfident;
-    }
-
-    async merge(source: ConceptNode, target: ConceptNode): Promise<ConceptNode> {
-        // Create a new node combining properties of both
-        const mergedNode: ConceptNode = {
-            id: target.id,
-            label: target.confidence >= source.confidence ? target.label : source.label,
-            type: target.type,
-            properties: new Map([...source.properties, ...target.properties]),
-            confidence: Math.max(source.confidence, target.confidence),
-            lastUpdated: new Date(),
-            source: [...new Set([...source.source, ...target.source])]
-        };
-
-        // Update the node
-        await this.updateNode(mergedNode);
-
-        // Redirect all relations from source to target
-        const sourceRelations = await this.getRelations(source.id);
-        for (const relation of sourceRelations) {
-            if (relation.sourceId === source.id) {
-                await this.addRelation({
-                    ...relation,
-                    id: crypto.randomUUID(),
-                    sourceId: target.id,
-                    confidence: Math.max(relation.confidence, 0.8) // Boost confidence for verified relations
-                });
-            } else {
-                await this.addRelation({
-                    ...relation,
-                    id: crypto.randomUUID(),
-                    targetId: target.id,
-                    confidence: Math.max(relation.confidence, 0.8)
-                });
-            }
-        }
-
-        // Delete the source node and its relations
-        await this.deleteNode(source.id);
-
-        return mergedNode;
+    async clear(): Promise<void> {
+        this.nodes.clear();
+        this.relations.clear();
+        this.adjacencyList.clear();
     }
 }

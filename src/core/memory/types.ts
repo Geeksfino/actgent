@@ -6,11 +6,11 @@ export interface IMemoryUnit {
     content: any;
     metadata: Map<string, any>;
     timestamp: Date;
-    priority?: number;
     accessCount?: number;
     lastAccessed?: Date;
-    associations?: string[]; // IDs of related memories
+    priority?: number;
     consolidationMetrics?: ConsolidationMetrics;
+    associations?: Set<string>;
 }
 
 /**
@@ -87,11 +87,28 @@ export interface IEpisodicMemoryUnit extends IMemoryUnit {
 }
 
 /**
+ * Enum for relation types in semantic memory
+ */
+export enum RelationType {
+    IS_A = 'is_a',
+    HAS_A = 'has_a',
+    PART_OF = 'part_of',
+    SIMILAR_TO = 'similar_to',
+    RELATED_TO = 'related_to',
+    CAUSES = 'causes',
+    FOLLOWS = 'follows',
+    USED_FOR = 'used_for',
+    LOCATED_IN = 'located_in',
+    MEMBER_OF = 'member_of'
+}
+
+/**
  * Concept node in semantic memory
  */
 export interface ConceptNode {
     id: string;
     name: string;
+    label?: string;
     confidence: number;
     source: string;
     lastVerified: Date;
@@ -102,9 +119,10 @@ export interface ConceptNode {
  * Concept relation in semantic memory
  */
 export interface ConceptRelation {
+    id: string;
     sourceId: string;
     targetId: string;
-    type: string;
+    type: RelationType;
     weight: number;
     confidence: number;
 }
@@ -129,13 +147,12 @@ export interface ISemanticMemoryUnit extends IMemoryUnit {
  */
 export enum MemoryType {
     WORKING = 'working',
-    EPISODIC = 'episodic',
+    LONG_TERM = 'long_term',
+    DECLARATIVE = 'declarative',
     SEMANTIC = 'semantic',
+    EPISODIC = 'episodic',
     PROCEDURAL = 'procedural',
-    PERCEPTUAL = 'perceptual',
-    SOCIAL = 'social',
-    CONTEXTUAL = 'contextual',
-    LONG_TERM = 'long_term'
+    CONTEXTUAL = 'contextual'
 }
 
 /**
@@ -349,25 +366,19 @@ export interface IMemoryMetadata {
  * Filter type for memory queries
  */
 export interface MemoryFilter {
+    id?: string;
+    ids?: string[];
     types?: MemoryType[];
     metadataFilters?: Map<string, any>[];
     contentFilters?: Map<string, any>[];
-    contextFilter?: Map<string, any>;
-    dateRange?: {
-        start: Date;
-        end: Date;
-    };
-    ids?: string[];
     query?: string;
+    dateRange?: {
+        start?: Date;
+        end?: Date;
+    };
     minPriority?: number;
     maxPriority?: number;
-    consolidationStatus?: ConsolidationStatus;
-    minAccessCount?: number;
-    associatedWith?: string[]; // Filter memories associated with these IDs
-    // Time range for backward compatibility
-    startTime?: Date;
-    endTime?: Date;
-    // Direct metadata filter for backward compatibility
+    type?: MemoryType;
     metadata?: Map<string, any>;
 }
 
@@ -387,11 +398,9 @@ export interface IMemoryStorage {
     store(memory: IMemoryUnit): Promise<void>;
     retrieve(id: string): Promise<IMemoryUnit | null>;
     retrieveByFilter(filter: MemoryFilter): Promise<IMemoryUnit[]>;
+    batchRetrieve(ids: string[]): Promise<(IMemoryUnit | null)[]>;
     update(memory: IMemoryUnit): Promise<void>;
     delete(id: string): Promise<void>;
-    clear(): Promise<void>;
-    batchStore(memories: IMemoryUnit[]): Promise<void>;
-    batchRetrieve(ids: string[]): Promise<(IMemoryUnit | null)[]>;
 }
 
 /**
@@ -399,11 +408,10 @@ export interface IMemoryStorage {
  */
 export interface IMemoryIndex {
     add(memory: IMemoryUnit): Promise<void>;
-    index(memory: IMemoryUnit): Promise<void>;  // Alias for add for backward compatibility
     search(query: string): Promise<string[]>;
     update(memory: IMemoryUnit): Promise<void>;
-    remove(id: string): Promise<void>;
-    batchIndex(memories: IMemoryUnit[]): Promise<void>;
+    delete(id: string): Promise<void>;
+    index?: (memory: IMemoryUnit) => Promise<void>;
 }
 
 /**
@@ -441,11 +449,16 @@ export interface IMemoryContextManager {
  * Consolidation metrics
  */
 export interface ConsolidationMetrics {
-    semanticSimilarity?: number;     // NLP-based similarity score
-    contextualOverlap?: number;      // Shared context score
-    temporalProximity?: number;      // Time-based relevance
-    sourceReliability?: number;      // Source credibility score
-    confidenceScore?: number;        // Overall confidence in the consolidation
+    semanticSimilarity?: number;
+    contextualOverlap?: number;
+    temporalProximity?: number;
+    sourceReliability?: number;
+    confidenceScore?: number;
+    accessCount?: number;
+    lastAccessed?: Date;
+    createdAt?: Date;
+    importance?: number;
+    relevance?: number;
 }
 
 /**
@@ -477,28 +490,8 @@ export function buildQueryFromFilter(filter: MemoryFilter): string {
         }
     }
 
-    if (filter.ids?.length) {
-        queryParts.push(`id:(${filter.ids.join(' OR ')})`);
-    }
-
-    if (filter.minPriority !== undefined) {
-        queryParts.push(`priority >= ${filter.minPriority}`);
-    }
-
-    if (filter.maxPriority !== undefined) {
-        queryParts.push(`priority <= ${filter.maxPriority}`);
-    }
-
-    if (filter.consolidationStatus) {
-        queryParts.push(`consolidationStatus:${filter.consolidationStatus}`);
-    }
-
-    if (filter.minAccessCount !== undefined) {
-        queryParts.push(`accessCount >= ${filter.minAccessCount}`);
-    }
-
-    if (filter.associatedWith?.length) {
-        queryParts.push(`associations:(${filter.associatedWith.join(' OR ')})`);
+    if (filter.id) {
+        queryParts.push(`id:${filter.id}`);
     }
 
     if (filter.metadataFilters?.length) {
@@ -514,12 +507,6 @@ export function buildQueryFromFilter(filter: MemoryFilter): string {
             for (const [key, value] of contentFilter.entries()) {
                 queryParts.push(`content.${key}:${value}`);
             }
-        }
-    }
-
-    if (filter.contextFilter?.size) {
-        for (const [key, value] of filter.contextFilter.entries()) {
-            queryParts.push(`context.${key}:${value}`);
         }
     }
 

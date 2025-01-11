@@ -1,7 +1,15 @@
 import { WorkingMemory } from './WorkingMemory';
 import { EpisodicMemory } from './EpisodicMemory';
 import { LongTermMemory } from './LongTermMemory';
-import { IMemoryStorage, IMemoryIndex, MemoryType, MemoryFilter, IMemoryUnit, IMemoryContextManager } from './types';
+import { 
+    IMemoryStorage, 
+    IMemoryIndex, 
+    MemoryType, 
+    MemoryFilter, 
+    IMemoryUnit, 
+    IMemoryContextManager,
+    ConsolidationMetrics 
+} from './types';
 import crypto from 'crypto';
 
 const CACHE_TTL = 60 * 1000; // 1 minute
@@ -14,7 +22,6 @@ export class MemoryContextManager implements IMemoryContextManager {
     private readonly MAX_HISTORY_SIZE = 10;
     private workingMemory: WorkingMemory;
     private episodicMemory: EpisodicMemory;
-    private longTermMemory: LongTermMemory;
     private contextCache: Map<string, { value: any, timestamp: number }>;
     private listeners: ((key: string, value: any) => void)[];
 
@@ -23,7 +30,6 @@ export class MemoryContextManager implements IMemoryContextManager {
         this.index = index;
         this.workingMemory = new WorkingMemory(storage, index);
         this.episodicMemory = new EpisodicMemory(storage, index);
-        this.longTermMemory = new LongTermMemory(storage, index);
         this.contextCache = new Map();
         this.listeners = [];
     }
@@ -49,12 +55,33 @@ export class MemoryContextManager implements IMemoryContextManager {
             ['timestamp', Date.now()]
         ]);
 
-        await this.storage.store({
+        const consolidationMetrics: ConsolidationMetrics = {
+            semanticSimilarity: 0,
+            contextualOverlap: 0,
+            temporalProximity: 0,
+            sourceReliability: 0,
+            confidenceScore: 0,
+            accessCount: 0,
+            lastAccessed: new Date(),
+            createdAt: new Date(),
+            importance: 1.0,
+            relevance: 1.0
+        };
+
+        const memory: IMemoryUnit = {
             id: crypto.randomUUID(),
             content: { key, value },
             metadata,
-            timestamp: new Date()
-        });
+            timestamp: new Date(),
+            priority: 1.0,
+            consolidationMetrics,
+            associations: new Set<string>()
+        };
+
+        await this.storage.store(memory);
+        if (this.index.index) {
+            await this.index.index(memory);
+        }
 
         // Notify listeners
         this.notifyContextChange(key, value);
@@ -96,78 +123,53 @@ export class MemoryContextManager implements IMemoryContextManager {
             }
         }
 
-        // Update current context with loaded values
+        // Update current context
         for (const [key, { value }] of contextByKey) {
             this.currentContext.set(key, value);
         }
     }
 
     async storeContextAsEpisodicMemory(context: Map<string, any>): Promise<void> {
-        const metadata = new Map<string, any>([
-            ['type', MemoryType.EPISODIC],
-            ['contextSnapshot', true],
-            ['timestamp', Date.now()]
-        ]);
+        const consolidationMetrics: ConsolidationMetrics = {
+            semanticSimilarity: 0,
+            contextualOverlap: 0,
+            temporalProximity: 0,
+            sourceReliability: 0,
+            confidenceScore: 0,
+            accessCount: 0,
+            lastAccessed: new Date(),
+            createdAt: new Date(),
+            importance: 1.0,
+            relevance: 1.0
+        };
 
-        await this.storage.store({
+        const memory: IMemoryUnit = {
             id: crypto.randomUUID(),
             content: Object.fromEntries(context),
-            metadata,
-            timestamp: new Date()
-        });
+            metadata: new Map([['type', MemoryType.EPISODIC]]),
+            timestamp: new Date(),
+            priority: 1.0,
+            consolidationMetrics,
+            associations: new Set<string>()
+        };
+
+        await this.storage.store(memory);
+        if (this.index.index) {
+            await this.index.index(memory);
+        }
     }
 
-    async getContextHistory(key: string): Promise<{ value: any, timestamp: number }[]> {
-        return this.contextHistory.get(key) || [];
-    }
-
-    async persistContext(): Promise<void> {
-        // Store all current context in episodic memory
-        await this.episodicMemory.store(
-            Object.fromEntries(this.currentContext),
-            new Map<string, any>([
-                ['type', MemoryType.CONTEXTUAL],
-                ['timestamp', new Date('2025-01-07T22:13:44+08:00').toISOString()]
-            ])
-        );
-    }
-
-    async retrieve(filter: MemoryFilter): Promise<IMemoryUnit[]> {
-        const contextMemories = await this.storage.retrieveByFilter({
-            ...filter,
-            types: [...(filter.types || []), MemoryType.CONTEXTUAL]
-        });
-
-        // Sort by timestamp (most recent first)
-        return contextMemories.sort((a, b) => {
-            const aTime = a.metadata.get('timestamp') || 0;
-            const bTime = b.metadata.get('timestamp') || 0;
-            return bTime - aTime;
-        });
+    onContextChange(listener: (key: string, value: any) => void): void {
+        this.listeners.push(listener);
     }
 
     private notifyContextChange(key: string, value: any): void {
-        this.listeners.forEach(listener => {
+        for (const listener of this.listeners) {
             try {
                 listener(key, value);
             } catch (error) {
                 console.error('Error in context change listener:', error);
             }
-        });
-    }
-
-    addContextChangeListener(listener: (key: string, value: any) => void): void {
-        this.listeners.push(listener);
-    }
-
-    removeContextChangeListener(listener: (key: string, value: any) => void): void {
-        const index = this.listeners.indexOf(listener);
-        if (index !== -1) {
-            this.listeners.splice(index, 1);
         }
-    }
-
-    cleanup(): void {
-        this.workingMemory.stopCleanupTimer();
     }
 }

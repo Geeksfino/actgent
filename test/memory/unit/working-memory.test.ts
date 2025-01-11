@@ -211,19 +211,13 @@ describe('WorkingMemory', () => {
 
         await workingMemory.store(initialContent, initialMetadata);
 
-        // Update memory with new content
-        const updatedContent = { text: 'updated content' };
-        const memories = await workingMemory.retrieve({ types: [MemoryType.WORKING] });
-        expect(memories.length).toBe(1);
-
-        const memory = memories[0];
-        memory.content = updatedContent;
-        await workingMemory.updateMemory(memory);
+        // Update memory
+        await workingMemory.updateContext('test', 'updated content', new Map([['priority', 2]]));
 
         // Verify update
         const updatedMemories = await workingMemory.retrieve({ types: [MemoryType.WORKING] });
         expect(updatedMemories.length).toBe(1);
-        expect(updatedMemories[0].content).toEqual(updatedContent);
+        expect(updatedMemories[0].content).toEqual({ text: 'updated content' });
     });
 
     test('should handle batch operations', async () => {

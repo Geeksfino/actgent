@@ -53,12 +53,12 @@ export class InMemoryIndex implements IMemoryIndex {
 
     async update(memory: IMemoryUnit): Promise<void> {
         // Remove old indices
-        await this.remove(memory.id);
+        await this.delete(memory.id);
         // Add new indices
         await this.index(memory);
     }
 
-    async remove(id: string): Promise<void> {
+    async delete(id: string): Promise<void> {
         // Remove from memories
         this.memories.delete(id);
 

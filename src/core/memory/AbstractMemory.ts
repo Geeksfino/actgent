@@ -43,20 +43,23 @@ class MemoryCache {
 }
 
 /**
- * Abstract base class for all memory systems
+ * Abstract base class for all memory types
  */
-export abstract class BaseMemorySystem extends EventEmitter {
+export abstract class AbstractMemory extends EventEmitter {
     protected storage: IMemoryStorage;
     protected index: IMemoryIndex;
     protected cache: MemoryCache;
+    protected memoryType: MemoryType;
     private cleanupTimer: ReturnType<typeof setInterval> | null = null;
     private readonly CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
-    constructor(storage: IMemoryStorage, index: IMemoryIndex) {
+    constructor(storage: IMemoryStorage, index: IMemoryIndex, type: MemoryType) {
         super();
         this.storage = storage;
         this.index = index;
         this.cache = new MemoryCache();
+        this.memoryType = type;
+        this.startCleanupTimer();
     }
 
     /**
@@ -85,7 +88,7 @@ export abstract class BaseMemorySystem extends EventEmitter {
     /**
      * Store memory unit with specific type
      */
-    protected async storeWithType(content: any, metadata: any, type: MemoryType): Promise<void> {
+    protected async storeWithType(content: any, metadata: any): Promise<IMemoryUnit> {
         // Convert metadata to Map if it's not already
         const metadataMap = metadata instanceof Map ? metadata : new Map(Object.entries(metadata || {}));
 
@@ -100,7 +103,7 @@ export abstract class BaseMemorySystem extends EventEmitter {
         };
 
         // Set memory type
-        memory.metadata.set('type', type.toString());
+        memory.metadata.set('type', this.memoryType.toString());
 
         // Store memory
         await this.storage.store(memory);
@@ -109,16 +112,18 @@ export abstract class BaseMemorySystem extends EventEmitter {
 
         // Emit memory stored event
         this.emit('memoryStored', memory);
+
+        return memory;
     }
 
     /**
      * Retrieve memories of specific type
      */
-    protected async retrieveWithType(filter: MemoryFilter, type: MemoryType): Promise<IMemoryUnit[]> {
+    protected async retrieveWithType(filter: MemoryFilter): Promise<IMemoryUnit[]> {
         // Create a new filter object with the specified type
         const memoryFilter: MemoryFilter = {
             ...filter,
-            types: [type],
+            types: [this.memoryType],
             ...(filter.query && { query: filter.query }),
             ...(filter.dateRange && { dateRange: filter.dateRange }),
             ...(filter.metadataFilters && { metadataFilters: filter.metadataFilters })
@@ -137,6 +142,24 @@ export abstract class BaseMemorySystem extends EventEmitter {
     }
 
     /**
+     * Store content with metadata
+     */
+    public async store(content: any, metadata?: any): Promise<IMemoryUnit> {
+        return this.storeWithType(content, metadata);
+    }
+
+    /**
+     * Retrieve memories based on filter
+     */
+    public async retrieve(idOrFilter: string | MemoryFilter): Promise<IMemoryUnit[]> {
+        if (typeof idOrFilter === 'string') {
+            const memory = await this.storage.retrieve(idOrFilter);
+            return memory ? [memory] : [];
+        }
+        return this.retrieveWithType(idOrFilter);
+    }
+
+    /**
      * Update memory unit
      */
     public async update(memory: IMemoryUnit): Promise<void> {
@@ -150,7 +173,7 @@ export abstract class BaseMemorySystem extends EventEmitter {
      */
     public async delete(id: string): Promise<void> {
         await this.storage.delete(id);
-        await this.index.remove(id);
+        await this.index.delete(id);
         this.cache.delete(id);
     }
 
@@ -169,17 +192,60 @@ export abstract class BaseMemorySystem extends EventEmitter {
     }
 
     /**
+     * Get memory type
+     */
+    public getType(): MemoryType {
+        return this.memoryType;
+    }
+
+    /**
+     * Build search query from filter
+     */
+    protected buildQuery(filter: MemoryFilter): string {
+        const queryParts: string[] = [];
+
+        if (filter.types?.length) {
+            queryParts.push(`type:(${filter.types.join(' OR ')})`);
+        }
+
+        if (filter.dateRange) {
+            if (filter.dateRange.start) {
+                queryParts.push(`timestamp >= ${filter.dateRange.start.toISOString()}`);
+            }
+            if (filter.dateRange.end) {
+                queryParts.push(`timestamp <= ${filter.dateRange.end.toISOString()}`);
+            }
+        }
+
+        if (filter.id) {
+            queryParts.push(`id:${filter.id}`);
+        }
+
+        if (filter.metadataFilters?.length) {
+            for (const metadataFilter of filter.metadataFilters) {
+                for (const [key, value] of metadataFilter.entries()) {
+                    queryParts.push(`metadata.${key}:${value}`);
+                }
+            }
+        }
+
+        if (filter.contentFilters?.length) {
+            for (const contentFilter of filter.contentFilters) {
+                for (const [key, value] of contentFilter.entries()) {
+                    queryParts.push(`content.${key}:${value}`);
+                }
+            }
+        }
+
+        if (filter.query) {
+            queryParts.push(filter.query);
+        }
+
+        return queryParts.join(' AND ');
+    }
+
+    /**
      * Abstract cleanup method to be implemented by derived classes
      */
-    protected abstract cleanup(): Promise<void>;
-
-    /**
-     * Abstract method for type-specific store operation
-     */
-    public abstract store(content: any, metadata?: any): Promise<void>;
-
-    /**
-     * Abstract method for type-specific retrieve operation
-     */
-    public abstract retrieve(idOrFilter: string | MemoryFilter): Promise<IMemoryUnit[]>;
+    public abstract cleanup(): Promise<void>;
 }

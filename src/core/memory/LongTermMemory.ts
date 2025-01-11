@@ -1,85 +1,50 @@
-import { BaseMemorySystem } from './BaseMemorySystem';
-import { DeclarativeMemory } from './DeclarativeMemory';
-import { ProceduralMemory } from './ProceduralMemory';
-import { IMemoryUnit, MemoryFilter, IMemoryStorage, IMemoryIndex, MemoryType } from './types';
+import { AbstractMemory } from './AbstractMemory';
+import { IMemoryUnit, IMemoryStorage, IMemoryIndex, MemoryFilter, MemoryType } from './types';
 
-export class LongTermMemory extends BaseMemorySystem {
+/**
+ * Base class for long-term memory types
+ */
+export abstract class LongTermMemory extends AbstractMemory {
     constructor(storage: IMemoryStorage, index: IMemoryIndex) {
-        super(storage, index);
-        this.startCleanupTimer();
+        super(storage, index, MemoryType.LONG_TERM);
     }
 
     /**
-     * Store content in long-term memory
+     * Store content with metadata in long-term memory
      */
-    public async store(content: any, metadata: any = {}): Promise<void> {
-        const metadataMap = metadata instanceof Map ? metadata : new Map(Object.entries(metadata || {}));
-        
-        // Determine memory type based on content and metadata
-        let type = metadataMap.get('type');
-        if (!type) {
-            // Default classification logic
-            if (typeof content === 'object') {
-                if ('event' in content || 'temporal' in content || 'location' in content) {
-                    type = MemoryType.EPISODIC;
-                } else if ('procedure' in content || 'steps' in content) {
-                    type = MemoryType.PROCEDURAL;
-                } else if ('concept' in content || 'relations' in content) {
-                    type = MemoryType.SEMANTIC;
-                } else {
-                    // Default to EPISODIC if no clear indicators
-                    type = MemoryType.EPISODIC;
-                }
-            } else {
-                // Default to EPISODIC for non-object content
-                type = MemoryType.EPISODIC;
-            }
-            metadataMap.set('type', type);
-        }
+    async store(content: any, metadata?: Map<string, any>): Promise<IMemoryUnit> {
+        const memoryId = this.generateId();
+        const metadataMap = new Map(metadata || []);
+        metadataMap.set('id', memoryId);
+        metadataMap.set('type', this.memoryType);
 
-        // Set memory ID if not provided
-        if (!metadataMap.has('id')) {
-            metadataMap.set('id', this.generateId());
-        }
+        const memory: IMemoryUnit = {
+            id: memoryId,
+            content,
+            metadata: metadataMap,
+            timestamp: new Date()
+        };
 
-        await this.storeWithType(content, metadataMap, type);
+        await this.storage.store(memory);
+        this.cache.set(memoryId, memory);
+        return memory;
     }
 
     /**
-     * Retrieve long-term memories
+     * Retrieve memories based on filter
      */
-    public async retrieve(idOrFilter: string | MemoryFilter): Promise<IMemoryUnit[]> {
-        if (typeof idOrFilter === 'string') {
-            const memory = await this.storage.retrieve(idOrFilter);
-            if (!memory || 
-                ![MemoryType.SEMANTIC, MemoryType.EPISODIC, MemoryType.PROCEDURAL].includes(memory.metadata.get('type'))) {
-                return [];
-            }
-            memory.accessCount = (memory.accessCount || 0) + 1;
-            memory.lastAccessed = new Date();
-            await this.update(memory);
-            return [memory];
-        }
-
-        // For long-term memory, we can retrieve multiple types
-        const types = idOrFilter.types || [MemoryType.SEMANTIC, MemoryType.EPISODIC, MemoryType.PROCEDURAL];
-        const allMemories = await Promise.all(
-            types.map(type => this.retrieveWithType(idOrFilter, type))
-        );
-
-        return allMemories.flat();
+    async retrieve(filter: MemoryFilter): Promise<IMemoryUnit[]> {
+        return this.storage.retrieveByFilter({
+            ...filter,
+            types: [this.memoryType]
+        });
     }
 
     /**
-     * Clean up old or irrelevant memories
+     * Clean up resources
      */
-    public async cleanup(): Promise<void> {
-        await this.performCleanup();
-    }
-
-    protected async performCleanup(): Promise<void> {
-        // Implement cleanup logic for long-term memory
-        // For now, we don't clean up long-term memories as they should be permanent
-        // unless explicitly deleted
+    async cleanup(): Promise<void> {
+        // Implement cleanup logic specific to long-term memory
+        this.cache.clear();
     }
 }

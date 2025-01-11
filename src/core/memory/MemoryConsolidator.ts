@@ -5,20 +5,15 @@ import {
     IMemoryStorage, 
     IMemoryIndex,
     MemoryType,
-    MemoryFilter
+    MemoryFilter,
+    ConsolidationMetrics
 } from './types';
+import crypto from 'crypto';
 
 export interface ConsolidationTrigger {
     type: 'access_count' | 'time_based' | 'priority_change' | 'context_switch' | 'memory_capacity';
     threshold: number;
     lastCheck?: number;
-}
-
-export interface ConsolidationMetrics {
-    temporalProximity?: number;
-    sourceReliability?: number;
-    semanticSimilarity?: number;
-    confidenceScore?: number;
 }
 
 export class MemoryConsolidator implements IMemoryConsolidation {
@@ -76,8 +71,11 @@ export class MemoryConsolidator implements IMemoryConsolidation {
 
         const memories = await this.storage.retrieveByFilter(filter);
         return memories.filter(memory => {
-            const accessCount = memory.accessCount || 0;
-            const lastAccessed = memory.lastAccessed?.getTime() || memory.timestamp.getTime();
+            const metrics = memory.consolidationMetrics;
+            if (!metrics) return false;
+
+            const accessCount = metrics.accessCount || 0;
+            const lastAccessed = metrics.lastAccessed?.getTime() || memory.timestamp.getTime();
             const age = Date.now() - lastAccessed;
 
             // Optimize memories with low access counts and old age
@@ -129,21 +127,28 @@ export class MemoryConsolidator implements IMemoryConsolidation {
     }
 
     private async calculateConsolidationMetrics(memories: IMemoryUnit[]): Promise<ConsolidationMetrics> {
-        const metrics: ConsolidationMetrics = {};
+        const metrics: ConsolidationMetrics = {
+            accessCount: 0,
+            lastAccessed: new Date(),
+            createdAt: new Date(),
+            importance: 0,
+            relevance: 0
+        };
         
         try {
             // Calculate temporal proximity (0-1 score based on time difference)
             const timestamps = memories.map(m => m.timestamp.getTime());
             const timeRange = Math.max(...timestamps) - Math.min(...timestamps);
-            metrics.temporalProximity = Math.exp(-timeRange / (24 * 60 * 60 * 1000)); // Decay over 24 hours
+            const temporalProximity = Math.exp(-timeRange / (24 * 60 * 60 * 1000)); // Decay over 24 hours
 
             // Calculate source reliability (based on memory metadata)
-            metrics.sourceReliability = memories.reduce((acc, m) => {
+            const sourceReliability = memories.reduce((acc, m) => {
                 const reliability = m.metadata.get('sourceReliability') || 0.5;
                 return acc + reliability;
             }, 0) / memories.length;
 
             // Calculate semantic similarity if NLP service is available
+            let semanticSimilarity = 0;
             if (this.nlpService) {
                 const contents = memories.map(m => JSON.stringify(m.content));
                 const similarities = await Promise.all(
@@ -157,26 +162,23 @@ export class MemoryConsolidator implements IMemoryConsolidation {
                         return scores.reduce((a, b) => a + b, 0) / scores.length;
                     })
                 );
-                metrics.semanticSimilarity = similarities.reduce((a, b) => a + b, 0) / similarities.length;
+                semanticSimilarity = similarities.reduce((a, b) => a + b, 0) / similarities.length;
             }
 
-            // Calculate overall confidence score
-            const weights = {
-                temporal: 0.2,
-                semantic: 0.4,
-                source: 0.4
-            };
+            // Calculate importance based on access patterns and age
+            metrics.accessCount = memories.reduce((acc, m) => acc + (m.consolidationMetrics?.accessCount || 0), 0);
+            metrics.lastAccessed = new Date(Math.max(...memories.map(m => m.consolidationMetrics?.lastAccessed?.getTime() || 0)));
+            metrics.createdAt = new Date(Math.min(...memories.map(m => m.consolidationMetrics?.createdAt?.getTime() || Date.now())));
 
-            metrics.confidenceScore = (
-                (metrics.temporalProximity || 0) * weights.temporal +
-                (metrics.semanticSimilarity || 0) * weights.semantic +
-                (metrics.sourceReliability || 0) * weights.source
-            );
+            // Calculate importance and relevance
+            metrics.importance = memories.reduce((acc, m) => acc + (m.priority || 0), 0) / memories.length;
+            metrics.relevance = (temporalProximity + sourceReliability + semanticSimilarity) / 3;
 
         } catch (error) {
             console.error('Error calculating consolidation metrics:', error);
             // Provide default metrics on error
-            metrics.confidenceScore = 0.5;
+            metrics.importance = 0.5;
+            metrics.relevance = 0.5;
         }
 
         return metrics;
@@ -189,11 +191,10 @@ export class MemoryConsolidator implements IMemoryConsolidation {
             // Calculate consolidation metrics
             const metrics = await this.calculateConsolidationMetrics(memories);
             
-            // Only proceed if confidence is high enough
-            if (metrics.confidenceScore && metrics.confidenceScore >= this.consolidationThreshold) {
+            // Only proceed if relevance is high enough
+            if ((metrics.relevance ?? 0) >= this.consolidationThreshold / 10) {
                 // Create consolidated memory with metrics
-                const consolidated = await this.createConsolidatedMemory(memories);
-                consolidated.consolidationMetrics = metrics;
+                const consolidated = await this.createConsolidatedMemory(memories, metrics);
 
                 // Store the consolidated memory
                 await this.storage.store(consolidated);
@@ -212,7 +213,7 @@ export class MemoryConsolidator implements IMemoryConsolidation {
         }
     }
 
-    private async createConsolidatedMemory(memories: IMemoryUnit[]): Promise<IMemoryUnit> {
+    private async createConsolidatedMemory(memories: IMemoryUnit[], metrics: ConsolidationMetrics): Promise<IMemoryUnit> {
         // Combine content from all memories
         const combinedContent = memories.reduce((acc, memory) => {
             if (typeof memory.content === 'object') {
@@ -243,13 +244,23 @@ export class MemoryConsolidator implements IMemoryConsolidation {
             combinedMetadata.set('optimized', true);
         }
 
+        // Combine associations from all memories
+        const associations = new Set<string>();
+        memories.forEach(memory => {
+            if (memory.associations) {
+                memory.associations.forEach(id => associations.add(id));
+            }
+        });
+
         // Create new consolidated memory
         return {
             id: crypto.randomUUID(),
             content: combinedContent,
             metadata: combinedMetadata,
             timestamp: new Date(),
-            accessCount: 0
+            priority: memories.reduce((acc, m) => acc + (m.priority || 0), 0) / memories.length,
+            consolidationMetrics: metrics,
+            associations
         };
     }
 
@@ -262,7 +273,7 @@ export class MemoryConsolidator implements IMemoryConsolidation {
     private checkTriggerCondition(memory: IMemoryUnit, trigger: ConsolidationTrigger): boolean {
         switch (trigger.type) {
             case 'access_count':
-                return (memory.accessCount || 0) >= trigger.threshold;
+                return (memory.consolidationMetrics?.accessCount || 0) >= trigger.threshold;
             case 'time_based':
                 return Date.now() - memory.timestamp.getTime() >= trigger.threshold;
             case 'priority_change':

@@ -409,4 +409,42 @@ describe('Episodic Memory Features', () => {
         const negativeMemory = memories.find(m => m.content.location === 'hospital');
         expect(negativeMemory?.metadata.get('emotionalSignificance')).toBeGreaterThan(0.7);
     });
+
+    test('should retrieve memories by type', async () => {
+        // Test retrieving by type
+        const retrievedByType = await episodicMemory.retrieve({
+            type: MemoryType.EPISODIC
+        });
+        expect(retrievedByType.length).toBeGreaterThan(0);
+    });
+
+    test('should retrieve memories by metadata', async () => {
+        // Test retrieving by metadata
+        const retrievedByMetadata = await episodicMemory.retrieve({
+            type: MemoryType.EPISODIC,
+            metadata: new Map([['tag', 'test']])
+        });
+        expect(retrievedByMetadata.length).toBeGreaterThan(0);
+    });
+
+    test('should retrieve memories by date range', async () => {
+        // Test retrieving by date range
+        const retrievedByDate = await episodicMemory.retrieve({
+            type: MemoryType.EPISODIC,
+            dateRange: {
+                start: new Date(Date.now() - 1000),
+                end: new Date()
+            }
+        });
+        expect(retrievedByDate.length).toBeGreaterThan(0);
+    });
+
+    test('should retrieve memories by filter', async () => {
+        const filter: MemoryFilter = {
+            type: MemoryType.EPISODIC,
+            metadata: new Map([['importance', 0.8]])
+        };
+        const memories = await episodicMemory.retrieve(filter);
+        expect(memories).toHaveLength(1);
+    });
 });

@@ -4,13 +4,10 @@ import {
     EnhancedTransitionTrigger,
     EnhancedTransitionConfig,
     EnhancedMemoryContext,
-    BaseTransitionTrigger,
-    EmotionalContext,
     EmotionalContextImpl
 } from './types';
 import { WorkingMemory } from './WorkingMemory';
 import { EpisodicMemory } from './EpisodicMemory';
-import { LongTermMemory } from './LongTermMemory';
 
 export { EnhancedTransitionConfig };
 
@@ -21,7 +18,6 @@ export class MemoryTransitionManager {
     constructor(
         private workingMemory: WorkingMemory,
         private episodicMemory: EpisodicMemory,
-        private longTermMemory: LongTermMemory,
         config?: Partial<EnhancedTransitionConfig>
     ) {
         // Default configuration

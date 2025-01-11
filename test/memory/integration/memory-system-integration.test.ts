@@ -387,4 +387,66 @@ describe('Memory System Integration', () => {
             expect(longTermMemories).toHaveLength(1);
         });
     });
+
+    describe('Memory Filter Usage', () => {
+        test('should retrieve multiple memories', async () => {
+            const memory1 = await memorySystem.storeWorkingMemory('memory1');
+            const memory2 = await memorySystem.storeWorkingMemory('memory2');
+
+            const retrievedMemories = await memorySystem.retrieve({
+                type: MemoryType.WORKING,
+                ids: [memory1.id, memory2.id]
+            });
+
+            expect(retrievedMemories.length).toBe(2);
+            expect(retrievedMemories.map(m => m.id).sort()).toEqual([memory1.id, memory2.id].sort());
+        });
+
+        test('should retrieve with metadata filter', async () => {
+            const memory1 = await memorySystem.storeWorkingMemory('memory1', new Map([['priority', 1]]));
+            const memory2 = await memorySystem.storeWorkingMemory('memory2', new Map([['priority', 2]]));
+
+            const retrievedWithMetadata = await memorySystem.retrieve({
+                type: MemoryType.WORKING,
+                ids: [memory1.id],
+                metadata: new Map([['priority', 1]])
+            });
+
+            expect(retrievedWithMetadata.length).toBe(1);
+            expect(retrievedWithMetadata[0].id).toBe(memory1.id);
+        });
+
+        test('should retrieve with multiple filters', async () => {
+            const memory1 = await memorySystem.storeWorkingMemory('memory1', new Map([['priority', 1]]));
+            const memory2 = await memorySystem.storeWorkingMemory('memory2', new Map([['priority', 2]]));
+
+            const retrievedWithFilters = await memorySystem.retrieve({
+                type: MemoryType.WORKING,
+                ids: [memory1.id, memory2.id],
+                metadata: new Map([['priority', 1]])
+            });
+
+            expect(retrievedWithFilters.length).toBe(1);
+            expect(retrievedWithFilters[0].id).toBe(memory1.id);
+        });
+
+        test('should update working memory', async () => {
+            const memory = await memorySystem.storeWorkingMemory('test content');
+
+            await memorySystem.setContext('test', 'updated content');
+
+            const updatedMemory = await memorySystem.retrieveWorkingMemories({ ids: [memory.id] });
+            expect(updatedMemory[0].content).toBe('updated content');
+        });
+
+        test('should update working memory with metadata', async () => {
+            const memory = await memorySystem.storeWorkingMemory('test content');
+
+            await memorySystem.setContext('test2', 'content2', new Map([['priority', 2]]));
+
+            const updatedMemory = await memorySystem.retrieveWorkingMemories({ ids: [memory.id] });
+            expect(updatedMemory[0].content).toBe('content2');
+            expect(updatedMemory[0].metadata.get('priority')).toBe(2);
+        });
+    });
 });

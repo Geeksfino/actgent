@@ -2,6 +2,7 @@ import { expect, test, describe, beforeEach, afterEach } from 'bun:test';
 import { AgentMemorySystem } from '../../src/core/memory/AgentMemorySystem';
 import { IMemoryStorage, IMemoryIndex, IMemoryUnit, MemoryFilter, MemoryType } from '../../src/core/memory/types';
 import crypto from 'crypto';
+import MemoryRegistry from '../../src/core/memory/MemoryRegistry';
 
 // Mock LLM response for testing
 class MockLLM {
@@ -171,81 +172,61 @@ class MockMemoryIndex implements IMemoryIndex {
     }
 
     async index(memory: IMemoryUnit): Promise<void> {
-        if (!memory.id) {
-            throw new Error('Cannot index memory without id');
-        }
-
-        // Index by memory type
-        const typeKey = `type:${memory.metadata.get('type')}`;
-        if (!this.indexMap.has(typeKey)) {
-            this.indexMap.set(typeKey, new Set());
-        }
-        this.indexMap.get(typeKey)?.add(memory.id);
-
-        // Index by metadata
-        for (const [key, value] of memory.metadata.entries()) {
-            const metaKey = `meta:${key}:${value}`;
-            if (!this.indexMap.has(metaKey)) {
-                this.indexMap.set(metaKey, new Set());
+        // Index by content words
+        const words = memory.content.toString().toLowerCase().split(/\s+/);
+        for (const word of words) {
+            if (!this.indexMap.has(word)) {
+                this.indexMap.set(word, new Set());
             }
-            this.indexMap.get(metaKey)?.add(memory.id);
+            this.indexMap.get(word)?.add(memory.id);
         }
-
-        this.cache.set(memory.id, memory);
-    }
-
-    async update(memory: IMemoryUnit): Promise<void> {
-        await this.remove(memory.id);
-        await this.add(memory);
-    }
-
-    async remove(id: string): Promise<void> {
-        // Remove from all indexes
-        for (const [_, ids] of this.indexMap.entries()) {
-            ids.delete(id);
-        }
-        this.cache.clear();
     }
 
     async search(query: string): Promise<string[]> {
-        // Simple implementation that returns all memories of the queried type
-        const typeMatch = query.match(/type:(\w+)/);
-        if (typeMatch) {
-            const typeKey = `type:${typeMatch[1]}`;
-            return Array.from(this.indexMap.get(typeKey) || []);
+        const words = query.toLowerCase().split(/\s+/);
+        const results = new Set<string>();
+        
+        for (const word of words) {
+            const matches = this.indexMap.get(word);
+            if (matches) {
+                matches.forEach(id => results.add(id));
+            }
         }
-        return [];
+        
+        return Array.from(results);
     }
 
-    async batchIndex(memories: IMemoryUnit[]): Promise<void> {
-        await Promise.all(memories.map(memory => this.index(memory)));
+    async delete(id: string): Promise<void> {
+        for (const [_, ids] of this.indexMap) {
+            ids.delete(id);
+        }
     }
 
     async clear(): Promise<void> {
         this.indexMap.clear();
-        this.cache.clear();
     }
 }
 
 describe('AgentMemorySystem', () => {
     let memorySystem: AgentMemorySystem;
-    let storage: MockMemoryStorage;
-    let index: MockMemoryIndex;
-    const mockLLM = new MockLLM();
+    let mockStorage: MockMemoryStorage;
+    let mockIndex: MockMemoryIndex;
+    let registry: any;
 
     beforeEach(() => {
-        storage = new MockMemoryStorage();
-        index = new MockMemoryIndex(storage);
-        // Using a shorter consolidation interval for testing
-        memorySystem = new AgentMemorySystem(storage, index, 1000);
+        // Reset memory registry
+        MemoryRegistry.reset();
+
+        // Initialize with mock storage and index
+        mockStorage = new MockMemoryStorage();
+        mockIndex = new MockMemoryIndex(mockStorage);
+        registry = MemoryRegistry.initialize(mockStorage, mockIndex);
+        memorySystem = new AgentMemorySystem(registry);
     });
 
     afterEach(async () => {
-        await storage.clear();
-        await index.clear();
-        if (memorySystem) {
-            memorySystem.stopAllTimers();
-        }
+        await memorySystem.cleanup();
+        MemoryRegistry.reset();
     });
 
     describe('Memory Storage Tests', () => {

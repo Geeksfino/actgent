@@ -1,231 +1,211 @@
-import { ISemanticMemory, IConceptGraph, ConceptNode, ConceptRelation, RelationType } from './types';
-import { IMemoryUnit, MemoryType } from '../types';
-import { ConceptGraph } from './ConceptGraph';
-import { NLPService } from './nlp/NLPService';
-import { WordEmbeddings } from './nlp/WordEmbeddings';
-import crypto from 'crypto';
+import { 
+    IMemoryUnit, 
+    MemoryType, 
+    ConceptNode, 
+    ConceptRelation, 
+    MemoryFilter,
+    RelationType
+} from '../types';
+import { AbstractMemory } from '../AbstractMemory';
+import { IMemoryStorage, IMemoryIndex } from '../types';
+import { IConceptGraph } from './IConceptGraph';
 import { logger } from '../../Logger';
+import crypto from 'crypto';
 
 /**
- * Implementation of semantic memory using concept graph and NLP
+ * Semantic memory implementation
  */
-export class SemanticMemory implements ISemanticMemory {
+export class SemanticMemory extends AbstractMemory {
     private conceptGraph: IConceptGraph;
-    private nlpService: NLPService;
-    private wordEmbeddings: WordEmbeddings;
-    private consistencyThreshold: number;
 
     constructor(
-        conceptGraph?: IConceptGraph, 
-        nlpService?: NLPService,
-        wordEmbeddings?: WordEmbeddings,
-        consistencyThreshold: number = 0.7
+        storage: IMemoryStorage, 
+        index: IMemoryIndex,
+        conceptGraph: IConceptGraph
     ) {
-        this.conceptGraph = conceptGraph || new ConceptGraph();
-        this.nlpService = nlpService || new NLPService(process.env.OPENAI_API_KEY || '');
-        this.wordEmbeddings = wordEmbeddings || new WordEmbeddings();
-        this.consistencyThreshold = consistencyThreshold;
+        super(storage, index, MemoryType.SEMANTIC);
+        this.conceptGraph = conceptGraph;
     }
 
-    async store(memory: IMemoryUnit): Promise<void> {
-        try {
-            // Extract concepts and relations using NLP
-            const { concepts, relations } = await this.extractConcepts(memory);
+    /**
+     * Add a concept to semantic memory
+     */
+    public async addConcept(concept: string, properties: Map<string, any>): Promise<void> {
+        const node: ConceptNode = {
+            id: crypto.randomUUID(),
+            name: concept,
+            confidence: 1.0,
+            source: 'user',
+            lastVerified: new Date(),
+            properties
+        };
 
-            // Store concepts
-            for (const concept of concepts) {
-                const existingConcepts = await this.findConcepts(concept.label);
-                if (existingConcepts.length > 0) {
-                    // Check consistency with existing concepts
-                    const mostSimilar = await this.findMostSimilarConcept(concept, existingConcepts);
-                    if (mostSimilar && await this.checkConsistency(concept, mostSimilar)) {
-                        // Merge with existing concept
-                        await this.conceptGraph.merge(concept, mostSimilar);
-                    } else {
-                        // Store as new concept
-                        await this.conceptGraph.addNode(concept);
-                    }
-                } else {
-                    await this.conceptGraph.addNode(concept);
-                }
-            }
-
-            // Store relations
-            for (const relation of relations) {
-                if (relation.sourceId && relation.targetId) {
-                    await this.conceptGraph.addRelation(relation);
-                }
-            }
-        } catch (error) {
-            logger.error('Error storing memory:', error);
-            throw error;
-        }
+        await this.conceptGraph.addNode(node);
     }
 
-    async retrieve(query: string): Promise<IMemoryUnit[]> {
-        try {
-            // Find concepts using both exact match and semantic similarity
-            const concepts = await this.conceptGraph.findNodes(query);
-            const memories: IMemoryUnit[] = [];
+    /**
+     * Add a relationship between concepts
+     */
+    public async addRelation(
+        sourceConcept: string,
+        targetConcept: string,
+        type: RelationType,
+        weight: number = 1.0
+    ): Promise<void> {
+        const relation: ConceptRelation = {
+            id: crypto.randomUUID(),
+            sourceId: sourceConcept,
+            targetId: targetConcept,
+            type,
+            weight,
+            confidence: 1.0
+        };
 
-            for (const concept of concepts) {
-                // Convert concept to memory unit
-                const memory: IMemoryUnit = {
-                    id: crypto.randomUUID(),
-                    content: {
-                        text: concept.label,
-                        type: concept.type,
-                        properties: Object.fromEntries(concept.properties)
-                    },
-                    metadata: new Map([
-                        ['type', MemoryType.SEMANTIC],
-                        ['confidence', concept.confidence.toString()],
-                        ['source', concept.source.join(',')]
-                    ]),
-                    timestamp: concept.lastUpdated,
-                    accessCount: 0,
-                    lastAccessed: new Date()
-                };
-                memories.push(memory);
-            }
-
-            return memories;
-        } catch (error) {
-            logger.error('Error retrieving memories:', error);
-            return [];
-        }
+        await this.conceptGraph.addRelation(relation);
     }
 
-    async update(memory: IMemoryUnit): Promise<void> {
-        await this.store(memory);
+    /**
+     * Get related concepts
+     */
+    public async getRelated(concept: string): Promise<ConceptNode[]> {
+        return this.conceptGraph.getNeighbors(concept);
     }
 
-    async delete(id: string): Promise<void> {
-        await this.conceptGraph.deleteNode(id);
-    }
-
-    async findConcepts(query: string): Promise<ConceptNode[]> {
-        return this.conceptGraph.findNodes(query);
-    }
-
-    async findRelations(conceptId: string): Promise<ConceptRelation[]> {
-        return this.conceptGraph.getRelations(conceptId);
-    }
-
-    async mergeConcepts(sourceId: string, targetId: string): Promise<void> {
-        const source = await this.conceptGraph.getNode(sourceId);
-        const target = await this.conceptGraph.getNode(targetId);
-
-        if (!source || !target) {
-            throw new Error('Source or target concept not found');
-        }
-
-        await this.conceptGraph.merge(source, target);
-    }
-
-    getConceptGraph(): IConceptGraph {
-        return this.conceptGraph;
-    }
-
-    private async extractConcepts(memory: IMemoryUnit): Promise<{ concepts: ConceptNode[]; relations: ConceptRelation[] }> {
-        const text = typeof memory.content === 'string' ? 
-            memory.content : 
-            memory.content.text || '';
-
-        try {
-            // Use NLP service to extract concepts and relations
-            const extracted = await this.nlpService.extractConcepts(text);
-
-            // Add memory source to all concepts and relations
-            extracted.concepts.forEach(concept => concept.source.push(memory.id));
-            extracted.relations.forEach(relation => relation.source.push(memory.id));
-
-            return extracted;
-        } catch (error) {
-            logger.error('Error in concept extraction:', error);
-            
-            // Fallback to simple word-based extraction
-            const concepts: ConceptNode[] = text
-                .split(/\W+/)
-                .filter((word: string) => word.length > 2)
-                .map((word: string) => ({
-                    id: crypto.randomUUID(),
-                    label: word,
-                    type: 'concept',
-                    properties: new Map(),
-                    confidence: 0.5,
-                    lastUpdated: new Date(),
-                    source: [memory.id]
-                }));
-
-            return { concepts, relations: [] };
-        }
-    }
-
-    private async findMostSimilarConcept(concept: ConceptNode, candidates: ConceptNode[]): Promise<ConceptNode | null> {
-        let mostSimilar: ConceptNode | null = null;
-        let highestSimilarity = 0;
-
-        for (const candidate of candidates) {
-            // Try word embeddings first
-            let similarity = await this.wordEmbeddings.calculateSimilarity(concept.label, candidate.label);
-            
-            // If no embedding found, use NLP service as fallback
-            if (similarity === 0) {
-                similarity = await this.nlpService.calculateSimilarity(concept.label, candidate.label);
-            }
-
-            if (similarity > highestSimilarity) {
-                highestSimilarity = similarity;
-                mostSimilar = candidate;
-            }
-        }
-
-        return mostSimilar;
-    }
-
-    private async checkConsistency(concept1: ConceptNode, concept2: ConceptNode): Promise<boolean> {
-        // Check type consistency
-        if (concept1.type !== concept2.type) {
-            return false;
-        }
-
-        // Calculate semantic similarity
-        const similarity = await this.calculateConceptSimilarity(concept1, concept2);
-        if (similarity < this.consistencyThreshold) {
-            return false;
-        }
-
-        // Check property consistency
-        const properties1 = Array.from(concept1.properties.entries());
-        const properties2 = Array.from(concept2.properties.entries());
+    /**
+     * Store semantic memory
+     */
+    public override async store(content: any, metadata?: Map<string, any>): Promise<IMemoryUnit> {
+        const metadataMap = metadata instanceof Map ? metadata : new Map(Object.entries(metadata || {}));
         
-        for (const [key, value1] of properties1) {
-            const value2 = concept2.properties.get(key);
-            if (value2 !== undefined && value1 !== value2) {
-                // If same property has different values, check if they're semantically similar
-                const propSimilarity = await this.nlpService.calculateSimilarity(
-                    value1.toString(),
-                    value2.toString()
-                );
-                if (propSimilarity < this.consistencyThreshold) {
-                    return false;
-                }
-            }
-        }
+        // Set semantic memory specific metadata
+        metadataMap.set('type', MemoryType.SEMANTIC);
+        metadataMap.set('confidence', 1.0);
+        metadataMap.set('source', 'user');
+        metadataMap.set('lastVerified', new Date());
 
-        return true;
+        return super.store(content, metadataMap);
     }
 
-    private async calculateConceptSimilarity(concept1: ConceptNode, concept2: ConceptNode): Promise<number> {
-        // Try word embeddings first
-        let similarity = await this.wordEmbeddings.calculateSimilarity(concept1.label, concept2.label);
-        
-        // If no embedding found, use NLP service
-        if (similarity === 0) {
-            similarity = await this.nlpService.calculateSimilarity(concept1.label, concept2.label);
+    /**
+     * Override retrieve to handle both string and filter inputs
+     */
+    public override async retrieve(filter: MemoryFilter | string | { concept: string }): Promise<IMemoryUnit[]> {
+        if (typeof filter === 'string') {
+            // Search by concept name
+            return this.retrieveByConcept(filter);
+        } else if ('concept' in filter) {
+            // Search by concept object
+            return this.retrieveByConcept(filter.concept);
+        } else {
+            // Use parent class retrieve with filter
+            return super.retrieve(filter);
         }
+    }
 
-        return similarity;
+    /**
+     * Find concepts matching a pattern
+     */
+    public async findConcepts(pattern: string): Promise<ConceptNode[]> {
+        return this.conceptGraph.findConcepts(pattern);
+    }
+
+    /**
+     * Find relations matching criteria
+     */
+    public async findRelations(criteria: {
+        type?: RelationType;
+        source?: string;
+        target?: string;
+    }): Promise<ConceptRelation[]> {
+        return this.conceptGraph.findRelations(criteria);
+    }
+
+    /**
+     * Retrieve memories by concept
+     */
+    private async retrieveByConcept(concept: string): Promise<IMemoryUnit[]> {
+        const nodes = await this.conceptGraph.getNeighbors(concept);
+        const nodeIds = nodes.map(node => node.id);
+        
+        return super.retrieve({
+            types: [MemoryType.SEMANTIC],
+            ids: nodeIds
+        });
+    }
+
+    /**
+     * Update concept properties
+     */
+    public async updateConcept(concept: string, properties: Map<string, any>): Promise<void> {
+        const node = await this.conceptGraph.getNode(concept);
+        if (node) {
+            node.properties = properties;
+            node.lastVerified = new Date();
+            await this.conceptGraph.addNode(node);
+        }
+    }
+
+    /**
+     * Update relationship weight
+     */
+    public async updateRelation(
+        sourceConcept: string,
+        targetConcept: string,
+        weight: number
+    ): Promise<void> {
+        const relation = await this.conceptGraph.getRelation(sourceConcept, targetConcept);
+        if (relation) {
+            relation.weight = weight;
+            await this.conceptGraph.addRelation(relation);
+        }
+    }
+
+    /**
+     * Delete concept and its relationships
+     */
+    public async deleteConcept(concept: string): Promise<void> {
+        await this.conceptGraph.deleteNode(concept);
+    }
+
+    /**
+     * Delete relationship between concepts
+     */
+    public async deleteRelation(sourceConcept: string, targetConcept: string): Promise<void> {
+        const relation = await this.conceptGraph.getRelation(sourceConcept, targetConcept);
+        if (relation) {
+            await this.conceptGraph.deleteRelation(relation);
+        }
+    }
+
+    /**
+     * Get all concepts
+     */
+    public async getAllConcepts(): Promise<ConceptNode[]> {
+        return this.conceptGraph.getAllNodes();
+    }
+
+    /**
+     * Get all relationships
+     */
+    public async getAllRelations(): Promise<ConceptRelation[]> {
+        return this.conceptGraph.getAllRelations();
+    }
+
+    /**
+     * Find path between concepts
+     */
+    public async findPath(
+        sourceConcept: string,
+        targetConcept: string,
+        maxDepth: number = 5
+    ): Promise<ConceptNode[]> {
+        return this.conceptGraph.findPath(sourceConcept, targetConcept);
+    }
+
+    /**
+     * Cleanup any resources
+     */
+    public override async cleanup(): Promise<void> {
+        await this.conceptGraph.clear();
     }
 }

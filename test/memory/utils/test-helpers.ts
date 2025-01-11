@@ -178,79 +178,25 @@ export class MockMemoryStorage implements IMemoryStorage {
 }
 
 export class MockMemoryIndex implements IMemoryIndex {
-    private indexMap: Map<string, Set<string>> = new Map();
     private memories: Map<string, IMemoryUnit> = new Map();
-
-    async index(memory: IMemoryUnit): Promise<void> {
-        await this.add(memory);
-    }
 
     async add(memory: IMemoryUnit): Promise<void> {
         this.memories.set(memory.id, memory);
-
-        // Index content
-        const content = typeof memory.content === 'string' ? memory.content : JSON.stringify(memory.content);
-        const words = content.toLowerCase().split(/\s+/);
-        
-        // Index metadata
-        const metadataStr = Array.from(memory.metadata.entries())
-            .map(([key, value]) => `${key}:${value}`)
-            .join(' ');
-        words.push(...metadataStr.toLowerCase().split(/\s+/));
-
-        // Add to index
-        for (const word of words) {
-            if (!this.indexMap.has(word)) {
-                this.indexMap.set(word, new Set());
-            }
-            this.indexMap.get(word)!.add(memory.id);
-        }
-        logger.debug('Added to index - memory: %o', memory);
     }
 
     async search(query: string): Promise<string[]> {
-        const words = query.toLowerCase().split(/\s+/);
-        const results = new Map<string, number>();
-        
-        for (const word of words) {
-            const ids = this.indexMap.get(word);
-            if (ids) {
-                for (const id of ids) {
-                    results.set(id, (results.get(id) || 0) + 1);
-                }
-            }
-        }
-        
-        // Sort by relevance (number of matching words)
-        const sortedResults = Array.from(results.entries())
-            .sort(([, a], [, b]) => b - a)
-            .map(([id]) => id);
-        logger.debug('Searching index - query: %s, results: %o', query, sortedResults);
-        return sortedResults;
+        return Array.from(this.memories.keys());
     }
 
     async update(memory: IMemoryUnit): Promise<void> {
-        await this.remove(memory.id);
-        await this.add(memory);
+        this.memories.set(memory.id, memory);
     }
 
-    async remove(id: string): Promise<void> {
+    async delete(id: string): Promise<void> {
         this.memories.delete(id);
-        for (const ids of this.indexMap.values()) {
-            ids.delete(id);
-        }
-        logger.debug('Removed from index - id: %s', id);
     }
 
-    async batchIndex(memories: IMemoryUnit[]): Promise<void> {
-        for (const memory of memories) {
-            await this.add(memory);
-        }
-    }
-
-    async getMemory(id: string): Promise<IMemoryUnit | null> {
-        const memory = this.memories.get(id);
-        logger.debug('Retrieved memory from index - id: %s, memory: %o', id, memory);
-        return memory || null;
+    async index(memory: IMemoryUnit): Promise<void> {
+        await this.add(memory);
     }
 }

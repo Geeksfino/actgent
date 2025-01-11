@@ -85,6 +85,33 @@ describe('Memory Optimization Features', () => {
             expect(retrievedMemories.length).toBe(2);
             expect(retrievedMemories[0].timestamp.getTime()).toBeGreaterThan(retrievedMemories[1].timestamp.getTime());
         });
+
+        test('should retrieve optimized memories', async () => {
+            // Test retrieving optimized memories
+            const optimizedMemories = await memorySystem.retrieve({
+                type: MemoryType.WORKING,
+                metadata: new Map([['priority', { min: 0.5 }]])
+            });
+            expect(optimizedMemories.length).toBe(0);
+        });
+
+        test('should retrieve memories with multiple filters', async () => {
+            // Test retrieving memories with multiple filters
+            const filteredMemories = await memorySystem.retrieve({
+                type: MemoryType.WORKING,
+                metadata: new Map([['priority', { min: 0.5 }]])
+            });
+            expect(filteredMemories.length).toBe(0);
+        });
+
+        test('should retrieve memories with metadata filter', async () => {
+            // Test retrieving memories with metadata filter
+            const metadataFilteredMemories = await memorySystem.retrieve({
+                type: MemoryType.WORKING,
+                metadata: new Map([['tag', 'important']])
+            });
+            expect(metadataFilteredMemories.length).toBe(0);
+        });
     });
 
     describe('Memory Summarization', () => {
