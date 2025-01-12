@@ -205,16 +205,9 @@ export class AgentMemorySystem {
             ? { query }  // Use query field for string searches
             : query;     // Use provided filter directly
 
-        // Add current context to filter
-        const context = this.contextManager.getCurrentContext();
-        filter.metadataFilters = filter.metadataFilters || [];
-        filter.metadataFilters.push(new Map([
-            ['context', context]
-        ]));
-
         // Search across all memory types
         const memories = await Promise.all([
-            this.workingMemory.retrieve(filter),
+            this.workingMemory.retrieve({}), // Retrieve all from working memory
             this.episodicMemory.retrieve(filter),
             this.proceduralMemory.retrieve(filter)
         ]);
@@ -230,7 +223,7 @@ export class AgentMemorySystem {
 
         // Remove duplicates and sort by relevance/recency
         const uniqueMemories = Array.from(new Set(allMemories));
-        return this.rankMemories(uniqueMemories, context);
+        return this.rankMemories(uniqueMemories, this.contextManager.getCurrentContext());
     }
 
     /**

@@ -65,19 +65,6 @@ export class WorkingMemory extends AbstractMemory {
         // Check capacity after storing
         await this.ensureCapacity();
 
-        // Set expiration timer
-        const expiresAt = metadataMap.get('expiresAt');
-        if (expiresAt) {
-            const timeout = setTimeout(async () => {
-                const currentMemory = await this.storage.retrieve(memory.id);
-                if (currentMemory) {
-                    await this.moveToEpisodicMemory(currentMemory);
-                }
-                this.expirationTimers.delete(memory.id);
-            }, expiresAt - Date.now());
-            this.expirationTimers.set(memory.id, timeout);
-        }
-
         return memory;
     }
 
@@ -93,33 +80,12 @@ export class WorkingMemory extends AbstractMemory {
                 return [];
             }
 
-            const expiresAt = memory.metadata.get('expiresAt');
-            const now = Date.now();
-            if (typeof expiresAt === 'number' && now > expiresAt) {
-                logger.debug('Memory expired, moving to episodic: %o', memory);
-                await this.moveToEpisodicMemory(memory);
-                return [];
-            }
-
             return [memory];
         }
 
         // Handle filter case
         const memories = await super.retrieve(idOrFilter);
-        const now = Date.now();
-        const validMemories: IMemoryUnit[] = [];
-
-        for (const memory of memories) {
-            const expiresAt = memory.metadata.get('expiresAt');
-            if (typeof expiresAt === 'number' && now > expiresAt) {
-                logger.debug('Memory expired, moving to episodic: %o', memory);
-                await this.moveToEpisodicMemory(memory);
-                continue;
-            }
-            validMemories.push(memory);
-        }
-
-        return validMemories;
+        return memories;
     }
 
     /**
@@ -284,18 +250,6 @@ export class WorkingMemory extends AbstractMemory {
      * Cleanup expired memories
      */
     public async cleanup(): Promise<void> {
-        const memories = await this.retrieve({
-            types: [MemoryType.WORKING]
-        });
-
-        const now = Date.now();
-        for (const memory of memories) {
-            const expiresAt = memory.metadata.get('expiresAt');
-            if (typeof expiresAt === 'number' && now > expiresAt) {
-                await this.moveToEpisodicMemory(memory);
-            }
-        }
-
         // Implement cleanup logic for working memory
         // For example, remove old or infrequently accessed memories
         const memoriesToCleanup = await this.retrieve({
