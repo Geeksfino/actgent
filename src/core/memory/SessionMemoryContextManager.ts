@@ -1,16 +1,20 @@
 import { 
-    IMemoryStorage, 
-    IMemoryIndex, 
-    MemoryType, 
-    MemoryFilter, 
     IMemoryUnit, 
-    IMemoryContextManager,
-    ConsolidationMetrics,
+    IMemoryStorage, 
+    IMemoryIndex,
     SessionMemoryContext,
     EmotionalState,
+    EmotionalContext,
+    EmotionalTrendEntry,
+    MemoryType,
+    MemoryFilter,
+    IMemoryContextManager,
+    ConsolidationMetrics,
     EmotionalContextImpl
 } from './types';
 import crypto from 'crypto';
+import { EventEmitter } from 'events';
+import { Subject, Observable } from 'rxjs';
 
 /**
  * Manages the active session context of an agent.
@@ -27,133 +31,148 @@ import crypto from 'crypto';
  * be cleared and only relevant information will be persisted to long-term memory
  * through the AgentMemorySystem.
  */
-export class SessionMemoryContextManager implements IMemoryContextManager {
+export class SessionMemoryContextManager extends EventEmitter implements IMemoryContextManager {
     private storage: IMemoryStorage;
     private index: IMemoryIndex;
     private contextCache: Map<string, { value: any, timestamp: number }>;
-    private listeners: ((context: SessionMemoryContext) => void)[];
-
-    private context: SessionMemoryContext = {
-        userGoals: new Set<string>(),
-        domainContext: new Map<string, any>(),
-        interactionHistory: [],
-        emotionalTrends: [],
-        emotionalState: new EmotionalContextImpl(),
-        topicHistory: [],
-        userPreferences: new Map(),
-        interactionPhase: 'introduction'
-    };
+    private currentContext: SessionMemoryContext;
+    private contextChanges$ = new Subject<SessionMemoryContext>();
+    private emotionalContext: EmotionalContext;
 
     constructor(storage: IMemoryStorage, index: IMemoryIndex) {
+        super();
         this.storage = storage;
         this.index = index;
         this.contextCache = new Map();
-        this.listeners = [];
+
+        const initialEmotionalState: EmotionalState = {
+            valence: 0,
+            arousal: 0
+        };
+
+        this.emotionalContext = {
+            currentEmotion: initialEmotionalState,
+            emotionalTrends: [],
+            addEmotion(emotion: EmotionalState) {
+                this.emotionalTrends.push({
+                    timestamp: new Date(),
+                    emotion
+                });
+                this.currentEmotion = emotion;
+            },
+            getEmotionalTrend(timeRange: { start: Date; end: Date }): EmotionalTrendEntry[] {
+                return this.emotionalTrends.filter(
+                    (entry: EmotionalTrendEntry) => entry.timestamp >= timeRange.start && entry.timestamp <= timeRange.end
+                );
+            }
+        };
+
+        this.currentContext = {
+            contextType: 'context_change',
+            timestamp: new Date(),
+            userGoals: new Set<string>(),
+            domainContext: new Map<string, any>(),
+            interactionHistory: [],
+            emotionalTrends: [],
+            emotionalState: initialEmotionalState,
+            topicHistory: [],
+            userPreferences: new Map<string, any>(),
+            interactionPhase: 'introduction'
+        };
+    }
+
+    public getContextChanges(): Observable<SessionMemoryContext> {
+        return this.contextChanges$.asObservable();
+    }
+
+    public getCurrentContext(): SessionMemoryContext {
+        return { ...this.currentContext };
     }
 
     async setContext(key: string, value: any): Promise<void> {
         // Update appropriate context field based on key
         switch (key) {
             case 'goal':
-                this.context.userGoals.add(value);
+                this.currentContext.userGoals.add(value);
                 break;
             case 'domain':
-                this.context.domainContext.set(value.key, value.value);
+                this.currentContext.domainContext.set(value.key, value.value);
                 break;
             case 'interaction':
-                this.context.interactionHistory.push(value);
-                if (this.context.interactionHistory.length > 10) {
-                    this.context.interactionHistory.shift();
+                this.currentContext.interactionHistory.push(value);
+                if (this.currentContext.interactionHistory.length > 10) {
+                    this.currentContext.interactionHistory.shift();
                 }
                 break;
             case 'emotion':
-                const emotion = value as EmotionalState;
-                this.context.emotionalState.addEmotion(emotion);
-                this.context.emotionalTrends.push(emotion);
-                if (this.context.emotionalTrends.length > 10) {
-                    this.context.emotionalTrends.shift();
-                }
+                this.updateEmotionalState(value);
                 break;
             case 'topic':
-                this.context.topicHistory.push(value);
-                if (this.context.topicHistory.length > 10) {
-                    this.context.topicHistory.shift();
+                this.currentContext.topicHistory.push(value);
+                if (this.currentContext.topicHistory.length > 10) {
+                    this.currentContext.topicHistory.shift();
                 }
                 break;
             case 'preference':
-                this.context.userPreferences.set(value.key, value.value);
+                this.currentContext.userPreferences.set(value.key, value.value);
                 break;
             case 'phase':
-                this.context.interactionPhase = value;
+                this.currentContext.interactionPhase = value;
                 break;
         }
 
+        this.emitContextChange('context_change');
+
         // Store in working memory for short-term recall
-        const metadata = new Map<string, any>([
-            ['type', MemoryType.CONTEXTUAL],
-            ['key', key],
-            ['timestamp', Date.now()]
-        ]);
-
-        const consolidationMetrics: ConsolidationMetrics = {
-            semanticSimilarity: 0,
-            contextualOverlap: 0,
-            temporalProximity: 0,
-            sourceReliability: 0,
-            confidenceScore: 0,
-            accessCount: 0,
-            lastAccessed: new Date(),
-            createdAt: new Date(),
-            importance: 1.0,
-            relevance: 1.0
-        };
-
-        const memory: IMemoryUnit = {
-            id: crypto.randomUUID(),
-            content: { key, value },
-            metadata,
-            timestamp: new Date(),
-            priority: 1.0,
-            consolidationMetrics,
-            associations: new Set<string>()
-        };
+        const memory = await this.createContextMemory(key, value);
 
         await this.storage.store(memory);
+    }
 
-        // Notify listeners
-        this.notifyContextChange();
+    private async createContextMemory(key: string, value: any): Promise<IMemoryUnit> {
+        return {
+            id: crypto.randomUUID(),
+            content: { key, value },
+            metadata: new Map([['type', 'context']]),
+            timestamp: new Date(),
+            memoryType: MemoryType.CONTEXTUAL,
+            accessCount: 0,
+            lastAccessed: new Date()
+        };
     }
 
     async getContext(key: string): Promise<any> {
         switch (key) {
             case 'goals':
-                return Array.from(this.context.userGoals);
+                return Array.from(this.currentContext.userGoals);
             case 'domain':
-                return new Map(this.context.domainContext);
+                return new Map(this.currentContext.domainContext);
             case 'interactions':
-                return [...this.context.interactionHistory];
+                return [...this.currentContext.interactionHistory];
             case 'emotions':
-                return this.context.emotionalState.getEmotionalTrend();
+                return this.emotionalContext.getEmotionalTrend({ start: new Date(0), end: new Date() });
             case 'topics':
-                return [...this.context.topicHistory];
+                return [...this.currentContext.topicHistory];
             case 'preferences':
-                return new Map(this.context.userPreferences);
+                return new Map(this.currentContext.userPreferences);
             case 'phase':
-                return this.context.interactionPhase;
+                return this.currentContext.interactionPhase;
             case 'all':
-                return { ...this.context };
+                return { ...this.currentContext };
             default:
                 return null;
         }
     }
 
     async clearContext(): Promise<void> {
-        this.context = {
+        this.currentContext = {
+            contextType: 'context_change',
+            timestamp: new Date(),
             userGoals: new Set<string>(),
             domainContext: new Map<string, any>(),
             interactionHistory: [],
             emotionalTrends: [],
-            emotionalState: new EmotionalContextImpl(),
+            emotionalState: this.emotionalContext.currentEmotion,
             topicHistory: [],
             userPreferences: new Map(),
             interactionPhase: 'introduction'
@@ -168,7 +187,7 @@ export class SessionMemoryContextManager implements IMemoryContextManager {
             await this.storage.delete(memory.id);
         }
 
-        this.notifyContextChange();
+        this.emitContextChange('context_change');
     }
 
     async loadContextFromWorkingMemory(): Promise<void> {
@@ -187,22 +206,42 @@ export class SessionMemoryContextManager implements IMemoryContextManager {
         }
     }
 
-    onContextChange(listener: (context: SessionMemoryContext) => void): void {
-        this.listeners.push(listener);
+    private emitContextChange(type: SessionMemoryContext['contextType']): void {
+        this.currentContext = {
+            ...this.currentContext,
+            contextType: type,
+            timestamp: new Date()
+        };
+        this.contextChanges$.next(this.currentContext);
+        this.emit('context_change', this.currentContext);
     }
 
-    private notifyContextChange(): void {
-        const contextSnapshot = { ...this.context };
-        for (const listener of this.listeners) {
-            try {
-                listener(contextSnapshot);
-            } catch (error) {
-                console.error('Error in context change listener:', error);
-            }
-        }
+    public onContextChange(handler: (context: SessionMemoryContext) => void): void {
+        this.on('context_change', handler);
     }
 
-    getCurrentContext(): SessionMemoryContext {
-        return { ...this.context };
+    public onEmotionalPeak(handler: (emotion: EmotionalState) => void): void {
+        this.on('emotional_peak', handler);
+    }
+
+    public onGoalCompletion(handler: (goalId: string) => void): void {
+        this.on('goal_completed', handler);
+    }
+
+    private isSignificantContextChange(prev: SessionMemoryContext, curr: SessionMemoryContext): boolean {
+        // Implement context change detection logic
+        return false; // Placeholder
+    }
+
+    private isEmotionalPeak(prev: EmotionalState, curr: EmotionalState): boolean {
+        // Implement emotional peak detection logic
+        return false; // Placeholder
+    }
+
+    public updateEmotionalState(emotion: EmotionalState): void {
+        this.emotionalContext.addEmotion(emotion);
+        this.currentContext.emotionalState = emotion;
+        this.currentContext.emotionalTrends = this.emotionalContext.emotionalTrends;
+        this.emitContextChange('emotional_peak');
     }
 }

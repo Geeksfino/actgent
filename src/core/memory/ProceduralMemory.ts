@@ -1,4 +1,4 @@
-import { LongTermMemory } from './LongTermMemory';
+import { AbstractMemory } from './AbstractMemory';
 import { IMemoryUnit, IMemoryStorage, IMemoryIndex, MemoryFilter, MemoryType } from './types';
 
 /**
@@ -13,10 +13,9 @@ export interface ProceduralAction {
  * Procedural Memory - stores skills, procedures, and action sequences
  * that can be executed without conscious recall
  */
-export class ProceduralMemory extends LongTermMemory {
+export class ProceduralMemory extends AbstractMemory {
     constructor(storage: IMemoryStorage, index: IMemoryIndex) {
-        super(storage, index);
-        this.memoryType = MemoryType.PROCEDURAL;
+        super(storage, index, MemoryType.PROCEDURAL);
     }
 
     /**
@@ -73,16 +72,8 @@ export class ProceduralMemory extends LongTermMemory {
      * Clean up rarely used or unsuccessful procedures
      */
     public async cleanup(): Promise<void> {
-        const memories = await this.retrieve({
-            type: MemoryType.PROCEDURAL,
-            metadata: new Map([
-                ['failureCount', { min: 5 }]
-            ])
-        });
-
-        for (const memory of memories) {
-            await this.storage.delete(memory.id);
-        }
+        // Procedural memory typically doesn't need cleanup
+        // as it stores long-term procedural knowledge
     }
 
     /**

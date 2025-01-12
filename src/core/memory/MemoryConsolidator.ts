@@ -54,13 +54,8 @@ export class MemoryConsolidator implements IMemoryConsolidation {
         const candidates = await this.getConsolidationCandidates();
         if (candidates.length === 0) return;
 
-        // Group similar memories
-        const groups = await this.groupSimilarMemories(candidates);
-
-        // Consolidate each group
-        for (const group of groups) {
-            await this.consolidateGroup(group);
-        }
+        // Consolidate memories
+        await this.consolidateMemories(candidates);
     }
 
     async getConsolidationCandidates(): Promise<IMemoryUnit[]> {
@@ -94,155 +89,34 @@ export class MemoryConsolidator implements IMemoryConsolidation {
         });
     }
 
-    private async groupSimilarMemories(memories: IMemoryUnit[]): Promise<IMemoryUnit[][]> {
-        const groups: IMemoryUnit[][] = [];
-        const processed = new Set<string>();
-
+    private async consolidateMemories(memories: IMemoryUnit[]): Promise<void> {
+        // Group memories by type
+        const groupedMemories = new Map<string, IMemoryUnit[]>();
         for (const memory of memories) {
-            if (processed.has(memory.id)) continue;
-
-            const similar = await this.findSimilarMemories(memory);
-            if (similar.length > 0) {
-                groups.push([memory, ...similar]);
-                processed.add(memory.id);
-                similar.forEach(m => processed.add(m.id));
+            const type = memory.memoryType;
+            if (!groupedMemories.has(type)) {
+                groupedMemories.set(type, []);
             }
+            groupedMemories.get(type)?.push(memory);
         }
 
-        return groups;
-    }
-
-    private async findSimilarMemories(memory: IMemoryUnit): Promise<IMemoryUnit[]> {
-        // Get related memory IDs from the index
-        const relatedIds = await this.index.search(JSON.stringify(memory.content));
-        
-        // Filter out the current memory ID
-        const otherIds = relatedIds.filter(id => id !== memory.id);
-        
-        // Retrieve all related memories
-        const memories = await this.storage.batchRetrieve(otherIds);
-        
-        // Filter out null values and return valid memories
-        return memories.filter((m): m is IMemoryUnit => m !== null);
-    }
-
-    private async calculateConsolidationMetrics(memories: IMemoryUnit[]): Promise<ConsolidationMetrics> {
-        // Initialize all required metrics
-        const metrics: ConsolidationMetrics = {
-            semanticSimilarity: 0,
-            contextualOverlap: 0,
-            temporalProximity: 0,
-            sourceReliability: 0,
-            confidenceScore: 0,
-            accessCount: 0,
-            lastAccessed: new Date(),
-            createdAt: new Date(),
-            importance: 0,
-            relevance: 0
-        };
-        
-        try {
-            // Calculate temporal proximity (0-1 score based on time difference)
-            const timestamps = memories.map(m => m.timestamp.getTime());
-            const timeRange = Math.max(...timestamps) - Math.min(...timestamps);
-            metrics.temporalProximity = Math.exp(-timeRange / (24 * 60 * 60 * 1000)); // Decay over 24 hours
-
-            // Calculate source reliability (based on memory metadata)
-            metrics.sourceReliability = memories.reduce((acc, m) => {
-                const reliability = m.metadata.get('sourceReliability') || 0.5;
-                return acc + reliability;
-            }, 0) / memories.length;
-
-            // Calculate semantic similarity if NLP service is available
-            if (this.nlpService) {
-                const contents = memories.map(m => JSON.stringify(m.content));
-                const similarities = await Promise.all(
-                    contents.map(async (c1, i) => {
-                        const scores = await Promise.all(
-                            contents.map(async (c2, j) => {
-                                if (i === j) return 1;
-                                return await this.nlpService.calculateSimilarity(c1, c2);
-                            })
-                        );
-                        return scores.reduce((a, b) => a + b, 0) / scores.length;
-                    })
-                );
-                metrics.semanticSimilarity = similarities.reduce((a, b) => a + b, 0) / similarities.length;
-            }
-
-            // Calculate contextual overlap based on metadata
-            metrics.contextualOverlap = memories.reduce((acc, m1, i) => {
-                const overlaps = memories.map((m2, j) => {
-                    if (i === j) return 1;
-                    return this.calculateContextOverlap(m1, m2);
-                });
-                return acc + (overlaps.reduce((a, b) => a + b, 0) / overlaps.length);
-            }, 0) / memories.length;
-
-            // Calculate confidence score based on source reliability and semantic similarity
-            metrics.confidenceScore = (metrics.sourceReliability + metrics.semanticSimilarity) / 2;
-
-            // Calculate access patterns
-            metrics.accessCount = memories.reduce((acc, m) => acc + (m.consolidationMetrics?.accessCount || 0), 0);
-            metrics.lastAccessed = new Date(Math.max(...memories.map(m => m.consolidationMetrics?.lastAccessed?.getTime() || 0)));
-            metrics.createdAt = new Date(Math.min(...memories.map(m => m.consolidationMetrics?.createdAt?.getTime() || Date.now())));
-
-            // Calculate importance and relevance
-            metrics.importance = memories.reduce((acc, m) => acc + (m.priority || 0), 0) / memories.length;
-            metrics.relevance = (metrics.temporalProximity + metrics.sourceReliability + metrics.semanticSimilarity + metrics.contextualOverlap) / 4;
-
-        } catch (error) {
-            console.error('Error calculating consolidation metrics:', error);
-            // On error, ensure all metrics have valid default values
-            metrics.semanticSimilarity = 0.5;
-            metrics.contextualOverlap = 0.5;
-            metrics.temporalProximity = 0.5;
-            metrics.sourceReliability = 0.5;
-            metrics.confidenceScore = 0.5;
-            metrics.importance = 0.5;
-            metrics.relevance = 0.5;
+        // Consolidate each group
+        for (const [type, typeMemories] of groupedMemories) {
+            await this.consolidateMemoryGroup(type, typeMemories);
         }
-
-        return metrics;
     }
 
-    private calculateContextOverlap(m1: IMemoryUnit, m2: IMemoryUnit): number {
-        // Get context from metadata
-        const c1 = m1.metadata.get('context');
-        const c2 = m2.metadata.get('context');
-        
-        if (!c1 || !c2) return 0;
-
-        // Calculate overlap based on common keys and values
-        const keys1 = Object.keys(c1);
-        const keys2 = Object.keys(c2);
-        const commonKeys = keys1.filter(k => keys2.includes(k));
-        
-        if (commonKeys.length === 0) return 0;
-
-        // Calculate value similarity for common keys
-        const similarity = commonKeys.reduce((acc, key) => {
-            if (c1[key] === c2[key]) return acc + 1;
-            if (typeof c1[key] === 'number' && typeof c2[key] === 'number') {
-                return acc + (1 - Math.abs(c1[key] - c2[key]));
-            }
-            return acc;
-        }, 0);
-
-        return similarity / commonKeys.length;
-    }
-
-    private async consolidateGroup(memories: IMemoryUnit[]): Promise<void> {
+    private async consolidateMemoryGroup(type: string, memories: IMemoryUnit[]): Promise<void> {
         if (memories.length < 2) return;
 
         try {
             // Calculate consolidation metrics
-            const metrics = await this.calculateConsolidationMetrics(memories);
+            const metrics = this.calculateConsolidationMetrics(memories);
             
             // Only proceed if relevance is high enough
             if ((metrics.relevance ?? 0) >= this.consolidationThreshold / 10) {
                 // Create consolidated memory with metrics
-                const consolidated = await this.createConsolidatedMemory(memories, metrics);
+                const consolidated = this.createConsolidatedMemory(memories);
 
                 // Store the consolidated memory
                 await this.storage.store(consolidated);
@@ -261,7 +135,70 @@ export class MemoryConsolidator implements IMemoryConsolidation {
         }
     }
 
-    private async createConsolidatedMemory(memories: IMemoryUnit[], metrics: ConsolidationMetrics): Promise<IMemoryUnit> {
+    protected calculateConsolidationMetrics(memories: IMemoryUnit[]): ConsolidationMetrics {
+        return {
+            semanticSimilarity: this.calculateSemanticSimilarity(memories),
+            contextualOverlap: this.calculateContextualOverlap(memories),
+            temporalProximity: this.calculateTemporalProximity(memories),
+            sourceReliability: this.calculateSourceReliability(memories),
+            confidenceScore: this.calculateConfidenceScore(memories),
+            accessCount: memories.reduce((acc, m) => acc + (m.consolidationMetrics?.accessCount || 0), 0),
+            lastAccessed: new Date(),
+            createdAt: new Date(),
+            importance: this.calculateImportance(memories),
+            relevance: this.calculateRelevance(memories)
+        };
+    }
+
+    private calculateSemanticSimilarity(memories: IMemoryUnit[]): number {
+        // TODO: Implement semantic similarity calculation
+        return 0.5;
+    }
+
+    private calculateContextualOverlap(memories: IMemoryUnit[]): number {
+        // TODO: Implement contextual overlap calculation
+        return 0.5;
+    }
+
+    private calculateTemporalProximity(memories: IMemoryUnit[]): number {
+        // TODO: Implement temporal proximity calculation
+        return 0.5;
+    }
+
+    private calculateSourceReliability(memories: IMemoryUnit[]): number {
+        // TODO: Implement source reliability calculation
+        return 0.8;
+    }
+
+    private calculateConfidenceScore(memories: IMemoryUnit[]): number {
+        // TODO: Implement confidence score calculation
+        return 0.7;
+    }
+
+    private calculateImportance(memories: IMemoryUnit[]): number {
+        // TODO: Implement importance calculation
+        return memories.reduce((acc, m) => acc + (m.consolidationMetrics?.importance || 0), 0) / memories.length;
+    }
+
+    private calculateRelevance(memories: IMemoryUnit[]): number {
+        // TODO: Implement relevance calculation
+        return memories.reduce((acc, m) => acc + (m.consolidationMetrics?.relevance || 0), 0) / memories.length;
+    }
+
+    protected createConsolidatedMemory(memories: IMemoryUnit[]): IMemoryUnit {
+        return {
+            id: crypto.randomUUID(),
+            content: this.mergeContents(memories),
+            metadata: this.mergeMetadata(memories),
+            timestamp: new Date(),
+            memoryType: MemoryType.EPISODIC,
+            priority: this.calculatePriority(memories),
+            consolidationMetrics: this.calculateConsolidationMetrics(memories),
+            associations: new Set(memories.map(m => m.id))
+        };
+    }
+
+    private mergeContents(memories: IMemoryUnit[]): any {
         // Combine content from all memories
         const combinedContent = memories.reduce((acc, memory) => {
             if (typeof memory.content === 'object') {
@@ -270,6 +207,10 @@ export class MemoryConsolidator implements IMemoryConsolidation {
             return memory.content;
         }, {});
 
+        return combinedContent;
+    }
+
+    private mergeMetadata(memories: IMemoryUnit[]): Map<string, any> {
         // Combine metadata from all memories
         const combinedMetadata = new Map<string, any>();
         memories.forEach(memory => {
@@ -292,24 +233,12 @@ export class MemoryConsolidator implements IMemoryConsolidation {
             combinedMetadata.set('optimized', true);
         }
 
-        // Combine associations from all memories
-        const associations = new Set<string>();
-        memories.forEach(memory => {
-            if (memory.associations) {
-                memory.associations.forEach(id => associations.add(id));
-            }
-        });
+        return combinedMetadata;
+    }
 
-        // Create new consolidated memory
-        return {
-            id: crypto.randomUUID(),
-            content: combinedContent,
-            metadata: combinedMetadata,
-            timestamp: new Date(),
-            priority: memories.reduce((acc, m) => acc + (m.priority || 0), 0) / memories.length,
-            consolidationMetrics: metrics,
-            associations
-        };
+    private calculatePriority(memories: IMemoryUnit[]): number {
+        // Calculate priority based on average priority of memories
+        return memories.reduce((acc, m) => acc + (m.priority || 0), 0) / memories.length;
     }
 
     public isConsolidationNeeded(memory: IMemoryUnit): boolean {

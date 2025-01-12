@@ -1,15 +1,20 @@
 import { 
-    IMemoryStorage, 
-    IMemoryIndex, 
     IMemoryUnit, 
-    MemoryType,
+    IMemoryStorage, 
+    IMemoryIndex,
+    MemoryEvent,
+    MemoryEventType,
     MemoryFilter,
-    SessionMemoryContext
+    SessionMemoryContext,
+    EmotionalState
 } from './types';
-import { MemoryRegistry } from './MemoryRegistry';
 import { SessionMemoryContextManager } from './SessionMemoryContextManager';
-import { MemoryAssociator } from './MemoryAssociator';
+import { WorkingMemory } from './WorkingMemory';
+import { EpisodicMemory } from './EpisodicMemory';
+import { ProceduralMemory } from './ProceduralMemory';
 import { MemoryTransitionManager } from './MemoryTransitionManager';
+import { Subject, interval, Observable } from 'rxjs';
+import { map, filter, distinctUntilChanged } from 'rxjs/operators';
 
 /**
  * Main entry point for the agent's memory system.
@@ -17,54 +22,148 @@ import { MemoryTransitionManager } from './MemoryTransitionManager';
  * while handling the complexity of memory management internally.
  */
 export class AgentMemorySystem {
-    private registry: MemoryRegistry;
-    private sessionContext: SessionMemoryContextManager;
-    private associator: MemoryAssociator;
+    private readonly contextChanges$ = new Subject<SessionMemoryContext>();
+
+    private workingMemory: WorkingMemory;
+    private episodicMemory: EpisodicMemory;
+    private proceduralMemory: ProceduralMemory;
     private transitionManager: MemoryTransitionManager;
-    private transitionTimer: NodeJS.Timer | null = null;
+    private contextManager: SessionMemoryContextManager;
 
     constructor(
         storage: IMemoryStorage,
-        index: IMemoryIndex,
-        transitionInterval: number = 5 * 60 * 1000 // 5 minutes default
+        index: IMemoryIndex
     ) {
-        this.registry = MemoryRegistry.initialize(storage, index);
-        this.sessionContext = new SessionMemoryContextManager(storage, index);
-        this.associator = new MemoryAssociator(storage, index);
-        
-        // Initialize transition manager
+        this.workingMemory = new WorkingMemory(storage, index);
+        this.episodicMemory = new EpisodicMemory(storage, index);
+        this.proceduralMemory = new ProceduralMemory(storage, index);
         this.transitionManager = new MemoryTransitionManager(
-            this.registry.getWorkingMemory(),
-            this.registry.getEpisodicMemory()
+            this.workingMemory,
+            this.episodicMemory
         );
+        this.contextManager = new SessionMemoryContextManager(storage, index);
+
+        this.setupEventHandlers();
 
         // Load initial context from working memory
-        this.sessionContext.loadContextFromWorkingMemory().catch(console.error);
+        this.contextManager.loadContextFromWorkingMemory().catch(console.error);
+    }
 
-        // Add context change listener for transitions
-        this.sessionContext.onContextChange((context) => {
-            // Notify transition manager of context changes
-            this.transitionManager.checkAndTransition().catch(console.error);
+    private setupEventHandlers(): void {
+        // Monitor working memory size
+        interval(1000).pipe(
+            map(() => ({
+                size: this.workingMemory.getCurrentSize(),
+                capacity: this.workingMemory.getCapacity()
+            })),
+            filter(({ size, capacity }) => size > capacity * 0.8),
+            distinctUntilChanged()
+        ).subscribe(() => this.handleCapacityWarning());
+
+        // Monitor context changes
+        this.contextManager.getContextChanges().subscribe(context => {
+            this.handleContextChange(context);
         });
+    }
 
-        // Start automatic memory management
-        this.startMemoryManagement(transitionInterval);
+    /**
+     * Handle memory access
+     */
+    private handleMemoryAccess(memoryId: string): void {
+        this.transitionManager.onMemoryAccess(memoryId);
+    }
+
+    /**
+     * Handle capacity warning
+     */
+    private handleCapacityWarning(): void {
+        const context: SessionMemoryContext = {
+            contextType: 'capacity_warning',
+            timestamp: new Date(),
+            userGoals: new Set(),
+            domainContext: new Map(),
+            interactionHistory: [],
+            emotionalTrends: [],
+            emotionalState: { valence: 0, arousal: 0 },
+            topicHistory: [],
+            userPreferences: new Map(),
+            interactionPhase: 'main'
+        };
+        this.transitionManager.onContextChange(context);
+    }
+
+    /**
+     * Handle context change
+     */
+    private handleContextChange(context: SessionMemoryContext): void {
+        this.transitionManager.onContextChange(context);
+    }
+
+    /**
+     * Handle emotional peak
+     */
+    private handleEmotionalPeak(emotion: EmotionalState): void {
+        this.transitionManager.onEmotionalChange(emotion);
+    }
+
+    /**
+     * Handle goal completion
+     */
+    private handleGoalCompletion(goalId: string): void {
+        this.transitionManager.emitEvent({
+            type: MemoryEventType.GOAL_COMPLETED,
+            memory: null,
+            metadata: new Map([['goalId', goalId]]),
+            timestamp: new Date()
+        });
+    }
+
+    private isEmotionalPeak(prevEmotion: EmotionalState, currentEmotion: EmotionalState): boolean {
+        const THRESHOLD = 0.5;
+        return Math.abs(currentEmotion.valence - prevEmotion.valence) > THRESHOLD ||
+               Math.abs(currentEmotion.arousal - prevEmotion.arousal) > THRESHOLD;
+    }
+
+    private async updateEmotionalState(prevState: EmotionalState, currentState: EmotionalState): Promise<void> {
+        if (this.isEmotionalPeak(prevState, currentState)) {
+            this.handleEmotionalPeak(currentState);
+        }
+    }
+
+    /**
+     * Store a new memory unit
+     */
+    public async store(memory: IMemoryUnit): Promise<void> {
+        await this.workingMemory.store(memory.content, memory.metadata);
+        
+        // Check capacity after storing
+        if (this.workingMemory.getCurrentSize() >= this.workingMemory.getCapacity() * 0.8) {
+            this.handleCapacityWarning();
+        }
     }
 
     /**
      * Remember something. The memory system will automatically determine
      * where and how to store it based on its characteristics.
      */
-    public async remember(content: any, metadata?: Map<string, any>): Promise<void> {
+    public async remember(content: any, metadata: Map<string, any> = new Map()): Promise<void> {
+        const memoryType = metadata?.get('type') || 'episodic';
+        
         // Store in working memory
-        await this.registry.getWorkingMemory().store(content, metadata);
+        await this.store({ 
+            content, 
+            metadata,
+            id: crypto.randomUUID(),
+            timestamp: new Date(),
+            memoryType
+        });
         
         // Update context based on content type
-        if (metadata?.get('type') === MemoryType.CONTEXTUAL) {
-            const key = metadata.get('key');
-            const value = content.value;
+        if (memoryType === 'contextual') {
+            const key = metadata.get('contextKey');
+            const value = content;
             if (key) {
-                await this.sessionContext.setContext(key, value);
+                await this.contextManager.setContext(key, value);
             }
         }
     }
@@ -73,28 +172,28 @@ export class AgentMemorySystem {
      * Update agent's session context with new information
      */
     public async updateContext(key: string, value: any): Promise<void> {
-        await this.sessionContext.setContext(key, value);
+        await this.contextManager.setContext(key, value);
     }
 
     /**
      * Get current context information
      */
     public async getContext(key: string): Promise<any> {
-        return this.sessionContext.getContext(key);
+        return this.contextManager.getContext(key);
     }
 
     /**
      * Get complete current session context state
      */
     public getCurrentContext(): SessionMemoryContext {
-        return this.sessionContext.getCurrentContext();
+        return this.contextManager.getCurrentContext();
     }
 
     /**
      * Register a listener for session context changes
      */
     public onContextChange(listener: (context: SessionMemoryContext) => void): void {
-        this.sessionContext.onContextChange(listener);
+        this.contextManager.onContextChange(listener);
     }
 
     /**
@@ -107,7 +206,7 @@ export class AgentMemorySystem {
             : query;     // Use provided filter directly
 
         // Add current context to filter
-        const context = this.sessionContext.getCurrentContext();
+        const context = this.contextManager.getCurrentContext();
         filter.metadataFilters = filter.metadataFilters || [];
         filter.metadataFilters.push(new Map([
             ['context', context]
@@ -115,10 +214,9 @@ export class AgentMemorySystem {
 
         // Search across all memory types
         const memories = await Promise.all([
-            this.registry.getWorkingMemory().retrieve(filter),
-            this.registry.getEpisodicMemory().retrieve(filter),
-            this.registry.getSemanticMemory().retrieve(filter),
-            this.registry.getProceduralMemory().retrieve(filter)
+            this.workingMemory.retrieve(filter),
+            this.episodicMemory.retrieve(filter),
+            this.proceduralMemory.retrieve(filter)
         ]);
 
         // Get all memories
@@ -184,8 +282,8 @@ export class AgentMemorySystem {
         }
 
         // Check emotional alignment
-        const memoryEmotion = memoryContext.emotionalState?.getCurrentEmotion();
-        const currentEmotion = context.emotionalState?.getCurrentEmotion();
+        const memoryEmotion = memoryContext.emotionalState;
+        const currentEmotion = context.emotionalState;
         if (memoryEmotion && currentEmotion) {
             const valenceDiff = Math.abs(memoryEmotion.valence - currentEmotion.valence);
             const arousalDiff = Math.abs(memoryEmotion.arousal - currentEmotion.arousal);
@@ -199,21 +297,22 @@ export class AgentMemorySystem {
      * Associate two memories together
      */
     public async associate(memoryId1: string, memoryId2: string): Promise<void> {
-        await this.associator.associate(memoryId1, memoryId2);
+        // TO DO: implement associate logic
     }
 
     /**
      * Remove association between two memories
      */
     public async dissociate(memoryId1: string, memoryId2: string): Promise<void> {
-        await this.associator.dissociate(memoryId1, memoryId2);
+        // TO DO: implement dissociate logic
     }
 
     /**
      * Find memories related to a given memory
      */
     public async findRelatedMemories(memoryId: string, maxResults: number = 10): Promise<IMemoryUnit[]> {
-        return this.associator.findRelatedMemories(memoryId, maxResults);
+        // TO DO: implement findRelatedMemories logic
+        return [];
     }
 
     /**
@@ -228,30 +327,16 @@ export class AgentMemorySystem {
         const ids = filter.ids || [];
         await Promise.all(ids.map(async id => {
             await Promise.all([
-                this.registry.getWorkingMemory().delete(id),
-                this.registry.getEpisodicMemory().delete(id),
-                this.registry.getSemanticMemory().delete(id),
-                this.registry.getProceduralMemory().delete(id)
+                this.workingMemory.delete(id),
+                this.episodicMemory.delete(id),
+                this.proceduralMemory.delete(id)
             ]);
         }));
-    }
-
-    private startMemoryManagement(interval: number): void {
-        this.transitionTimer = setInterval(() => {
-            // Periodically check for memories that need to be moved or consolidated
-            Promise.all([
-                this.transitionManager.checkAndTransition(),
-            ]).catch(console.error);
-        }, interval);
     }
 
     /**
      * Clean up resources
      */
     public dispose(): void {
-        if (this.transitionTimer) {
-            clearInterval(this.transitionTimer);
-            this.transitionTimer = null;
-        }
     }
 }

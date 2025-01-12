@@ -1,12 +1,12 @@
 import { DeclarativeMemoryFactory } from './DeclarativeMemoryFactory';
-import { ISemanticMemoryUnit, ConceptNode, ConceptRelation } from './types';
+import { ISemanticMemoryUnit, ConceptNode, ConceptRelation, MemoryType } from './types';
 import crypto from 'crypto';
 
 /**
  * Factory class for creating semantic memory units
  */
 export class SemanticMemoryFactory extends DeclarativeMemoryFactory {
-    createMemoryUnit(content: any, metadata?: Map<string, any>): ISemanticMemoryUnit {
+    public createMemoryUnit(content: any, metadata?: Map<string, any>): ISemanticMemoryUnit {
         const conceptId = crypto.randomUUID();
         const node: ConceptNode = {
             id: conceptId,
@@ -32,6 +32,7 @@ export class SemanticMemoryFactory extends DeclarativeMemoryFactory {
             content,
             metadata: metadata || new Map(),
             timestamp: new Date(),
+            memoryType: MemoryType.SEMANTIC,
             accessCount: 0,
             lastAccessed: new Date()
         };

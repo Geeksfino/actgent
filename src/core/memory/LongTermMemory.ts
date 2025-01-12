@@ -18,16 +18,23 @@ export abstract class LongTermMemory extends AbstractMemory {
         metadataMap.set('id', memoryId);
         metadataMap.set('type', this.memoryType);
 
-        const memory: IMemoryUnit = {
-            id: memoryId,
-            content,
-            metadata: metadataMap,
-            timestamp: new Date()
-        };
+        const memory: IMemoryUnit = await this.createMemoryUnit(content, metadataMap);
 
         await this.storage.store(memory);
         this.cache.set(memoryId, memory);
         return memory;
+    }
+
+    protected async createMemoryUnit(content: any, metadata: Map<string, any>): Promise<IMemoryUnit> {
+        return {
+            id: crypto.randomUUID(),
+            content,
+            metadata,
+            timestamp: new Date(),
+            memoryType: MemoryType.LONG_TERM,
+            accessCount: 0,
+            lastAccessed: new Date()
+        };
     }
 
     /**

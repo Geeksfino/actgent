@@ -5,19 +5,53 @@ import { logger } from '../Logger';
 import crypto from 'crypto';
 
 export class WorkingMemory extends AbstractMemory {
-    protected readonly MAX_WORKING_MEMORY_SIZE = 100;
+    private readonly maxCapacity: number;
     protected readonly DEFAULT_TTL = 30 * 60 * 1000; // 30 minutes
     protected readonly expirationTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+    protected size: number = 0;
 
-    constructor(storage: IMemoryStorage, index: IMemoryIndex) {
+    constructor(storage: IMemoryStorage, index: IMemoryIndex, maxCapacity: number = 100) {
         super(storage, index, MemoryType.WORKING);
+        this.maxCapacity = maxCapacity;
+    }
+
+    public getCapacity(): number {
+        return this.maxCapacity;
+    }
+
+    public getCurrentSize(): number {
+        return this.size;
+    }
+
+    protected async createEpisodicMemory(memory: IMemoryUnit): Promise<IMemoryUnit> {
+        return {
+            id: crypto.randomUUID(),
+            content: memory.content,
+            metadata: new Map(memory.metadata),
+            timestamp: new Date(),
+            memoryType: MemoryType.EPISODIC,
+            accessCount: 0,
+            lastAccessed: new Date()
+        };
+    }
+
+    protected async createBatchMemory(contents: any[]): Promise<IMemoryUnit> {
+        return {
+            id: crypto.randomUUID(),
+            content: contents,
+            metadata: new Map(),
+            timestamp: new Date(),
+            memoryType: MemoryType.WORKING,
+            accessCount: 0,
+            lastAccessed: new Date()
+        };
     }
 
     /**
      * Store content in working memory
      */
-    public override async store(content: any, metadata: any = {}): Promise<IMemoryUnit> {
-        const metadataMap = metadata instanceof Map ? metadata : new Map(Object.entries(metadata || {}));
+    public override async store(content: any, metadata?: Map<string, any>): Promise<IMemoryUnit> {
+        const metadataMap = metadata || new Map();
         
         // Set working memory specific metadata
         if (!metadataMap.has('expiresAt')) {
@@ -26,7 +60,8 @@ export class WorkingMemory extends AbstractMemory {
 
         // Store using parent class method
         const memory = await super.store(content, metadataMap);
-
+        this.size++;
+        
         // Check capacity after storing
         await this.ensureCapacity();
 
@@ -97,41 +132,36 @@ export class WorkingMemory extends AbstractMemory {
     }
 
     /**
+     * Batch retrieve memories by IDs
+     */
+    public async batchRetrieve(ids: string[]): Promise<IMemoryUnit[]> {
+        const memories = await Promise.all(
+            ids.map(id => this.retrieve({ id }))
+        );
+        return memories.flat();
+    }
+
+    /**
      * Move a single memory to episodic storage immediately
      * Used for immediate transitions (expiration, capacity)
      */
     private async moveToEpisodicMemory(memory: IMemoryUnit): Promise<void> {
-        // Clear expiration timer first
-        this.clearExpirationTimer(memory.id);
-
-        const episodicMetadata = new Map(memory.metadata);
-        episodicMetadata.set('type', MemoryType.EPISODIC);
-        episodicMetadata.delete('expiresAt');  // Episodic memories don't expire
-        episodicMetadata.set('originalType', MemoryType.WORKING);
-        episodicMetadata.set('consolidationTime', Date.now());
-        episodicMetadata.set('transitionType', 'immediate');
-        episodicMetadata.set('originalId', memory.id);
-
-        // Preserve important metadata
-        const preserveKeys = ['priority', 'relevance', 'importance', 'tags', 'category', 'source'];
-        for (const key of preserveKeys) {
-            const value = memory.metadata.get(key);
-            if (value !== undefined) {
-                episodicMetadata.set(key, value);
-            }
-        }
-
+        // Create episodic memory
         const episodicMemory: IMemoryUnit = {
             id: crypto.randomUUID(),
             content: memory.content,
-            metadata: episodicMetadata,
-            timestamp: memory.timestamp // Preserve original timestamp
+            metadata: new Map(memory.metadata),
+            timestamp: new Date(),
+            memoryType: MemoryType.EPISODIC,
+            accessCount: 0,
+            lastAccessed: new Date()
         };
 
-        logger.debug('Moving memory to episodic: %o', episodicMemory);
+        // Store in episodic memory
         await this.storage.store(episodicMemory);
         await this.index.add(episodicMemory);
         await this.storage.delete(memory.id);
+        this.size--;
     }
 
     /**
@@ -191,7 +221,10 @@ export class WorkingMemory extends AbstractMemory {
                 id: crypto.randomUUID(),
                 content: groupMemories.map(m => m.content),
                 metadata: consolidatedMetadata,
-                timestamp: new Date(Math.max(...groupMemories.map(m => m.timestamp.getTime())))
+                timestamp: new Date(Math.max(...groupMemories.map(m => m.timestamp.getTime()))),
+                memoryType: MemoryType.EPISODIC,
+                accessCount: 0,
+                lastAccessed: new Date()
             };
 
             // Store consolidated memory and clean up originals
@@ -204,6 +237,7 @@ export class WorkingMemory extends AbstractMemory {
                 this.clearExpirationTimer(memory.id);
                 await this.storage.delete(memory.id);
                 await this.index.delete(memory.id);
+                this.size--;
             }
         }
     }
@@ -216,7 +250,7 @@ export class WorkingMemory extends AbstractMemory {
             types: [MemoryType.WORKING]
         });
 
-        if (memories.length > this.MAX_WORKING_MEMORY_SIZE) {
+        if (this.getCurrentSize() > this.maxCapacity) {
             // Sort by priority and recency
             const sortedMemories = memories.sort((a, b) => {
                 const aPriority = a.metadata.get('priority') || 0;
@@ -228,7 +262,7 @@ export class WorkingMemory extends AbstractMemory {
             });
 
             // Move excess memories to episodic
-            const excessMemories = sortedMemories.slice(this.MAX_WORKING_MEMORY_SIZE);
+            const excessMemories = sortedMemories.slice(this.maxCapacity);
             for (const memory of excessMemories) {
                 await this.moveToEpisodicMemory(memory);
             }
@@ -261,5 +295,41 @@ export class WorkingMemory extends AbstractMemory {
                 await this.moveToEpisodicMemory(memory);
             }
         }
+
+        // Implement cleanup logic for working memory
+        // For example, remove old or infrequently accessed memories
+        const memoriesToCleanup = await this.retrieve({
+            types: [MemoryType.WORKING],
+            orderBy: 'lastAccessed',
+            limit: 10
+        });
+
+        // Delete oldest memories if capacity exceeded
+        if (this.getCurrentSize() > this.maxCapacity) {
+            for (const memory of memoriesToCleanup) {
+                await this.delete(memory.id);
+                if (this.getCurrentSize() <= this.maxCapacity) {
+                    break;
+                }
+            }
+        }
+    }
+
+    public async batchStore(contents: any[]): Promise<IMemoryUnit> {
+        const batchMemory = {
+            id: crypto.randomUUID(),
+            content: contents,
+            metadata: new Map(),
+            timestamp: new Date(),
+            memoryType: MemoryType.WORKING,
+            accessCount: 0,
+            lastAccessed: new Date()
+        };
+
+        await this.storage.store(batchMemory);
+        await this.index.add(batchMemory);
+        this.size++;
+
+        return batchMemory;
     }
 }

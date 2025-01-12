@@ -1,223 +1,277 @@
-import { 
-    IMemoryUnit, 
-    MemoryType, 
-    ConsolidationStatus,
-    TransitionTrigger,
-    SessionMemoryContext,
-    EmotionalState,
-    EmotionalContext
-} from './types';
+import { Subject, merge, from, Observable, EMPTY, interval } from 'rxjs';
+import { debounceTime, filter, mergeMap, distinctUntilChanged, map, bufferTime, retry, catchError, withLatestFrom } from 'rxjs/operators';
 import { WorkingMemory } from './WorkingMemory';
 import { EpisodicMemory } from './EpisodicMemory';
+import { IMemoryUnit, MemoryType, MemoryEvent, MemoryEventType, ConsolidationRule, EmotionalState, SessionMemoryContext } from './types';
+import { logger } from '../Logger';
 
-/**
- * Manages the transition of memories between different memory stores
- * based on various triggers and conditions.
- */
 export class MemoryTransitionManager {
-    private workingMemory: WorkingMemory;
-    private episodicMemory: EpisodicMemory;
-    private lastCheck: Date;
-    private currentContext?: SessionMemoryContext;
+    private consolidationRules: ConsolidationRule[] = [];
+    private eventsSubject$ = new Subject<MemoryEvent>();
+    public readonly events$ = this.eventsSubject$.asObservable();
 
-    constructor(workingMemory: WorkingMemory, episodicMemory: EpisodicMemory) {
-        this.workingMemory = workingMemory;
-        this.episodicMemory = episodicMemory;
-        this.lastCheck = new Date();
+    // Memory operation streams
+    private readonly accessStream$ = new Subject<{ memoryId: string, timestamp: Date }>();
+    private readonly capacityStream$ = new Subject<{ size: number, capacity: number }>();
+    private readonly contextStream$ = new Subject<SessionMemoryContext>();
+    private readonly emotionalStream$ = new Subject<EmotionalState>();
+
+    constructor(
+        private workingMemory: WorkingMemory,
+        private episodicMemory: EpisodicMemory
+    ) {
+        this.setupDefaultRules();
+        this.setupEventStreams();
     }
 
-    /**
-     * Update the current context used for memory transitions
-     */
-    public updateContext(context: SessionMemoryContext): void {
-        this.currentContext = context;
-    }
-
-    /**
-     * Check for memories that need to be transitioned and handle them
-     */
-    public async checkAndTransition(): Promise<void> {
-        const now = new Date();
-        
-        // Get all memories from working memory
-        const memories = await this.workingMemory.retrieve({
-            types: [MemoryType.EPISODIC, MemoryType.CONTEXTUAL]
-        });
-
-        for (const memory of memories) {
-            const shouldTransition = await this.shouldTransitionMemory(memory);
-            if (shouldTransition) {
-                await this.transitionMemory(memory);
-            }
-        }
-
-        this.lastCheck = now;
-    }
-
-    /**
-     * Determine if a memory should be transitioned based on various triggers
-     */
-    private async shouldTransitionMemory(memory: IMemoryUnit): Promise<boolean> {
-        if (!this.currentContext) return false;
-
-        // Check time-based trigger
-        const timeTrigger = await this.checkTimeTrigger(memory);
-        if (timeTrigger) return true;
-
-        // Check context-based trigger
-        const contextTrigger = await this.checkContextTrigger(memory);
-        if (contextTrigger) return true;
-
-        // Check emotion-based trigger
-        const emotionTrigger = await this.checkEmotionTrigger(memory);
-        if (emotionTrigger) return true;
-
-        // Check consolidation trigger
-        const consolidationTrigger = await this.checkConsolidationTrigger(memory);
-        if (consolidationTrigger) return true;
-
-        return false;
-    }
-
-    /**
-     * Check if memory should transition based on time
-     */
-    private async checkTimeTrigger(memory: IMemoryUnit): Promise<boolean> {
-        const timeThreshold = 30 * 60 * 1000; // 30 minutes
-        const now = new Date();
-        const memoryAge = now.getTime() - memory.timestamp.getTime();
-        
-        return memoryAge > timeThreshold;
-    }
-
-    /**
-     * Check if memory should transition based on context changes
-     */
-    private async checkContextTrigger(memory: IMemoryUnit): Promise<boolean> {
-        if (!this.currentContext) return false;
-
-        const memoryContext = memory.metadata.get('context') as SessionMemoryContext | undefined;
-        if (!memoryContext) return false;
-
-        // Calculate context overlap score
-        const contextScore = this.calculateContextOverlap(memoryContext, this.currentContext);
-        
-        // If context overlap is low, consider transitioning
-        return contextScore < 0.3; // Threshold for context relevance
-    }
-
-    /**
-     * Check if memory should transition based on emotional state
-     */
-    private async checkEmotionTrigger(memory: IMemoryUnit): Promise<boolean> {
-        if (!this.currentContext) return false;
-
-        const memoryContext = memory.metadata.get('context') as SessionMemoryContext | undefined;
-        if (!memoryContext?.emotionalState) return false;
-
-        // Calculate emotional state difference
-        const emotionalScore = this.calculateEmotionalAlignment(
-            memoryContext.emotionalState,
-            this.currentContext.emotionalState
+    private monitorMemoryOperations() {
+        // Monitor working memory capacity
+        interval(1000).pipe(
+            map(() => ({
+                size: this.workingMemory.getCurrentSize(),
+                capacity: this.workingMemory.getCapacity()
+            })),
+            filter(({ size, capacity }) => size > capacity * 0.8),
+            distinctUntilChanged((prev, curr) => 
+                prev.size === curr.size && prev.capacity === curr.capacity
+            )
+        ).subscribe(stats => 
+            this.capacityStream$.next(stats)
         );
 
-        // If emotional alignment is low, consider transitioning
-        return emotionalScore < 0.3; // Threshold for emotional relevance
+        // Process memory access patterns
+        this.accessStream$.pipe(
+            bufferTime(5000),
+            filter(accesses => accesses.length > 0),
+            map(accesses => this.analyzeAccessPatterns(accesses))
+        ).subscribe();
+
+        // Handle context changes
+        this.contextStream$.pipe(
+            distinctUntilChanged((prev, curr) => 
+                this.calculateContextOverlap(prev, curr) > 0.8
+            ),
+            withLatestFrom(this.getActiveMemories()),
+            mergeMap(([context, memories]) => 
+                this.handleContextTransition(context, memories)
+            )
+        ).subscribe();
+
+        // Process emotional peaks
+        this.emotionalStream$.pipe(
+            distinctUntilChanged((prev, curr) => 
+                !this.isEmotionalPeak(prev, curr)
+            ),
+            withLatestFrom(this.getActiveMemories()),
+            mergeMap(([emotion, memories]) => 
+                this.handleEmotionalTransition(emotion, memories)
+            )
+        ).subscribe();
     }
 
-    /**
-     * Check if memory should transition based on consolidation status
-     */
-    private async checkConsolidationTrigger(memory: IMemoryUnit): Promise<boolean> {
-        const consolidationStatus = memory.metadata.get('consolidationStatus') as ConsolidationStatus | undefined;
-        return consolidationStatus === ConsolidationStatus.CONSOLIDATED;
+    private getActiveMemories(): Observable<IMemoryUnit[]> {
+        return from(this.workingMemory.retrieve({
+            types: [MemoryType.WORKING, MemoryType.EPISODIC]
+        }));
     }
 
-    /**
-     * Calculate how well two contexts overlap
-     */
-    private calculateContextOverlap(context1: SessionMemoryContext, context2: SessionMemoryContext): number {
-        let totalScore = 0;
-        let weights = 0;
-
-        // Compare topics (30% weight)
-        if (context1.topicHistory.length > 0 && context2.topicHistory.length > 0) {
-            const topicScore = context1.topicHistory
-                .map((topic: string, index: number) => {
-                    const position = context2.topicHistory.indexOf(topic);
-                    if (position === -1) return 0;
-                    return 1 - (Math.abs(position - index) / Math.max(context1.topicHistory.length, context2.topicHistory.length));
-                })
-                .reduce((sum: number, score: number) => sum + score, 0) / context1.topicHistory.length;
-
-            totalScore += topicScore * 0.3;
-            weights += 0.3;
-        }
-
-        // Compare goals (40% weight)
-        if (context1.userGoals.size > 0 && context2.userGoals.size > 0) {
-            const goals1 = Array.from(context1.userGoals);
-            const goals2 = Array.from(context2.userGoals);
-            const commonGoals = goals1.filter(goal => goals2.includes(goal));
-            const goalScore = commonGoals.length / Math.max(goals1.length, goals2.length);
-
-            totalScore += goalScore * 0.4;
-            weights += 0.4;
-        }
-
-        // Compare emotional states (30% weight)
-        if (context1.emotionalState && context2.emotionalState) {
-            const emotionScore = context1.emotionalTrends
-                .map((emotion: EmotionalState, index: number) => {
-                    const other = context2.emotionalTrends[index];
-                    if (!other) return 0;
-                    const valenceDiff = Math.abs(emotion.valence - other.valence);
-                    const arousalDiff = Math.abs(emotion.arousal - other.arousal);
-                    return 1 - ((valenceDiff + arousalDiff) / 4); // Normalize to 0-1
-                })
-                .reduce((sum: number, score: number) => sum + score, 0) / context1.emotionalTrends.length;
-
-            totalScore += emotionScore * 0.3;
-            weights += 0.3;
-        }
-
-        return weights > 0 ? totalScore / weights : 0;
+    private analyzeAccessPatterns(accesses: { memoryId: string, timestamp: Date }[]): void {
+        // Implement access pattern analysis
+        // Example: Detect frequently co-accessed memories
     }
 
-    /**
-     * Calculate emotional alignment between two emotional states
-     */
-    private calculateEmotionalAlignment(emotion1: EmotionalContext, emotion2: EmotionalContext): number {
-        const e1 = emotion1.getCurrentEmotion();
-        const e2 = emotion2.getCurrentEmotion();
-        
-        if (!e1 || !e2) return 0;
-        
-        const valenceDiff = Math.abs(e1.valence - e2.valence);
-        const arousalDiff = Math.abs(e1.arousal - e2.arousal);
-        
-        // Normalize differences to 0-1 scale
+    public onMemoryAccess(memoryId: string): void {
+        this.accessStream$.next({
+            memoryId,
+            timestamp: new Date()
+        });
+    }
+
+    public onContextChange(context: SessionMemoryContext): void {
+        this.contextStream$.next(context);
+    }
+
+    public onEmotionalChange(emotion: EmotionalState): void {
+        this.emotionalStream$.next(emotion);
+    }
+
+    private async handleContextTransition(
+        context: SessionMemoryContext, 
+        memories: IMemoryUnit[]
+    ): Promise<void> {
+        for (const memory of memories) {
+            const contextualAlignment = await this.calculateContextualAlignment(memory, context);
+            if (contextualAlignment < 0.3) {
+                await this.transitionToEpisodic(memory, 'context_change');
+            }
+        }
+    }
+
+    private async handleEmotionalTransition(
+        emotion: EmotionalState,
+        memories: IMemoryUnit[]
+    ): Promise<void> {
+        for (const memory of memories) {
+            const emotionalAlignment = this.calculateEmotionalAlignment(
+                memory.metadata.get('emotion') as EmotionalState,
+                emotion
+            );
+            if (emotionalAlignment < 0.3) {
+                await this.transitionToEpisodic(memory, 'emotional_peak');
+            }
+        }
+    }
+
+    private async transitionToEpisodic(memory: IMemoryUnit, reason: string): Promise<void> {
+        try {
+            const transitionedMemory = {
+                ...memory,
+                memoryType: MemoryType.EPISODIC,
+                metadata: new Map(memory.metadata).set('transitionReason', reason)
+            };
+
+            await this.episodicMemory.store(
+                transitionedMemory.content,
+                transitionedMemory.metadata
+            );
+            await this.workingMemory.delete(memory.id);
+
+            this.eventsSubject$.next({
+                type: MemoryEventType.CONSOLIDATE,
+                memory: transitionedMemory,
+                timestamp: new Date()
+            });
+        } catch (error) {
+            logger.error('Failed to transition memory:', error);
+        }
+    }
+
+    private isEmotionalPeak(prev: EmotionalState, curr: EmotionalState): boolean {
+        if (!prev || !curr) return false;
+        const valenceDiff = Math.abs((curr.valence || 0) - (prev.valence || 0));
+        const arousalDiff = Math.abs((curr.arousal || 0) - (prev.arousal || 0));
+        return valenceDiff > 0.5 || arousalDiff > 0.5;
+    }
+
+    private calculateContextOverlap(prev: SessionMemoryContext, curr: SessionMemoryContext): number {
+        // Implement context overlap calculation
+        return 0.5; // Placeholder
+    }
+
+    private calculateEmotionalAlignment(emotion1: EmotionalState, emotion2: EmotionalState): number {
+        if (!emotion1 || !emotion2) return 0;
+        const valenceDiff = Math.abs((emotion1.valence || 0) - (emotion2.valence || 0));
+        const arousalDiff = Math.abs((emotion1.arousal || 0) - (emotion2.arousal || 0));
         return 1 - ((valenceDiff + arousalDiff) / 4);
     }
 
-    /**
-     * Handle the transition of a memory between stores
-     */
-    private async transitionMemory(memory: IMemoryUnit): Promise<void> {
-        try {
-            // Add transition metadata
-            memory.metadata.set('transitionType', TransitionTrigger.TIME_BASED);
-            memory.metadata.set('transitionTimestamp', new Date());
+    private async calculateContextualAlignment(memory: IMemoryUnit, context: SessionMemoryContext): Promise<number> {
+        // Implement context alignment calculation
+        return 0.5; // Placeholder
+    }
 
-            // Store in episodic memory
-            await this.episodicMemory.store(memory);
+    private setupDefaultRules(): void {
+        this.consolidationRules = [
+            {
+                name: 'Capacity Based',
+                condition: (event) => event.type === MemoryEventType.CAPACITY_WARNING,
+                priority: 1,
+                targetMemoryType: MemoryType.EPISODIC
+            },
+            {
+                name: 'Emotional Peak',
+                condition: (event) => 
+                    event.type === MemoryEventType.EMOTIONAL_PEAK && 
+                    this.isSignificantEmotion(event.emotion),
+                priority: 2,
+                targetMemoryType: MemoryType.EPISODIC
+            },
+            {
+                name: 'Context Change',
+                condition: (event) => 
+                    event.type === MemoryEventType.CONTEXT_CHANGE && 
+                    this.isSignificantContextChange(event.context),
+                priority: 3,
+                targetMemoryType: MemoryType.EPISODIC
+            }
+        ];
+    }
 
-            // Remove from working memory
-            await this.workingMemory.delete(memory.id);
+    private setupEventStreams(): void {
+        // Monitor working memory operations
+        this.monitorMemoryOperations();
 
-        } catch (error) {
-            console.error('Error transitioning memory:', error);
-            // Consider adding retry logic or error handling here
+        // Set up consolidation pipeline
+        this.eventsSubject$.pipe(
+            // Filter out events without memory
+            filter((event): event is MemoryEvent & { memory: IMemoryUnit } => event.memory !== null),
+            // Group by consolidation rule
+            mergeMap(event => this.applyConsolidationRules(event)),
+            // Handle transitions with retry logic
+            mergeMap(({ memory, rule }) => 
+                from(this.transitionMemory(memory, rule)).pipe(
+                    retry(3),
+                    catchError(err => {
+                        logger.error('Failed to transition memory:', err);
+                        return EMPTY;
+                    })
+                )
+            )
+        ).subscribe();
+    }
+
+    public emitEvent(event: MemoryEvent): void {
+        this.eventsSubject$.next(event);
+    }
+
+    private async processEvents(events: MemoryEvent[]): Promise<void> {
+        // Process each event
+        for (const event of events) {
+            this.eventsSubject$.next(event);
         }
+    }
+
+    private applyConsolidationRules(event: MemoryEvent): Observable<{ memory: IMemoryUnit; rule: ConsolidationRule }> {
+        if (!event.memory) {
+            return EMPTY;
+        }
+
+        return from(this.consolidationRules)
+            .pipe(
+                filter(rule => rule.condition(event)),
+                map(rule => ({ memory: event.memory!, rule }))
+            );
+    }
+
+    private async transitionMemory(memory: IMemoryUnit, rule: ConsolidationRule): Promise<void> {
+        // Create memory in target store
+        const transitionedMemory: IMemoryUnit = {
+            ...memory,
+            memoryType: rule.targetMemoryType,
+            metadata: new Map(memory.metadata)
+        };
+
+        // Add transition metadata
+        transitionedMemory.metadata.set('transitionRule', rule.name);
+        transitionedMemory.metadata.set('originalType', memory.memoryType);
+        transitionedMemory.metadata.set('transitionTime', new Date().toISOString());
+
+        // Store in target memory and remove from source
+        if (rule.targetMemoryType === MemoryType.EPISODIC) {
+            await this.episodicMemory.store(transitionedMemory.content, transitionedMemory.metadata);
+            await this.workingMemory.delete(memory.id);
+        }
+    }
+
+    private isSignificantEmotion(emotion?: EmotionalState): boolean {
+        if (!emotion || emotion.valence === undefined || emotion.arousal === undefined) {
+            return false;
+        }
+        return Math.abs(emotion.valence) > 0.7 || Math.abs(emotion.arousal) > 0.7;
+    }
+
+    private isSignificantContextChange(context?: SessionMemoryContext): boolean {
+        // Implement context change significance check
+        return true; // Placeholder
     }
 }

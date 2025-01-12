@@ -1,6 +1,6 @@
 import { IMemoryUnit, IMemoryStorage, IMemoryIndex, MemoryFilter, MemoryType } from './types';
-import { EventEmitter } from 'events';
 import crypto from 'crypto';
+import { Logger } from '../Logger';
 
 /**
  * Memory cache implementation for optimizing memory access
@@ -8,244 +8,202 @@ import crypto from 'crypto';
 class MemoryCache {
     private cache: Map<string, IMemoryUnit> = new Map();
     private maxSize: number = 1000;
+    private logger = Logger.getInstance();
 
-    public get(id: string): IMemoryUnit | undefined {
-        const memory = this.cache.get(id);
-        if (memory) {
-            memory.accessCount = (memory.accessCount || 0) + 1;
-            memory.lastAccessed = new Date();
-            this.cache.set(id, memory);
-        }
-        return memory;
-    }
-
-    public set(id: string, memory: IMemoryUnit): void {
-        if (!id) {
-            return;
-        }
+    set(id: string, memory: IMemoryUnit): void {
         if (this.cache.size >= this.maxSize) {
             // Remove oldest entry
             const firstKey = this.cache.keys().next().value;
             if (firstKey) {
+                this.logger.debug('Cache eviction', { id: firstKey });
                 this.cache.delete(firstKey);
             }
         }
         this.cache.set(id, memory);
+        this.logger.debug('Cache set', { id, type: memory.memoryType });
     }
 
-    public delete(id: string): void {
+    get(id: string): IMemoryUnit | undefined {
+        const memory = this.cache.get(id);
+        this.logger.debug('Cache access', { 
+            id, 
+            hit: !!memory,
+            type: memory?.memoryType 
+        });
+        return memory;
+    }
+
+    delete(id: string): void {
         this.cache.delete(id);
+        this.logger.debug('Cache delete', { id });
     }
 
-    public clear(): void {
+    clear(): void {
+        const size = this.cache.size;
         this.cache.clear();
+        this.logger.debug('Cache cleared', { entriesCleared: size });
     }
 }
 
 /**
- * Abstract base class for all memory types
+ * Abstract base class for memory implementations
  */
-export abstract class AbstractMemory extends EventEmitter {
-    protected storage: IMemoryStorage;
-    protected index: IMemoryIndex;
-    protected cache: MemoryCache;
-    protected memoryType: MemoryType;
-    private cleanupTimer: ReturnType<typeof setInterval> | null = null;
-    private readonly CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
+export abstract class AbstractMemory {
+    protected readonly storage: IMemoryStorage;
+    protected readonly index: IMemoryIndex;
+    protected readonly memoryType: MemoryType;
+    protected readonly cache: MemoryCache = new MemoryCache();
+    protected readonly logger = Logger.getInstance();
 
-    constructor(storage: IMemoryStorage, index: IMemoryIndex, type: MemoryType) {
-        super();
+    constructor(storage: IMemoryStorage, index: IMemoryIndex, memoryType: MemoryType) {
         this.storage = storage;
         this.index = index;
-        this.cache = new MemoryCache();
-        this.memoryType = type;
-        this.startCleanupTimer();
+        this.memoryType = memoryType;
+        this.logger.debug('Memory system initialized', { type: memoryType });
     }
 
-    /**
-     * Start cleanup timer
-     */
-    protected startCleanupTimer(): void {
-        if (!this.cleanupTimer) {
-            this.cleanupTimer = setInterval(() => {
-                this.cleanup().catch(error => {
-                    console.error('Error during cleanup:', error);
-                });
-            }, this.CLEANUP_INTERVAL);
-        }
+    protected generateId(): string {
+        return crypto.randomUUID();
     }
 
-    /**
-     * Stop cleanup timer
-     */
-    public stopCleanupTimer(): void {
-        if (this.cleanupTimer) {
-            clearInterval(this.cleanupTimer);
-            this.cleanupTimer = null;
-        }
-    }
-
-    /**
-     * Store memory unit with specific type
-     */
-    protected async storeWithType(content: any, metadata: any): Promise<IMemoryUnit> {
-        // Convert metadata to Map if it's not already
-        const metadataMap = metadata instanceof Map ? metadata : new Map(Object.entries(metadata || {}));
-
-        // Create memory unit
+    protected async storeWithType(content: any, metadata: Map<string, any> = new Map()): Promise<IMemoryUnit> {
         const memory: IMemoryUnit = {
-            id: metadataMap.get('id') || this.generateId(),
+            id: this.generateId(),
             content,
-            metadata: metadataMap,
+            metadata: metadata || new Map(),
             timestamp: new Date(),
+            memoryType: this.memoryType,
             accessCount: 0,
             lastAccessed: new Date()
         };
 
-        // Set memory type
-        memory.metadata.set('type', this.memoryType.toString());
+        this.logger.debug('Storing memory', { 
+            id: memory.id, 
+            type: memory.memoryType,
+            metadata: Object.fromEntries(memory.metadata)
+        });
 
-        // Store memory
         await this.storage.store(memory);
         await this.index.add(memory);
-        this.cache.set(memory.id, memory);
-
-        // Emit memory stored event
-        this.emit('memoryStored', memory);
-
         return memory;
     }
 
-    /**
-     * Retrieve memories of specific type
-     */
-    protected async retrieveWithType(filter: MemoryFilter): Promise<IMemoryUnit[]> {
-        // Create a new filter object with the specified type
-        const memoryFilter: MemoryFilter = {
-            ...filter,
-            types: [this.memoryType],
-            ...(filter.query && { query: filter.query }),
-            ...(filter.dateRange && { dateRange: filter.dateRange }),
-            ...(filter.metadataFilters && { metadataFilters: filter.metadataFilters })
-        };
+    public async store(content: any, metadata?: Map<string, any>): Promise<IMemoryUnit> {
+        const memory = await this.storeWithType(content, metadata || new Map());
+        this.logger.info('Memory stored', { 
+            id: memory.id, 
+            type: memory.memoryType 
+        });
+        return memory;
+    }
 
-        const memories = await this.storage.retrieveByFilter(memoryFilter);
-        if (memories.length > 0) {
-            // Update access counts for all retrieved memories
-            await Promise.all(memories.map(async memory => {
-                memory.accessCount = (memory.accessCount || 0) + 1;
-                memory.lastAccessed = new Date();
-                await this.update(memory);
-            }));
+    public async retrieve(filter: MemoryFilter): Promise<IMemoryUnit[]> {
+        this.logger.debug('Retrieving memories', { filter });
+
+        // Check cache first for id-based queries
+        if (filter.id) {
+            const cached = this.cache.get(filter.id);
+            if (cached) {
+                await this.updateAccessStats(cached);
+                this.logger.debug('Cache hit', { id: filter.id });
+                return [cached];
+            }
+            this.logger.debug('Cache miss', { id: filter.id });
         }
+
+        const memories = await this.storage.retrieveByFilter(filter);
+        
+        this.logger.debug('Retrieved memories', { 
+            count: memories.length,
+            types: [...new Set(memories.map(m => m.memoryType))]
+        });
+
+        // Update cache and access stats
+        for (const memory of memories) {
+            this.cache.set(memory.id, memory);
+            await this.updateAccessStats(memory);
+        }
+
         return memories;
     }
 
-    /**
-     * Store content with metadata
-     */
-    public async store(content: any, metadata?: any): Promise<IMemoryUnit> {
-        return this.storeWithType(content, metadata);
+    protected async updateAccessStats(memory: IMemoryUnit): Promise<void> {
+        const updatedMemory = {
+            ...memory,
+            accessCount: (memory.accessCount || 0) + 1,
+            lastAccessed: new Date()
+        };
+
+        this.logger.debug('Updating access stats', { 
+            id: memory.id,
+            accessCount: updatedMemory.accessCount,
+            type: memory.memoryType
+        });
+
+        await this.storage.store(updatedMemory);
+        this.cache.set(updatedMemory.id, updatedMemory);
     }
 
-    /**
-     * Retrieve memories based on filter
-     */
-    public async retrieve(idOrFilter: string | MemoryFilter): Promise<IMemoryUnit[]> {
-        if (typeof idOrFilter === 'string') {
-            const memory = await this.storage.retrieve(idOrFilter);
-            return memory ? [memory] : [];
-        }
-        return this.retrieveWithType(idOrFilter);
-    }
-
-    /**
-     * Update memory unit
-     */
     public async update(memory: IMemoryUnit): Promise<void> {
+        this.logger.debug('Updating memory', { 
+            id: memory.id,
+            type: memory.memoryType
+        });
+
         await this.storage.update(memory);
         await this.index.update(memory);
-        this.cache.set(memory.id, memory);
     }
 
-    /**
-     * Delete memory unit
-     */
     public async delete(id: string): Promise<void> {
+        this.logger.debug('Deleting memory', { id });
         await this.storage.delete(id);
         await this.index.delete(id);
         this.cache.delete(id);
     }
 
-    /**
-     * Generate unique ID
-     */
-    protected generateId(): string {
-        return crypto.randomUUID();
-    }
-
-    /**
-     * Set memory index
-     */
-    public setIndex(index: IMemoryIndex): void {
-        this.index = index;
-    }
-
-    /**
-     * Get memory type
-     */
-    public getType(): MemoryType {
-        return this.memoryType;
-    }
-
-    /**
-     * Build search query from filter
-     */
-    protected buildQuery(filter: MemoryFilter): string {
-        const queryParts: string[] = [];
-
-        if (filter.types?.length) {
-            queryParts.push(`type:(${filter.types.join(' OR ')})`);
-        }
-
-        if (filter.dateRange) {
-            if (filter.dateRange.start) {
-                queryParts.push(`timestamp >= ${filter.dateRange.start.toISOString()}`);
-            }
-            if (filter.dateRange.end) {
-                queryParts.push(`timestamp <= ${filter.dateRange.end.toISOString()}`);
-            }
-        }
-
-        if (filter.id) {
-            queryParts.push(`id:${filter.id}`);
-        }
-
-        if (filter.metadataFilters?.length) {
-            for (const metadataFilter of filter.metadataFilters) {
-                for (const [key, value] of metadataFilter.entries()) {
-                    queryParts.push(`metadata.${key}:${value}`);
+    public async batchRetrieve(ids: string[]): Promise<(IMemoryUnit | null)[]> {
+        this.logger.debug('Batch retrieving memories', { count: ids.length });
+        
+        const results = await Promise.all(
+            ids.map(async id => {
+                try {
+                    const results = await this.retrieve({ id });
+                    return results[0] || null;
+                } catch (error) {
+                    this.logger.error('Error retrieving memory', { id, error });
+                    return null;
                 }
-            }
-        }
+            })
+        );
 
-        if (filter.contentFilters?.length) {
-            for (const contentFilter of filter.contentFilters) {
-                for (const [key, value] of contentFilter.entries()) {
-                    queryParts.push(`content.${key}:${value}`);
-                }
-            }
-        }
+        const successCount = results.filter(r => r !== null).length;
+        this.logger.debug('Batch retrieve completed', {
+            total: ids.length,
+            success: successCount,
+            failed: ids.length - successCount
+        });
 
-        if (filter.query) {
-            queryParts.push(filter.query);
-        }
-
-        return queryParts.join(' AND ');
+        return results;
     }
 
-    /**
-     * Abstract cleanup method to be implemented by derived classes
-     */
+    public getCurrentSize(): number {
+        const size = this.storage.getSize();
+        this.logger.debug('Current memory size', { 
+            type: this.memoryType, 
+            size,
+            capacityUsed: `${((size / this.getCapacity()) * 100).toFixed(1)}%`
+        });
+        return size;
+    }
+
+    public getCapacity(): number {
+        const capacity = this.storage.getCapacity();
+        this.logger.debug('Memory capacity', { 
+            type: this.memoryType, 
+            capacity 
+        });
+        return capacity;
+    }
+
     public abstract cleanup(): Promise<void>;
 }

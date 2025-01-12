@@ -1,4 +1,98 @@
 /**
+ * Session context interface representing the agent's current state
+ * during an interaction session.
+ */
+export interface SessionMemoryContext {
+    /** Type of context change */
+    contextType: 'capacity_warning' | 'goal_completion' | 'emotional_peak' | 'context_change';
+    /** Timestamp of the context change */
+    timestamp: Date;
+    /** Optional metadata */
+    metadata?: Map<string, any>;
+    /** Active goals for the current session */
+    userGoals: Set<string>;
+    /** Domain-specific context */
+    domainContext: Map<string, any>;
+    /** History of interactions */
+    interactionHistory: Array<{
+        timestamp: Date;
+        type: string;
+        content: any;
+    }>;
+    /** Emotional trends over time */
+    emotionalTrends: EmotionalTrendEntry[];
+    /** Current emotional state */
+    emotionalState: EmotionalState;
+    /** History of discussed topics */
+    topicHistory: string[];
+    /** User preferences */
+    userPreferences: Map<string, any>;
+    /** Current phase of interaction */
+    interactionPhase: 'introduction' | 'main' | 'conclusion';
+}
+
+/**
+ * Emotional state
+ */
+export interface EmotionalState {
+    /** Emotional valence (-1 to 1) */
+    valence: number;
+    /** Emotional arousal (-1 to 1) */
+    arousal: number;
+    /** Dominant emotion label */
+    emotion?: string;
+}
+
+/**
+ * Emotional trend entry
+ */
+export interface EmotionalTrendEntry {
+    timestamp: Date;
+    emotion: EmotionalState;
+}
+
+/**
+ * Emotional context interface
+ */
+export interface EmotionalContext {
+    /** Current emotional state */
+    currentEmotion: EmotionalState;
+    /** Emotional history */
+    emotionalTrends: EmotionalTrendEntry[];
+    /** Add a new emotional state */
+    addEmotion(emotion: EmotionalState): void;
+    /** Get emotional trend over time */
+    getEmotionalTrend(timeRange: { start: Date; end: Date }): EmotionalTrendEntry[];
+}
+
+/**
+ * Emotional context implementation
+ */
+export class EmotionalContextImpl implements EmotionalContext {
+    private emotions: EmotionalTrendEntry[] = [];
+    private maxHistory: number = 10;
+
+    addEmotion(emotion: EmotionalState): void {
+        this.emotions.push({ timestamp: new Date(), emotion });
+        if (this.emotions.length > this.maxHistory) {
+            this.emotions.shift();
+        }
+    }
+
+    get currentEmotion(): EmotionalState {
+        return this.emotions[this.emotions.length - 1].emotion;
+    }
+
+    get emotionalTrends(): EmotionalTrendEntry[] {
+        return [...this.emotions];
+    }
+
+    getEmotionalTrend(timeRange: { start: Date; end: Date }): EmotionalTrendEntry[] {
+        return this.emotions.filter((entry) => entry.timestamp >= timeRange.start && entry.timestamp <= timeRange.end);
+    }
+}
+
+/**
  * Base interface for all memory units
  */
 export interface IMemoryUnit {
@@ -6,132 +100,12 @@ export interface IMemoryUnit {
     content: any;
     metadata: Map<string, any>;
     timestamp: Date;
+    memoryType: MemoryType;
     accessCount?: number;
     lastAccessed?: Date;
     priority?: number;
     consolidationMetrics?: ConsolidationMetrics;
     associations?: Set<string>;
-}
-
-/**
- * Emotional state
- */
-export interface EmotionalState {
-    valence: number;  // -1 to 1, negative to positive
-    arousal: number;  // 0 to 1, calm to excited
-    dominance?: number;  // 0 to 1, submissive to dominant
-    category?: string;  // e.g., 'joy', 'sadness', 'anger', etc.
-}
-
-/**
- * Emotional context interface
- */
-export interface EmotionalContext {
-    /**
-     * Get current emotional state
-     */
-    getCurrentEmotion(): EmotionalState | null;
-
-    /**
-     * Get emotional trend over time
-     */
-    getEmotionalTrend(): EmotionalState[];
-
-    /**
-     * Add a new emotional state
-     */
-    addEmotion(emotion: EmotionalState): void;
-
-    /**
-     * Get average valence across emotional history
-     */
-    getAverageValence(): number;
-
-    /**
-     * Get average arousal across emotional history
-     */
-    getAverageArousal(): number;
-
-    /**
-     * Clear emotional history
-     */
-    clear(): void;
-
-    /**
-     * Get number of emotional states in history
-     */
-    getSize(): number;
-}
-
-/**
- * Emotional context implementation
- */
-export class EmotionalContextImpl implements EmotionalContext {
-    private emotions: EmotionalState[] = [];
-    private maxHistory: number = 10;
-
-    addEmotion(emotion: EmotionalState): void {
-        this.emotions.push(emotion);
-        if (this.emotions.length > this.maxHistory) {
-            this.emotions.shift();
-        }
-    }
-
-    getCurrentEmotion(): EmotionalState | null {
-        return this.emotions[this.emotions.length - 1] || null;
-    }
-
-    getEmotionalTrend(): EmotionalState[] {
-        return [...this.emotions];
-    }
-
-    getAverageValence(): number {
-        if (this.emotions.length === 0) return 0;
-        return this.emotions.reduce((sum, e) => sum + e.valence, 0) / this.emotions.length;
-    }
-
-    getAverageArousal(): number {
-        if (this.emotions.length === 0) return 0;
-        return this.emotions.reduce((sum, e) => sum + e.arousal, 0) / this.emotions.length;
-    }
-
-    clear(): void {
-        this.emotions = [];
-    }
-
-    getSize(): number {
-        return this.emotions.length;
-    }
-}
-
-/**
- * Session context interface representing the agent's current state
- * during an interaction session.
- */
-export interface SessionMemoryContext {
-    /** Active goals for the current session */
-    userGoals: Set<string>;
-    
-    /** Domain-specific context information */
-    domainContext: Map<string, any>;
-    
-    /** History of interactions in the current session */
-    interactionHistory: string[];
-    
-    /** Recent emotional states */
-    emotionalTrends: EmotionalState[];
-    
-    /** Current emotional context */
-    emotionalState: EmotionalContext;
-    
-    /** History of topics discussed in the session */
-    topicHistory: string[];
-    
-    /** User preferences for the current session */
-    userPreferences: Map<string, any>;
-    
-    /** Current phase of the interaction */
-    interactionPhase: 'introduction' | 'main' | 'conclusion';
 }
 
 /**
@@ -204,7 +178,9 @@ export enum MemoryType {
     SEMANTIC = 'semantic',
     EPISODIC = 'episodic',
     PROCEDURAL = 'procedural',
-    CONTEXTUAL = 'contextual'
+    CONTEXTUAL = 'contextual',
+    SYSTEM = 'system',
+    GENERIC = 'generic'
 }
 
 /**
@@ -460,17 +436,15 @@ export interface MemoryFilter {
     id?: string;
     ids?: string[];
     types?: MemoryType[];
-    metadataFilters?: Map<string, any>[];
-    contentFilters?: Map<string, any>[];
     query?: string;
     dateRange?: {
         start?: Date;
         end?: Date;
     };
-    minPriority?: number;
-    maxPriority?: number;
-    type?: MemoryType;
-    metadata?: Map<string, any>;
+    metadataFilters?: Map<string, any>[];
+    contentFilters?: Map<string, any>[];
+    orderBy?: 'lastAccessed' | 'accessCount' | 'timestamp';
+    limit?: number;
 }
 
 /**
@@ -489,9 +463,10 @@ export interface IMemoryStorage {
     store(memory: IMemoryUnit): Promise<void>;
     retrieve(id: string): Promise<IMemoryUnit | null>;
     retrieveByFilter(filter: MemoryFilter): Promise<IMemoryUnit[]>;
-    batchRetrieve(ids: string[]): Promise<(IMemoryUnit | null)[]>;
     update(memory: IMemoryUnit): Promise<void>;
     delete(id: string): Promise<void>;
+    getSize(): number;
+    getCapacity(): number;
 }
 
 /**
@@ -579,4 +554,62 @@ export interface UserInstruction {
     target: string;
     context?: string;
     metadata?: Map<string, any>;
+}
+
+// Memory Events
+export enum MemoryEventType {
+    ACCESS = 'access',
+    STORE = 'store',
+    MODIFY = 'modify',
+    UPDATE = 'update',
+    DELETE = 'delete',
+    CONSOLIDATE = 'consolidate',
+    CAPACITY_WARNING = 'capacity_warning',
+    CONTEXT_CHANGE = 'context_change',
+    EMOTIONAL_PEAK = 'emotional_peak',
+    GOAL_COMPLETED = 'goal_completed',
+    MEMORY_ACCESS = 'memory_access'
+}
+
+/**
+ * Memory Event
+ */
+export type MemoryEvent = {
+    type: MemoryEventType;
+    memory: IMemoryUnit | null;  // null for system events like capacity warnings
+    context?: SessionMemoryContext;
+    emotion?: EmotionalState;
+    timestamp: Date;
+    metadata?: Map<string, any>;
+}
+
+/**
+ * Consolidation Rule
+ */
+export interface ConsolidationRule {
+    name: string;
+    condition: (event: MemoryEvent) => boolean;
+    priority: number;
+    targetMemoryType: MemoryType;
+}
+
+/**
+ * Memory Event Handlers
+ */
+export interface MemoryEventHandlers {
+    onCapacityWarning: () => void;
+    onContextChange: (context: SessionMemoryContext) => void;
+    onEmotionalPeak: (emotion: EmotionalState) => void;
+    onGoalCompletion: (goalId: string) => void;
+    onMemoryAccess: (memoryId: string) => void;
+    onUserInstruction: (instruction: string) => void;
+}
+
+/**
+ * Memory Metrics
+ */
+export interface MemoryMetrics {
+    currentSize: number;
+    capacity: number;
+    utilizationRatio: number;
 }

@@ -7,6 +7,11 @@ import { logger } from '../../Logger';
  */
 export class InMemoryStorage implements IMemoryStorage {
     private memories: Map<string, IMemoryUnit> = new Map();
+    private maxCapacity: number;
+
+    constructor(maxCapacity: number = 1000) {
+        this.maxCapacity = maxCapacity;
+    }
 
     async store(memory: IMemoryUnit): Promise<void> {
         // Deep clone memory to prevent reference issues
@@ -56,6 +61,44 @@ export class InMemoryStorage implements IMemoryStorage {
         return this.deepCloneWithMaps(memory);
     }
 
+    async retrieveByFilter(filter: MemoryFilter): Promise<IMemoryUnit[]> {
+        let memories = Array.from(this.memories.values());
+
+        if (filter.types?.length) {
+            memories = memories.filter(m => filter.types!.includes(m.metadata.get('type')));
+        }
+
+        if (filter.dateRange) {
+            memories = memories.filter(m => {
+                const timestamp = m.timestamp.getTime();
+                const start = filter.dateRange?.start?.getTime() || 0;
+                const end = filter.dateRange?.end?.getTime() || Infinity;
+                return timestamp >= start && timestamp <= end;
+            });
+        }
+
+        if (filter.orderBy) {
+            memories.sort((a, b) => {
+                switch (filter.orderBy) {
+                    case 'lastAccessed':
+                        return (b.consolidationMetrics?.lastAccessed?.getTime() || 0) - (a.consolidationMetrics?.lastAccessed?.getTime() || 0);
+                    case 'accessCount':
+                        return (b.consolidationMetrics?.accessCount || 0) - (a.consolidationMetrics?.accessCount || 0);
+                    case 'timestamp':
+                        return b.timestamp.getTime() - a.timestamp.getTime();
+                    default:
+                        return 0;
+                }
+            });
+        }
+
+        if (filter.limit) {
+            memories = memories.slice(0, filter.limit);
+        }
+
+        return memories.map(memory => this.deepCloneWithMaps(memory));
+    }
+
     async update(memory: IMemoryUnit): Promise<void> {
         if (!memory.id || !this.memories.has(memory.id)) {
             throw new Error(`Memory with id ${memory.id} not found`);
@@ -93,69 +136,12 @@ export class InMemoryStorage implements IMemoryStorage {
         return memories;
     }
 
-    async retrieveByFilter(filter: MemoryFilter): Promise<IMemoryUnit[]> {
-        const results: IMemoryUnit[] = [];
-
-        for (const memory of this.memories.values()) {
-            if (this.matchesFilter(memory, filter)) {
-                results.push(this.deepCloneWithMaps(memory));
-            }
-        }
-
-        return results;
+    public getSize(): number {
+        return this.memories.size;
     }
 
-    private matchesFilter(memory: IMemoryUnit, filter: MemoryFilter): boolean {
-        // Check ID
-        if (filter.id && memory.id !== filter.id) return false;
-
-        // Check memory types
-        if (filter.types && filter.types.length > 0) {
-            const memoryType = memory.metadata.get('type');
-            if (!memoryType || !filter.types.includes(memoryType)) return false;
-        }
-
-        // Check priority range
-        if (filter.minPriority !== undefined && (memory.priority || 0) < filter.minPriority) return false;
-        if (filter.maxPriority !== undefined && (memory.priority || 0) > filter.maxPriority) return false;
-
-        // Check date range
-        if (filter.dateRange) {
-            const timestamp = memory.timestamp.getTime();
-            if (filter.dateRange.start && timestamp < filter.dateRange.start.getTime()) return false;
-            if (filter.dateRange.end && timestamp > filter.dateRange.end.getTime()) return false;
-        }
-
-        // Check metadata filters
-        if (filter.metadataFilters && filter.metadataFilters.length > 0) {
-            for (const metadataFilter of filter.metadataFilters) {
-                let matches = true;
-                for (const [key, value] of metadataFilter.entries()) {
-                    const memoryValue = memory.metadata.get(key);
-                    if (memoryValue !== value) {
-                        matches = false;
-                        break;
-                    }
-                }
-                if (!matches) return false;
-            }
-        }
-
-        // Check content filters
-        if (filter.contentFilters && filter.contentFilters.length > 0) {
-            for (const contentFilter of filter.contentFilters) {
-                let matches = true;
-                for (const [key, value] of contentFilter.entries()) {
-                    if (typeof memory.content !== 'object' || memory.content[key] !== value) {
-                        matches = false;
-                        break;
-                    }
-                }
-                if (!matches) return false;
-            }
-        }
-
-        return true;
+    public getCapacity(): number {
+        return this.maxCapacity;
     }
 
     private deepCloneWithMaps<T>(obj: T): T {
