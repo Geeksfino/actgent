@@ -241,3 +241,24 @@ class Agent {
    - Always provide relevant context when storing memories
    - Use specific filters when retrieving memories
    - Trust the system to handle memory transitions
+
+4. **Event Handling**:
+   - Subscribe to context changes
+   - Process events asynchronously
+   - Handle errors appropriately
+
+5. **Performance**:
+   - Monitor context size
+   - Clean up old contexts
+   - Optimize event processing
+
+6. **Logging**:
+   - Log context changes
+   - Log emotional state changes
+   - Log memory transitions
+
+7. **Migration Steps**:
+   - Update to new context interfaces
+   - Implement RxJS event handling
+   - Add proper logging
+   - Review context transitions

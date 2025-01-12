@@ -1,240 +1,156 @@
 # Memory System Documentation
 
 ## Overview
-The Actgent memory system is designed to mimic human memory processes, providing a sophisticated mechanism for storing, retrieving, and managing information. It includes working memory, long-term memory, context management, memory consolidation, and memory association capabilities.
+The Actgent memory system is designed to mimic human memory processes, providing a sophisticated mechanism for storing, retrieving, and managing information. It has been recently refactored to use RxJS for improved event handling and memory transitions.
 
-## Architecture
+## Core Components
 
-### Class Diagram
-```mermaid
-classDiagram
-    %% Interfaces
-    class IMemoryUnit {
-        <<interface>>
-        +id: string
-        +timestamp: Date
-        +content: any
-        +metadata: Map<string, any>
-    }
+### AbstractMemory
+The base class for all memory implementations, providing:
+- Standardized CRUD operations
+- Caching mechanism with LRU eviction
+- Integrated logging system
+- Memory access statistics
 
-    class IEpisodicMemoryUnit {
-        <<interface>>
-        +timeSequence: number
-        +location: string
-        +actors: string[]
-        +actions: string[]
-        +emotions: Map<string, number>
-    }
-
-    class ISemanticMemoryUnit {
-        <<interface>>
-        +concept: string
-        +relations: Map<string, string[]>
-        +confidence: number
-        +source: string
-    }
-
-    class IMemoryRetrieval {
-        <<interface>>
-        +query(filter: MemoryFilter): Promise<IMemoryUnit[]>
-        +exists(id: string): Promise<boolean>
-    }
-
-    class IMemoryStorage {
-        <<interface>>
-        +store(memory: IMemoryUnit): Promise<void>
-        +retrieve(id: string): Promise<IMemoryUnit>
-        +update(memory: IMemoryUnit): Promise<void>
-        +delete(id: string): Promise<void>
-        +batchStore(memories: IMemoryUnit[]): Promise<void>
-        +batchRetrieve(ids: string[]): Promise<IMemoryUnit[]>
-    }
-
-    class IMemoryIndex {
-        <<interface>>
-        +index(memory: IMemoryUnit): Promise<void>
-        +search(query: string): Promise<string[]>
-        +batchIndex(memories: IMemoryUnit[]): Promise<void>
-        +remove(id: string): Promise<void>
-    }
-
-    %% Abstract Classes
-    class BaseMemorySystem {
-        <<abstract>>
-        #storage: IMemoryStorage
-        #index: IMemoryIndex
-        #cache: MemoryCache
-        #cacheSize: number
-        #cacheExpiryMs: number
-        +store(content: any, metadata?: Map): Promise<void>
-        +retrieve(filter: MemoryFilter): Promise<IMemoryUnit[]>
-        +delete(id: string): Promise<void>
-        #cleanupCache(): void
-    }
-
-    class DeclarativeMemoryFactory {
-        <<abstract>>
-        +createMemoryUnit(content, metadata): IMemoryUnit
-    }
-
-    %% Concrete Classes
-    class LongTermMemory {
-        -declarativeMemory: DeclarativeMemory
-        -proceduralMemory: ProceduralMemory
-        +store(content, metadata?): Promise<void>
-        +retrieve(filter): Promise<IMemoryUnit[]>
-        +search(query: string): Promise<IMemoryUnit[]>
-    }
-
-    class DeclarativeMemory {
-        -episodicMemory: EpisodicMemory
-        -semanticMemory: SemanticMemory
-        +store(content, metadata?): Promise<void>
-        +retrieve(filter): Promise<IMemoryUnit[]>
-        -classifyMemoryType(content, metadata?): MemoryType
-    }
-
-    class EpisodicMemory {
-        -factory: EpisodicMemoryFactory
-        +store(content, metadata?): Promise<void>
-        +retrieve(filter): Promise<IMemoryUnit[]>
-        +findSimilarExperiences(experience): Promise<IEpisodicMemoryUnit[]>
-        -buildEpisodicQuery(filter): string
-    }
-
-    class SemanticMemory {
-        -factory: SemanticMemoryFactory
-        -conceptGraph: Map<string, Set<string>>
-        +store(content, metadata?): Promise<void>
-        +retrieve(filter): Promise<IMemoryUnit[]>
-        +findRelatedConcepts(concept): Promise<string[]>
-        -updateConceptGraph(memory): void
-        -buildSemanticQuery(filter): string
-    }
-
-    class EpisodicMemoryFactory {
-        +createMemoryUnit(content, metadata): IEpisodicMemoryUnit
-    }
-
-    class SemanticMemoryFactory {
-        +createMemoryUnit(content, metadata): ISemanticMemoryUnit
-    }
-
-    class ProceduralMemory {
-        +store(content, metadata?): Promise<void>
-        +retrieve(filter): Promise<IMemoryUnit[]>
-        -buildQuery(filter): string
-    }
-
-    class WorkingMemory {
-        -timeToLive: number
-        -cleanupInterval: number
-        -cleanupTimer: Timer
-        -ephemeralTimeToLive: number
-        +store(content, metadata?): Promise<void>
-        +storeEphemeral(content, metadata?): Promise<void>
-        +retrieve(filter): Promise<IMemoryUnit[]>
-        +update(memory: IMemoryUnit): Promise<void>
-        -cleanup(): Promise<void>
-        -isExpired(memory): boolean
-    }
-
-    class MemoryCache {
-        -cache: Map<string, IMemoryUnit>
-        -maxSize: number
-        +set(id, memory): void
-        +get(id): IMemoryUnit
-        +clear(): void
-    }
-
-    class ContextManager {
-        -currentContext: Map<string, any>
-        -workingMemory: WorkingMemory
-        -episodicMemory: EpisodicMemory
-        +setContext(key, value): void
-        +getContext(key): any
-        +clearContext(): void
-        +loadContext(): Promise<void>
-        +getAllContext(): Map<string, any>
-        +persistContext(): Promise<void>
-        +storeContextAsEpisodicMemory(metadata?: Map): Promise<void>
-        +cleanup(): void
-    }
-
-    class AgentMemorySystem {
-        -longTermMemory: LongTermMemory
-        -workingMemory: WorkingMemory
-        -contextManager: ContextManager
-        -consolidator: MemoryConsolidator
-        -associator: MemoryAssociator
-        -consolidationTimer: Timer
-        -consolidationInterval: number
-        +storeLongTerm(content, metadata?): Promise<void>
-        +storeWorkingMemory(content, metadata?): Promise<void>
-        +retrieveMemories(filter): Promise<IMemoryUnit[]>
-        +setContext(key, value): void
-        +getContext(key): any
-        +cleanup(): void
-    }
-
-    class MemoryFilter {
-        +type: MemoryType[]
-        +metadataFilters: Map<string, any>[]
-        +contentFilters: Map<string, any>[]
-        +dateRange: {start: Date, end: Date}
-        +ids: string[]
-    }
-
-    enum MemoryType {
-        EPISODIC
-        SEMANTIC
-        PROCEDURAL
-        PERCEPTUAL
-        SOCIAL
-        CONTEXTUAL
-        WORKING
-    }
-
-    %% Relationships
-    IEpisodicMemoryUnit --|> IMemoryUnit
-    ISemanticMemoryUnit --|> IMemoryUnit
-
-    BaseMemorySystem ..> IMemoryUnit
-    BaseMemorySystem ..> IMemoryStorage
-    BaseMemorySystem ..> IMemoryIndex
-    BaseMemorySystem *-- MemoryCache
-
-    LongTermMemory --|> BaseMemorySystem
-    LongTermMemory *-- DeclarativeMemory
-    LongTermMemory *-- ProceduralMemory
-
-    DeclarativeMemory --|> BaseMemorySystem
-    DeclarativeMemory *-- EpisodicMemory
-    DeclarativeMemory *-- SemanticMemory
-
-    EpisodicMemory --|> BaseMemorySystem
-    EpisodicMemory *-- EpisodicMemoryFactory
-    EpisodicMemory ..> IEpisodicMemoryUnit
-
-    SemanticMemory --|> BaseMemorySystem
-    SemanticMemory *-- SemanticMemoryFactory
-    SemanticMemory ..> ISemanticMemoryUnit
-
-    EpisodicMemoryFactory --|> DeclarativeMemoryFactory
-    SemanticMemoryFactory --|> DeclarativeMemoryFactory
-
-    ProceduralMemory --|> BaseMemorySystem
-    WorkingMemory --|> BaseMemorySystem
-
-    AgentMemorySystem *-- LongTermMemory
-    AgentMemorySystem *-- WorkingMemory
-    AgentMemorySystem *-- ContextManager
-    AgentMemorySystem *-- MemoryConsolidator
-    AgentMemorySystem *-- MemoryAssociator
-
-    ContextManager *-- WorkingMemory
-    ContextManager *-- EpisodicMemory
+### Memory Types
+```typescript
+enum MemoryType {
+    WORKING = 'working',
+    EPISODIC = 'episodic',
+    PROCEDURAL = 'procedural',
+    SEMANTIC = 'semantic',
+    CONTEXTUAL = 'contextual',
+    SYSTEM = 'system',
+    GENERIC = 'generic'
 }
+```
+
+### Memory Transitions
+Memory transitions are now handled through RxJS streams:
+```typescript
+class MemoryTransitionManager {
+    // Event streams
+    private memoryAccess$ = new Subject<string>();
+    private contextChange$ = new Subject<SessionMemoryContext>();
+    private emotionalChange$ = new Subject<EmotionalState>();
+    private capacityWarning$ = new Subject<void>();
+
+    // Event handlers
+    public onMemoryAccess(memoryId: string): void
+    public onContextChange(context: SessionMemoryContext): void
+    public onEmotionalChange(emotion: EmotionalState): void
+    public onCapacityWarning(): void
+}
+```
+
+### Context Management
+The SessionMemoryContextManager now maintains:
+- Current emotional state
+- Interaction history
+- Domain context
+- User preferences
+- Topic history
+
+### Logging System
+Integrated logging throughout the memory system:
+```typescript
+// Example logging in memory operations
+this.logger.debug('Memory operation', {
+    operation: 'store',
+    id: memory.id,
+    type: memory.memoryType,
+    metadata: Object.fromEntries(memory.metadata)
+});
+```
+
+## Memory Operations
+
+### Storage
+```typescript
+async store(content: any, metadata?: Map<string, any>): Promise<IMemoryUnit>
+```
+- Creates a new memory unit with unique ID
+- Adds timestamps and access statistics
+- Logs operation details
+- Updates cache
+
+### Retrieval
+```typescript
+async retrieve(filter: MemoryFilter): Promise<IMemoryUnit[]>
+```
+- Checks cache first for id-based queries
+- Updates access statistics
+- Logs cache hits/misses
+- Supports complex filtering
+
+### Cache Management
+```typescript
+class MemoryCache {
+    private cache: Map<string, IMemoryUnit>;
+    private maxSize: number;
+    
+    // LRU eviction
+    set(id: string, memory: IMemoryUnit): void
+    get(id: string): IMemoryUnit | undefined
+    delete(id: string): void
+    clear(): void
+}
+```
+
+## Performance Monitoring
+The system now includes comprehensive monitoring:
+- Memory size and capacity tracking
+- Cache effectiveness metrics
+- Operation timing
+- Error tracking
+- Event processing statistics
+
+## Best Practices
+
+### Memory Storage
+1. Always provide appropriate metadata
+2. Use proper memory types
+3. Consider memory lifecycle
+
+### Memory Retrieval
+1. Use specific filters when possible
+2. Monitor cache effectiveness
+3. Handle potential errors
+
+### Event Handling
+1. Subscribe to relevant event streams
+2. Process events asynchronously
+3. Maintain proper error boundaries
+
+## Error Handling
+```typescript
+try {
+    await memory.store(content, metadata);
+} catch (error) {
+    logger.error('Memory storage failed', {
+        error,
+        content: typeof content,
+        metadata: Object.fromEntries(metadata)
+    });
+    throw error;
+}
+```
+
+## Configuration
+```typescript
+interface MemoryConfig {
+    cacheSize: number;
+    consolidationInterval: number;
+    cleanupInterval: number;
+    loggingLevel: LogLevel;
+}
+```
+
+## Migration Guide
+1. Update to RxJS-based event handling
+2. Implement proper logging
+3. Update context management
+4. Review memory transitions
 
 ## Memory Transitions
 

@@ -5,26 +5,37 @@ import { Logger } from '../Logger';
 /**
  * Memory cache implementation for optimizing memory access
  */
-class MemoryCache {
+export class MemoryCache {
     private cache: Map<string, IMemoryUnit> = new Map();
+    private accessOrder: string[] = [];
     private maxSize: number = 1000;
     private logger = Logger.getInstance();
 
     set(id: string, memory: IMemoryUnit): void {
         if (this.cache.size >= this.maxSize) {
-            // Remove oldest entry
-            const firstKey = this.cache.keys().next().value;
-            if (firstKey) {
-                this.logger.debug('Cache eviction', { id: firstKey });
-                this.cache.delete(firstKey);
+            // Remove least recently used entry
+            const oldestId = this.accessOrder.shift();
+            if (oldestId) {
+                this.logger.debug('Cache eviction', { id: oldestId });
+                this.cache.delete(oldestId);
             }
         }
         this.cache.set(id, memory);
+        // Add to access order
+        this.accessOrder.push(id);
         this.logger.debug('Cache set', { id, type: memory.memoryType });
     }
 
     get(id: string): IMemoryUnit | undefined {
         const memory = this.cache.get(id);
+        if (memory) {
+            // Update access order
+            const index = this.accessOrder.indexOf(id);
+            if (index > -1) {
+                this.accessOrder.splice(index, 1);
+                this.accessOrder.push(id);
+            }
+        }
         this.logger.debug('Cache access', { 
             id, 
             hit: !!memory,
@@ -35,12 +46,17 @@ class MemoryCache {
 
     delete(id: string): void {
         this.cache.delete(id);
+        const index = this.accessOrder.indexOf(id);
+        if (index > -1) {
+            this.accessOrder.splice(index, 1);
+        }
         this.logger.debug('Cache delete', { id });
     }
 
     clear(): void {
         const size = this.cache.size;
         this.cache.clear();
+        this.accessOrder = [];
         this.logger.debug('Cache cleared', { entriesCleared: size });
     }
 }
@@ -77,7 +93,7 @@ export abstract class AbstractMemory {
             lastAccessed: new Date()
         };
 
-        this.logger.debug('Storing memory', { 
+        this.logger.debug('Storing memory unit', { 
             id: memory.id, 
             type: memory.memoryType,
             metadata: Object.fromEntries(memory.metadata)
@@ -98,15 +114,15 @@ export abstract class AbstractMemory {
     }
 
     public async retrieve(filter: MemoryFilter): Promise<IMemoryUnit[]> {
-        this.logger.debug('Retrieving memories', { filter });
+        this.logger.debug('Retrieving memory unit', { filter });
 
         // Check cache first for id-based queries
         if (filter.id) {
             const cached = this.cache.get(filter.id);
             if (cached) {
-                await this.updateAccessStats(cached);
+                const updated = await this.updateAccessStats(cached);
                 this.logger.debug('Cache hit', { id: filter.id });
-                return [cached];
+                return [updated];
             }
             this.logger.debug('Cache miss', { id: filter.id });
         }
@@ -119,43 +135,58 @@ export abstract class AbstractMemory {
         });
 
         // Update cache and access stats
-        for (const memory of memories) {
-            this.cache.set(memory.id, memory);
-            await this.updateAccessStats(memory);
-        }
+        const updatedMemories = await Promise.all(
+            memories.map(async memory => {
+                const updated = await this.updateAccessStats(memory);
+                this.cache.set(updated.id, updated);
+                return updated;
+            })
+        );
 
-        return memories;
+        return updatedMemories;
     }
 
-    protected async updateAccessStats(memory: IMemoryUnit): Promise<void> {
+    protected async updateAccessStats(memory: IMemoryUnit): Promise<IMemoryUnit> {
         const updatedMemory = {
             ...memory,
             accessCount: (memory.accessCount || 0) + 1,
             lastAccessed: new Date()
         };
 
-        this.logger.debug('Updating access stats', { 
+        this.logger.debug('Updating memory unit', { 
             id: memory.id,
             accessCount: updatedMemory.accessCount,
             type: memory.memoryType
         });
 
-        await this.storage.store(updatedMemory);
+        await this.storage.update(updatedMemory);
         this.cache.set(updatedMemory.id, updatedMemory);
+        return updatedMemory;
     }
 
     public async update(memory: IMemoryUnit): Promise<void> {
-        this.logger.debug('Updating memory', { 
-            id: memory.id,
-            type: memory.memoryType
+        this.logger.debug('Updating memory unit', { 
+            id: memory.id, 
+            type: memory.memoryType 
         });
 
         await this.storage.update(memory);
         await this.index.update(memory);
+        this.cache.set(memory.id, memory);
     }
 
     public async delete(id: string): Promise<void> {
-        this.logger.debug('Deleting memory', { id });
+        const memory = await this.storage.retrieve(id);
+        if (!memory) {
+            this.logger.error('Memory unit not found', { id });
+            return;
+        }
+
+        this.logger.debug('Deleting memory unit', { 
+            id, 
+            type: memory.memoryType 
+        });
+
         await this.storage.delete(id);
         await this.index.delete(id);
         this.cache.delete(id);
@@ -184,6 +215,18 @@ export abstract class AbstractMemory {
         });
 
         return results;
+    }
+
+    public async search(query: string): Promise<IMemoryUnit[]> {
+        this.logger.debug('Searching memories', { query });
+        
+        const ids = await this.index.search(query);
+        if (ids.length === 0) {
+            return [];
+        }
+
+        const filter: MemoryFilter = { ids };
+        return this.retrieve(filter);
     }
 
     public getCurrentSize(): number {

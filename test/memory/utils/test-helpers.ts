@@ -1,202 +1,158 @@
-import { IMemoryStorage, IMemoryIndex, IMemoryUnit, MemoryFilter, MemoryType } from '../../../src/core/memory/types';
-import crypto from 'crypto';
-import { logger } from '../../../src/core/Logger';
+import { IMemoryUnit, MemoryType, SessionMemoryContext, EmotionalState, IMemoryStorage, IMemoryIndex, MemoryFilter } from '../../../src/core/memory/types';
 
-// Debug flag that can be controlled via environment variable
-const DEBUG = process.env.DEBUG === 'true';
+export function createTestMemory(overrides: Partial<IMemoryUnit> = {}): IMemoryUnit {
+    return {
+        id: crypto.randomUUID(),
+        content: 'test content',
+        metadata: new Map(),
+        timestamp: new Date(),
+        memoryType: MemoryType.WORKING,
+        accessCount: 0,
+        lastAccessed: new Date(),
+        ...overrides
+    };
+}
+
+export function createTestContext(overrides: Partial<SessionMemoryContext> = {}): SessionMemoryContext {
+    return {
+        contextType: 'context_change',
+        timestamp: new Date(),
+        userGoals: new Set(),
+        domainContext: new Map(),
+        interactionHistory: [],
+        emotionalTrends: [],
+        emotionalState: { valence: 0, arousal: 0 },
+        topicHistory: [],
+        userPreferences: new Map(),
+        interactionPhase: 'introduction',
+        ...overrides
+    };
+}
+
+export function createEmotionalState(overrides: Partial<EmotionalState> = {}): EmotionalState {
+    return {
+        valence: 0,
+        arousal: 0,
+        ...overrides
+    };
+}
+
+export function sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+export function compareMemories(memory1: IMemoryUnit, memory2: IMemoryUnit): boolean {
+    const lastAccessedMatch = 
+        (!memory1.lastAccessed && !memory2.lastAccessed) ||
+        (memory1.lastAccessed?.getTime() === memory2.lastAccessed?.getTime());
+
+    return (
+        memory1.id === memory2.id &&
+        memory1.content === memory2.content &&
+        memory1.memoryType === memory2.memoryType &&
+        memory1.accessCount === memory2.accessCount &&
+        memory1.timestamp.getTime() === memory2.timestamp.getTime() &&
+        lastAccessedMatch &&
+        compareMetadata(memory1.metadata, memory2.metadata)
+    );
+}
+
+function compareMetadata(map1: Map<string, any>, map2: Map<string, any>): boolean {
+    if (map1.size !== map2.size) return false;
+    for (const [key, value] of map1) {
+        if (!map2.has(key)) return false;
+        const value2 = map2.get(key);
+        if (value instanceof Map) {
+            if (!(value2 instanceof Map) || !compareMetadata(value, value2)) {
+                return false;
+            }
+        } else if (value instanceof Set) {
+            if (!(value2 instanceof Set) || !compareSets(value, value2)) {
+                return false;
+            }
+        } else if (value instanceof Date) {
+            if (!(value2 instanceof Date) || value.getTime() !== value2.getTime()) {
+                return false;
+            }
+        } else if (value !== value2) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function compareSets<T>(set1: Set<T>, set2: Set<T>): boolean {
+    if (set1.size !== set2.size) return false;
+    for (const item of set1) {
+        if (!set2.has(item)) return false;
+    }
+    return true;
+}
 
 export class MockMemoryStorage implements IMemoryStorage {
-    private memories: Map<string, IMemoryUnit> = new Map();
+    private memoryStore = new Map<string, IMemoryUnit>();
+    private maxCapacity = 1000;
 
     async store(memory: IMemoryUnit): Promise<void> {
-        // Deep clone memory to prevent reference issues
-        const clonedMemory = {
-            ...memory,
-            id: memory.id || crypto.randomUUID(),
-            content: this.deepCloneWithMaps(memory.content),
-            metadata: memory.metadata instanceof Map ? 
-                new Map(memory.metadata) : 
-                new Map(Object.entries(memory.metadata || {})),
-            timestamp: memory.timestamp || new Date(),
-            accessCount: memory.accessCount || 0,
-            lastAccessed: memory.lastAccessed || new Date()
-        };
-        
-        // Ensure metadata type is set
-        if (!clonedMemory.metadata.has('type')) {
-            clonedMemory.metadata.set('type', MemoryType.WORKING);
-        }
-        
-        logger.debug('Storing memory: %o', clonedMemory);
-        this.memories.set(clonedMemory.id, clonedMemory);
-    }
-
-    private deepCloneWithMaps(obj: any): any {
-        if (obj === null || typeof obj !== 'object') {
-            return obj;
-        }
-
-        if (obj instanceof Map) {
-            return new Map(
-                Array.from(obj.entries()).map(([key, value]) => [
-                    key,
-                    this.deepCloneWithMaps(value)
-                ])
-            );
-        }
-
-        if (Array.isArray(obj)) {
-            return obj.map(item => this.deepCloneWithMaps(item));
-        }
-
-        const clonedObj: any = {};
-        for (const [key, value] of Object.entries(obj)) {
-            clonedObj[key] = this.deepCloneWithMaps(value);
-        }
-        return clonedObj;
+        this.memoryStore.set(memory.id, memory);
     }
 
     async retrieve(id: string): Promise<IMemoryUnit | null> {
-        const memory = this.memories.get(id);
-        logger.debug('Retrieved memory %s: %o', id, memory);
+        const memory = this.memoryStore.get(id);
         return memory || null;
     }
 
     async retrieveByFilter(filter: MemoryFilter): Promise<IMemoryUnit[]> {
-        logger.debug('Memories:', Array.from(this.memories.values()).map(m => ({
-            id: m.id,
-            content: m.content,
-            metadata: Object.fromEntries(m.metadata.entries())
-        })));
-        logger.debug('Filter:', filter);
-        
-        const memories = Array.from(this.memories.values()).filter(memory => {
-            // Type check
-            if (filter.types && filter.types.length > 0) {
-                const memoryType = memory.metadata.get('type');
-                if (!memoryType || !filter.types.some(t => t === memoryType)) {
-                    return false;
-                }
-            }
-
-            // Metadata filters
-            if (filter.metadataFilters) {
-                const matchesAnyFilter = filter.metadataFilters.some(metadataFilter => {
-                    return Array.from(metadataFilter.entries()).every(([key, value]) => {
-                        const memoryValue = memory.metadata.get(key);
-                        if (value instanceof Date && memoryValue instanceof Date) {
-                            return value.getTime() === memoryValue.getTime();
-                        }
-                        if (value instanceof Map && memoryValue instanceof Map) {
-                            return Array.from(value.entries()).every(([k, v]) => 
-                                memoryValue.get(k) === v
-                            );
-                        }
-                        return memoryValue === value;
-                    });
-                });
-                if (!matchesAnyFilter) {
-                    return false;
-                }
-            }
-
-            // Query match
-            const query = filter.query;
-            if (typeof query === 'string' && query.length > 0) {
-                const content = typeof memory.content === 'string' ? memory.content : JSON.stringify(memory.content);
-                const contentMatch = content.toLowerCase().includes(query.toLowerCase());
-                
-                const tags = memory.metadata.get('tags');
-                const tagsMatch = Array.isArray(tags) && tags.some(tag => 
-                    typeof tag === 'string' && tag.toLowerCase().includes(query.toLowerCase())
-                );
-                
-                if (!contentMatch && !tagsMatch) {
-                    return false;
-                }
-            }
-
-            // Priority check
-            if (filter.minPriority !== undefined || filter.maxPriority !== undefined) {
-                const priority = memory.priority || 0;
-                if (filter.minPriority !== undefined && priority < filter.minPriority) {
-                    return false;
-                }
-                if (filter.maxPriority !== undefined && priority > filter.maxPriority) {
-                    return false;
-                }
-            }
-
-            // Date range check
-            if (filter.dateRange) {
-                const timestamp = memory.timestamp.getTime();
-                if (filter.dateRange.start && timestamp < filter.dateRange.start.getTime()) {
-                    return false;
-                }
-                if (filter.dateRange.end && timestamp > filter.dateRange.end.getTime()) {
-                    return false;
-                }
-            }
-
-            return true;
-        });
-
-        // Clone memories to prevent reference issues
-        return memories.map(memory => ({
-            ...memory,
-            metadata: new Map(memory.metadata.entries())
-        }));
+        return Array.from(this.memoryStore.values());
     }
 
     async update(memory: IMemoryUnit): Promise<void> {
-        if (!(memory.metadata instanceof Map)) {
-            memory.metadata = new Map(Object.entries(memory.metadata || {}));
-        }
-        logger.debug('Updating memory: %o', memory);
-        this.memories.set(memory.id, memory);
+        this.memoryStore.set(memory.id, memory);
     }
 
     async delete(id: string): Promise<void> {
-        logger.debug('Deleting memory: %s', id);
-        this.memories.delete(id);
+        this.memoryStore.delete(id);
     }
 
     async clear(): Promise<void> {
-        logger.debug('Clearing all memories');
-        this.memories.clear();
+        this.memoryStore.clear();
     }
 
-    async batchStore(memories: IMemoryUnit[]): Promise<void> {
-        for (const memory of memories) {
-            await this.store(memory);
-        }
+    getSize(): number {
+        return this.memoryStore.size;
     }
 
-    async batchRetrieve(ids: string[]): Promise<(IMemoryUnit | null)[]> {
-        return Promise.all(ids.map(id => this.retrieve(id)));
+    getCapacity(): number {
+        return this.maxCapacity;
     }
 }
 
 export class MockMemoryIndex implements IMemoryIndex {
-    private memories: Map<string, IMemoryUnit> = new Map();
+    private indexMap = new Map<string, Set<string>>();
 
-    async add(memory: IMemoryUnit): Promise<void> {
-        this.memories.set(memory.id, memory);
+    async index(memory: IMemoryUnit): Promise<void> {
+        const key = memory.content.toString();
+        if (!this.indexMap.has(key)) {
+            this.indexMap.set(key, new Set());
+        }
+        this.indexMap.get(key)?.add(memory.id);
     }
 
-    async search(query: string): Promise<string[]> {
-        return Array.from(this.memories.keys());
+    async add(memory: IMemoryUnit): Promise<void> {
+        await this.index(memory);
     }
 
     async update(memory: IMemoryUnit): Promise<void> {
-        this.memories.set(memory.id, memory);
+        await this.index(memory);
     }
 
     async delete(id: string): Promise<void> {
-        this.memories.delete(id);
+        for (const ids of this.indexMap.values()) {
+            ids.delete(id);
+        }
     }
 
-    async index(memory: IMemoryUnit): Promise<void> {
-        await this.add(memory);
+    async search(query: string): Promise<string[]> {
+        return Array.from(this.indexMap.values()).flatMap(set => Array.from(set));
     }
 }

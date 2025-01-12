@@ -85,14 +85,32 @@ export class MemoryTransitionManager {
             memoryId,
             timestamp: new Date()
         });
+        this.emitEvent({
+            type: MemoryEventType.MEMORY_ACCESS,
+            timestamp: new Date(),
+            memory: null,
+            metadata: new Map([['memoryId', memoryId]])
+        });
     }
 
     public onContextChange(context: SessionMemoryContext): void {
         this.contextStream$.next(context);
+        this.emitEvent({
+            type: MemoryEventType.CONTEXT_CHANGE,
+            timestamp: new Date(),
+            memory: null,
+            context
+        });
     }
 
     public onEmotionalChange(emotion: EmotionalState): void {
         this.emotionalStream$.next(emotion);
+        this.emitEvent({
+            type: MemoryEventType.EMOTIONAL_PEAK,
+            timestamp: new Date(),
+            memory: null,
+            emotion
+        });
     }
 
     private async handleContextTransition(

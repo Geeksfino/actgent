@@ -1,5 +1,8 @@
 # Memory System Testing Guidelines
 
+## Overview
+With the recent migration to RxJS and enhanced logging, testing the memory system requires additional considerations for event streams, logging, and asynchronous operations.
+
 ## How It Should Work
 
 To integrate memory-management and context-management into an agent framework for prompt construction, we follow a systematic flow. Here's how these components work together to construct effective prompts for an agent's interaction with an LLM.
@@ -156,66 +159,156 @@ The mock storage implementation must:
 
 ## Test Categories
 
-### 1. Storage Tests
-```typescript
-// Basic storage
-await memory.store(content, metadata);
-const retrieved = await memory.retrieve({ types: [type] });
-expect(retrieved.length).toBe(1);
+### Unit Tests
 
-// Batch storage
-await memory.batchStore(memories);
-const retrieved = await memory.retrieve({ types: [type] });
-expect(retrieved.length).toBe(memories.length);
+#### Memory Operations
+```typescript
+describe('AbstractMemory', () => {
+    it('should store and retrieve memory with proper logging', async () => {
+        const memory = await testMemory.store(content, metadata);
+        expect(mockLogger.debug).toHaveBeenCalledWith(
+            'Storing memory',
+            expect.objectContaining({
+                id: memory.id,
+                type: memory.memoryType
+            })
+        );
+    });
+});
 ```
 
-### 2. Retrieval Tests
+#### Event Handling
 ```typescript
-// By type
-const typeFilter = { types: [MemoryType.WORKING] };
+describe('MemoryTransitionManager', () => {
+    it('should emit events on memory access', (done) => {
+        const manager = new MemoryTransitionManager();
+        manager.memoryAccess$.subscribe(id => {
+            expect(id).toBe(testId);
+            done();
+        });
+        manager.onMemoryAccess(testId);
+    });
+});
+```
 
-// By metadata
-const metadataFilter = {
-    types: [MemoryType.WORKING],
-    metadataFilters: [new Map([['key', 'value']])]
+#### Context Management
+```typescript
+describe('SessionMemoryContextManager', () => {
+    it('should update emotional state and emit event', (done) => {
+        const manager = new SessionMemoryContextManager();
+        manager.getContextChanges().subscribe(context => {
+            expect(context.emotionalState).toEqual(testEmotion);
+            done();
+        });
+        manager.updateEmotionalState(testEmotion);
+    });
+});
+```
+
+### Integration Tests
+
+#### Memory System Integration
+```typescript
+describe('AgentMemorySystem Integration', () => {
+    it('should handle memory transitions with context changes', async () => {
+        const system = new AgentMemorySystem();
+        const memory = await system.store(content);
+        await system.contextManager.updateEmotionalState(emotion);
+        
+        // Verify transitions
+        const transitions = await system.getMemoryTransitions(memory.id);
+        expect(transitions).toContainEqual(
+            expect.objectContaining({
+                type: 'emotional_peak',
+                emotion
+            })
+        );
+    });
+});
+```
+
+### Performance Tests
+
+#### Cache Performance
+```typescript
+describe('MemoryCache Performance', () => {
+    it('should maintain performance under load', async () => {
+        const start = performance.now();
+        for (let i = 0; i < 1000; i++) {
+            await cache.set(generateId(), generateMemory());
+        }
+        const end = performance.now();
+        expect(end - start).toBeLessThan(1000);
+    });
+});
+```
+
+#### Event Processing
+```typescript
+describe('Event Processing Performance', () => {
+    it('should handle high event throughput', async () => {
+        const events = generateEvents(1000);
+        const start = performance.now();
+        await Promise.all(events.map(e => manager.processEvent(e)));
+        const end = performance.now();
+        expect(end - start).toBeLessThan(2000);
+    });
+});
+```
+
+## Test Utilities
+
+### Mock Logger
+```typescript
+const mockLogger = {
+    debug: jest.fn(),
+    info: jest.fn(),
+    error: jest.fn()
 };
-
-// By date range
-const dateFilter = {
-    types: [MemoryType.WORKING],
-    dateRange: { start: new Date(), end: new Date() }
-};
 ```
 
-### 3. Expiration Tests
+### Test Helpers
 ```typescript
-// Test expired memory
-const expiredMetadata = new Map([
-    ['type', MemoryType.WORKING],
-    ['expiresAt', now - 1000] // Already expired
-]);
-
-// Test non-expired memory
-const validMetadata = new Map([
-    ['type', MemoryType.WORKING],
-    ['expiresAt', now + 10000] // Not expired yet
-]);
+function createTestMemory(type: MemoryType): IMemoryUnit {
+    return {
+        id: crypto.randomUUID(),
+        content: 'test content',
+        metadata: new Map(),
+        timestamp: new Date(),
+        memoryType: type,
+        accessCount: 0,
+        lastAccessed: new Date()
+    };
+}
 ```
 
-### 4. Update Tests
-```typescript
-// Store initial memory
-await memory.store(content, metadata);
+## Best Practices
 
-// Update memory
-const retrieved = await memory.retrieve({ types: [type] });
-retrieved[0].content = updatedContent;
-await memory.update(retrieved[0]);
+### Testing Events
+1. Use RxJS TestScheduler
+2. Test both sync and async paths
+3. Verify event ordering
 
-// Verify update
-const updated = await memory.retrieve({ types: [type] });
-expect(updated[0].content).toEqual(updatedContent);
-```
+### Testing Logging
+1. Mock logger in tests
+2. Verify log messages
+3. Check log levels
+
+### Performance Testing
+1. Set realistic thresholds
+2. Test under load
+3. Monitor resource usage
+
+### Error Handling
+1. Test error conditions
+2. Verify error logging
+3. Check error recovery
+
+## Migration Testing
+1. Test RxJS integration
+2. Verify logging implementation
+3. Check context transitions
+4. Test performance impact
 
 ## Common Pitfalls to Avoid
 
