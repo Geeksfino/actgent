@@ -52,9 +52,7 @@ export class InMemoryIndex implements IMemoryIndex {
     }
 
     async update(memory: IMemoryUnit): Promise<void> {
-        // Remove old indices
-        await this.delete(memory.id);
-        // Add new indices
+        await this.remove(memory.id);
         await this.index(memory);
     }
 
@@ -73,6 +71,22 @@ export class InMemoryIndex implements IMemoryIndex {
                 this.indexMap.delete(term);
             }
         });
+    }
+
+    async remove(id: string): Promise<void> {
+        // Remove from the memory map
+        this.memories.delete(id);
+
+        // Remove the ID from all index entries
+        for (const [term, ids] of this.indexMap.entries()) {
+            if (ids.has(id)) {
+                ids.delete(id);
+                // Clean up empty sets
+                if (ids.size === 0) {
+                    this.indexMap.delete(term);
+                }
+            }
+        }
     }
 
     async batchIndex(memories: IMemoryUnit[]): Promise<void> {

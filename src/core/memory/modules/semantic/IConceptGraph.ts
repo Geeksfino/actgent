@@ -1,4 +1,4 @@
-import { ConceptNode, ConceptRelation } from '../types';
+import { ConceptNode, ConceptRelation } from './types';
 
 /**
  * Interface for concept graph operations

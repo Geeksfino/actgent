@@ -1,4 +1,60 @@
 /**
+ * Interface for all memory types
+ */
+export interface IMemory<T extends IMemoryUnit> {
+    /**
+     * Store content with metadata
+     */
+    store(content: T): Promise<void>;
+
+    /**
+     * Retrieve a memory unit by ID
+     */
+    retrieve(id: string): Promise<T | null>;
+
+    /**
+     * Query memory units based on filter
+     */
+    query(filter: MemoryFilter): Promise<T[]>;
+
+    /**
+     * Delete a memory unit
+     */
+    delete(id: string): Promise<void>;
+
+    /**
+     * Clear all memory units
+     */
+    clear(): Promise<void>;
+
+    /**
+     * Subscribe to memory events
+     */
+    onEvent(callback: (unit: T) => void): void;
+
+    /**
+     * Type guard to ensure retrieved memory unit is of correct type
+     */
+    isMemoryUnitOfType(unit: any): unit is T;
+}
+
+/**
+ * Base interface for all memory units
+ */
+export interface IMemoryUnit {
+    id: string;
+    content: any;
+    metadata: Map<string, any>;
+    timestamp: Date;
+    memoryType: MemoryType;
+    accessCount?: number;
+    lastAccessed?: Date;
+    priority?: number;
+    consolidationMetrics?: ConsolidationMetrics;
+    associations?: Set<string>;
+}
+
+/**
  * Session context interface representing the agent's current state
  * during an interaction session.
  */
@@ -93,22 +149,6 @@ export class EmotionalContextImpl implements EmotionalContext {
 }
 
 /**
- * Base interface for all memory units
- */
-export interface IMemoryUnit {
-    id: string;
-    content: any;
-    metadata: Map<string, any>;
-    timestamp: Date;
-    memoryType: MemoryType;
-    accessCount?: number;
-    lastAccessed?: Date;
-    priority?: number;
-    consolidationMetrics?: ConsolidationMetrics;
-    associations?: Set<string>;
-}
-
-/**
  * Interface for memory context management operations
  */
 export interface IMemoryContextManager {
@@ -145,27 +185,6 @@ export interface IMemoryContextManager {
      * Get current context state
      */
     getCurrentContext(): SessionMemoryContext;
-}
-
-/**
- * Interface for episodic memory units, representing experiences and events
- */
-export interface IEpisodicMemoryUnit extends IMemoryUnit {
-    content: {
-        timeSequence: number;
-        location: string;
-        actors: string[];
-        actions: string[];
-        emotions: EmotionalContext;
-        context: SessionMemoryContext;
-        coherenceScore: number;
-        userInstruction?: string;
-        consolidationStatus?: ConsolidationStatus;
-        originalMemories?: string[];  // IDs of memories that were consolidated
-        relatedTo?: string[];        // IDs of related memories
-        timestamp: Date;
-    };
-    metadata: Map<string, any>;
 }
 
 /**
@@ -280,174 +299,6 @@ export interface ConsolidationResult {
 }
 
 /**
- * Interface for semantic memory units, representing knowledge and concepts
- */
-export interface ISemanticMemoryUnit extends IMemoryUnit {
-    concept: string;
-    conceptGraph: {
-        nodes: Map<string, ConceptNode>;
-        relations: ConceptRelation[];
-    };
-    confidence: number;
-    source: string;
-    lastVerified: Date;
-    consolidationStatus?: ConsolidationStatus;
-}
-
-/**
- * Concept node in semantic memory
- */
-export interface ConceptNode {
-    id: string;
-    name: string;
-    label?: string;
-    confidence: number;
-    source: string;
-    lastVerified: Date;
-    properties: Map<string, any>;
-}
-
-/**
- * Concept relation in semantic memory
- */
-export interface ConceptRelation {
-    id: string;
-    sourceId: string;
-    targetId: string;
-    type: RelationType;
-    weight: number;
-    confidence: number;
-}
-
-/**
- * Relation types
- */
-export enum RelationType {
-    IS_A = 'is_a',
-    HAS_A = 'has_a',
-    PART_OF = 'part_of',
-    SIMILAR_TO = 'similar_to',
-    RELATED_TO = 'related_to',
-    CAUSES = 'causes',
-    FOLLOWS = 'follows',
-    USED_FOR = 'used_for',
-    LOCATED_IN = 'located_in',
-    MEMBER_OF = 'member_of'
-}
-
-/**
- * Base metadata interface that all memory types must implement
- */
-export interface BaseMetadata {
-    type: MemoryType;
-}
-
-/**
- * Working memory specific metadata
- */
-export interface WorkingMetadata extends BaseMetadata {
-    type: MemoryType.WORKING;
-    expiresAt: number;
-}
-
-/**
- * Episodic memory specific metadata
- */
-export interface EpisodicMetadata extends BaseMetadata {
-    type: MemoryType.EPISODIC;
-    importanceScore?: number;
-    emotionalSignificance?: number;
-    consolidationStatus?: ConsolidationStatus;
-    consolidatedFrom?: string;
-    consolidatedInto?: string;
-    location?: string;
-    actors?: string;
-}
-
-/**
- * Convert a metadata object to a Map
- */
-export function metadataToMap(metadata: BaseMetadata): Map<string, any> {
-    return new Map(Object.entries(metadata));
-}
-
-/**
- * Convert a Map back to a typed metadata object
- */
-export function mapToMetadata<T extends BaseMetadata>(map: Map<string, any>): T {
-    const obj: any = {};
-    map.forEach((value, key) => {
-        obj[key] = value;
-    });
-    return obj as T;
-}
-
-/**
- * Create working memory metadata
- */
-export function createWorkingMetadata(expiresAt: number): Map<string, any> {
-    const metadata: WorkingMetadata = {
-        type: MemoryType.WORKING,
-        expiresAt
-    };
-    return metadataToMap(metadata);
-}
-
-/**
- * Create episodic memory metadata
- */
-export function createEpisodicMetadata(params: Partial<Omit<EpisodicMetadata, 'type'>>): Map<string, any> {
-    const metadata: EpisodicMetadata = {
-        type: MemoryType.EPISODIC,
-        ...params
-    };
-    return metadataToMap(metadata);
-}
-
-/**
- * Type guard to check if metadata map represents working memory
- */
-export function isWorkingMemory(metadata: Map<string, any>): boolean {
-    return metadata.get('type') === MemoryType.WORKING;
-}
-
-/**
- * Type guard to check if metadata map represents episodic memory
- */
-export function isEpisodicMemory(metadata: Map<string, any>): boolean {
-    return metadata.get('type') === MemoryType.EPISODIC;
-}
-
-/**
- * Interface for memory metadata
- */
-export interface IMemoryMetadata {
-    type: MemoryType;
-    importanceScore?: number;
-    emotionalSignificance?: number;
-    consolidationStatus?: ConsolidationStatus;
-    [key: string]: any;
-}
-
-/**
- * Filter type for memory queries
- */
-export interface MemoryFilter {
-    id?: string;
-    ids?: string[];
-    types?: MemoryType[];
-    query?: string;
-    dateRange?: {
-        start?: Date;
-        end?: Date;
-    };
-    metadataFilters?: Map<string, any>[];
-    contentFilters?: Map<string, any>[];
-    orderBy?: 'lastAccessed' | 'accessCount' | 'timestamp';
-    limit?: number;
-}
-
-/**
  * Interface for memory retrieval operations
  */
 export interface IMemoryRetrieval {
@@ -467,17 +318,23 @@ export interface IMemoryStorage {
     delete(id: string): Promise<void>;
     getSize(): number;
     getCapacity(): number;
+    add(id: string, memory: IMemoryUnit): Promise<void>;
+    get(id: string): Promise<IMemoryUnit | null>;
+    remove(id: string): Promise<void>;
+    clear(): Promise<void>;
+    getAll(): Promise<IMemoryUnit[]>;
 }
 
 /**
  * Interface for memory indexing operations
  */
 export interface IMemoryIndex {
+    index?: (memory: IMemoryUnit) => Promise<void>;
     add(memory: IMemoryUnit): Promise<void>;
     search(query: string): Promise<string[]>;
     update(memory: IMemoryUnit): Promise<void>;
     delete(id: string): Promise<void>;
-    index?: (memory: IMemoryUnit) => Promise<void>;
+    remove(id: string): Promise<void>;
 }
 
 /**
@@ -498,52 +355,6 @@ export interface IMemoryAssociation {
     dissociate(sourceId: string, targetId: string): Promise<void>;
     getAssociations(id: string): Promise<string[]>;
     findRelatedMemories(id: string, maxResults?: number): Promise<IMemoryUnit[]>;
-}
-
-/**
- * Helper function to build query string from memory filter
- */
-export function buildQueryFromFilter(filter: MemoryFilter): string {
-    const queryParts: string[] = [];
-
-    if (filter.types?.length) {
-        queryParts.push(`type:(${filter.types.join(' OR ')})`);
-    }
-
-    if (filter.dateRange) {
-        if (filter.dateRange.start) {
-            queryParts.push(`timestamp >= ${filter.dateRange.start.toISOString()}`);
-        }
-        if (filter.dateRange.end) {
-            queryParts.push(`timestamp <= ${filter.dateRange.end.toISOString()}`);
-        }
-    }
-
-    if (filter.id) {
-        queryParts.push(`id:${filter.id}`);
-    }
-
-    if (filter.metadataFilters?.length) {
-        for (const metadataFilter of filter.metadataFilters) {
-            for (const [key, value] of metadataFilter.entries()) {
-                queryParts.push(`metadata.${key}:${value}`);
-            }
-        }
-    }
-
-    if (filter.contentFilters?.length) {
-        for (const contentFilter of filter.contentFilters) {
-            for (const [key, value] of contentFilter.entries()) {
-                queryParts.push(`content.${key}:${value}`);
-            }
-        }
-    }
-
-    if (filter.query) {
-        queryParts.push(filter.query);
-    }
-
-    return queryParts.join(' AND ');
 }
 
 /**
@@ -613,3 +424,40 @@ export interface MemoryMetrics {
     capacity: number;
     utilizationRatio: number;
 }
+
+/**
+ * Base metadata interface that all memory types must implement
+ */
+export interface BaseMetadata {
+    type: MemoryType;
+}
+
+/**
+ * Interface for memory metadata
+ */
+export interface IMemoryMetadata {
+    type: MemoryType;
+    importanceScore?: number;
+    emotionalSignificance?: number;
+    consolidationStatus?: ConsolidationStatus;
+    [key: string]: any;
+}
+
+/**
+ * Filter type for memory queries
+ */
+export interface MemoryFilter {
+    id?: string;
+    ids?: string[];
+    types?: MemoryType[];
+    query?: string;
+    dateRange?: {
+        start?: Date;
+        end?: Date;
+    };
+    metadataFilters?: Map<string, any>[];
+    contentFilters?: Map<string, any>[];
+    orderBy?: 'lastAccessed' | 'accessCount' | 'timestamp';
+    limit?: number;
+}
+

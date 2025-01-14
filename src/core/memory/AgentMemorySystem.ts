@@ -8,10 +8,12 @@ import {
     SessionMemoryContext,
     EmotionalState
 } from './types';
+import { IEpisodicMemoryUnit } from './modules/episodic/types';
+import { IProceduralMemoryUnit } from './modules/procedural/types';
 import { SessionMemoryContextManager } from './SessionMemoryContextManager';
-import { WorkingMemory } from './WorkingMemory';
-import { EpisodicMemory } from './EpisodicMemory';
-import { ProceduralMemory } from './ProceduralMemory';
+import { WorkingMemory } from './modules/working/WorkingMemory';
+import { EpisodicMemory } from './modules/episodic/EpisodicMemory';
+import { ProceduralMemory } from './modules/procedural/ProceduralMemory';
 import { MemoryTransitionManager } from './MemoryTransitionManager';
 import { Subject, interval, Observable } from 'rxjs';
 import { map, filter, distinctUntilChanged } from 'rxjs/operators';
@@ -134,7 +136,7 @@ export class AgentMemorySystem {
      * Store a new memory unit
      */
     public async store(memory: IMemoryUnit): Promise<void> {
-        await this.workingMemory.store(memory.content, memory.metadata);
+        await this.workingMemory.store(memory);
         
         // Check capacity after storing
         if (this.workingMemory.getCurrentSize() >= this.workingMemory.getCapacity() * 0.8) {
@@ -148,23 +150,26 @@ export class AgentMemorySystem {
      */
     public async remember(content: any, metadata: Map<string, any> = new Map()): Promise<void> {
         const memoryType = metadata?.get('type') || 'episodic';
+        let memory;
         
-        // Store in working memory
-        await this.store({ 
-            content, 
-            metadata,
-            id: crypto.randomUUID(),
-            timestamp: new Date(),
-            memoryType
-        });
-        
-        // Update context based on content type
-        if (memoryType === 'contextual') {
-            const key = metadata.get('contextKey');
-            const value = content;
-            if (key) {
-                await this.contextManager.setContext(key, value);
-            }
+        switch (memoryType) {
+            case 'episodic':
+                memory = { content, metadata } as IEpisodicMemoryUnit;
+                await this.episodicMemory.store(memory);
+                break;
+            case 'procedural':
+                memory = {
+                    content,
+                    metadata,
+                    procedure: metadata.get('procedure') || 'defaultProcedure',
+                    expectedOutcomes: metadata.get('expectedOutcomes') || [],
+                    applicableContext: metadata.get('applicableContext') || 'defaultContext'
+                } as IProceduralMemoryUnit;
+                await this.proceduralMemory.store(memory);
+                break;
+            default:
+                memory = { content, metadata } as IMemoryUnit;
+                await this.workingMemory.store(memory);
         }
     }
 
@@ -207,13 +212,13 @@ export class AgentMemorySystem {
 
         // Search across all memory types
         const memories = await Promise.all([
-            this.workingMemory.retrieve({}), // Retrieve all from working memory
-            this.episodicMemory.retrieve(filter),
-            this.proceduralMemory.retrieve(filter)
+            this.workingMemory.query(filter),
+            this.episodicMemory.query(filter),
+            this.proceduralMemory.query(filter)
         ]);
 
-        // Get all memories
-        const allMemories = memories.flat();
+        // Get all memories and filter out nulls
+        const allMemories = memories.flat().filter((memory): memory is IMemoryUnit => memory !== null);
 
         // If we have a specific memory ID, also get related memories
         if (filter.ids && filter.ids.length === 1) {

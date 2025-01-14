@@ -1,5 +1,5 @@
 import { IConceptGraph } from './IConceptGraph';
-import { ConceptNode, ConceptRelation, RelationType } from '../types';
+import { ConceptNode, ConceptRelation, RelationType } from './types';
 import crypto from 'crypto';
 
 /**

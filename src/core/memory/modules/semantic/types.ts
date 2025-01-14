@@ -1,4 +1,4 @@
-import { IMemoryUnit } from '../types';
+import { IMemoryUnit, MemoryType } from '../../types';
 
 /**
  * Types of semantic relationships between concepts
@@ -13,34 +13,76 @@ export enum RelationType {
     CAUSES = 'CAUSES',       // Causal relationship (e.g., "rain" CAUSES "wet")
     PRECEDED_BY = 'PRECEDED_BY', // Temporal relationship (e.g., "dinner" PRECEDED_BY "cooking")
     FOLLOWED_BY = 'FOLLOWED_BY', // Temporal relationship (e.g., "cooking" FOLLOWED_BY "eating")
-    USED_FOR = 'USED_FOR',   // Functional relationship (e.g., "knife" USED_FOR "cutting")
+    USED_FOR = 'USED_FOR'   // Functional relationship (e.g., "knife" USED_FOR "cutting")
 }
 
 /**
  * Represents a node in the concept graph
  */
-export interface ConceptNode {
+export class ConceptNode {
     id: string;
-    label: string;
-    type: string;
-    properties: Map<string, any>;
+    name: string;
+    label?: string;
     confidence: number;
-    lastUpdated: Date;
-    source: string[];  // References to source memories
+    source: string;
+    lastVerified: Date;
+    properties: Map<string, any>;
+
+    constructor(id: string, name: string, confidence: number, source: string, lastVerified: Date, properties: Map<string, any>) {
+        this.id = id;
+        this.name = name;
+        this.confidence = confidence;
+        this.source = source;
+        this.lastVerified = lastVerified;
+        this.properties = properties;
+    }
 }
 
 /**
  * Represents a relationship between two concepts
+ */
+export class ConceptRelation {
+    id: string;
+    sourceId: string;
+    targetId: string;
+    type: RelationType;
+    weight: number;
+    confidence: number;
+
+    constructor(id: string, sourceId: string, targetId: string, type: RelationType, weight: number, confidence: number) {
+        this.id = id;
+        this.sourceId = sourceId;
+        this.targetId = targetId;
+        this.type = type;
+        this.weight = weight;
+        this.confidence = confidence;
+    }
+}
+
+/**
+ * Interface for concept nodes in the semantic network
+ */
+export interface ConceptNode {
+    id: string;
+    name: string;
+    type: string;
+    confidence: number;
+    source: string;
+    lastVerified: Date;
+    properties: Map<string, any>;
+}
+
+/**
+ * Interface for relationships between concepts
  */
 export interface ConceptRelation {
     id: string;
     sourceId: string;
     targetId: string;
     type: RelationType;
-    properties: Map<string, any>;
+    weight: number;
     confidence: number;
-    lastUpdated: Date;
-    source: string[];  // References to source memories
+    properties: Map<string, any>;
 }
 
 /**
@@ -73,4 +115,28 @@ export interface ISemanticMemory {
     findRelations(conceptId: string): Promise<ConceptRelation[]>;
     mergeConcepts(sourceId: string, targetId: string): Promise<void>;
     getConceptGraph(): IConceptGraph;
+}
+
+/**
+ * Interface for semantic memory units
+ */
+export interface ISemanticMemoryUnit extends IMemoryUnit {
+    /** Memory type */
+    memoryType: MemoryType.SEMANTIC;
+    /** Timestamp when this unit was created */
+    timestamp: Date;
+    /** Memory metadata */
+    metadata: Map<string, any>;
+    /** The concept or relationship being stored */
+    content: ConceptNode | ConceptRelation;
+}
+
+/**
+ * Create semantic memory metadata
+ */
+export function createSemanticMetadata(timestamp: Date): Map<string, any> {
+    const metadata = new Map<string, any>();
+    metadata.set('type', MemoryType.SEMANTIC);
+    metadata.set('timestamp', timestamp);
+    return metadata;
 }

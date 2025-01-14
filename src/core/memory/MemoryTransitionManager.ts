@@ -1,9 +1,11 @@
 import { Subject, merge, from, Observable, EMPTY, interval } from 'rxjs';
 import { debounceTime, filter, mergeMap, distinctUntilChanged, map, bufferTime, retry, catchError, withLatestFrom } from 'rxjs/operators';
-import { WorkingMemory } from './WorkingMemory';
-import { EpisodicMemory } from './EpisodicMemory';
-import { IMemoryUnit, MemoryType, MemoryEvent, MemoryEventType, ConsolidationRule, EmotionalState, SessionMemoryContext } from './types';
+import { WorkingMemory } from './modules/working/WorkingMemory';
+import { EpisodicMemory } from './modules/episodic/EpisodicMemory';
+import { IMemoryUnit, MemoryType, MemoryEvent, MemoryEventType, ConsolidationRule, EmotionalState, SessionMemoryContext, MemoryFilter } from './types';
 import { logger } from '../Logger';
+import { NLPService } from './modules/semantic/nlp/NLPService';
+import { ConceptGraph } from './modules/semantic/ConceptGraph';
 
 export class MemoryTransitionManager {
     private consolidationRules: ConsolidationRule[] = [];
@@ -16,12 +18,19 @@ export class MemoryTransitionManager {
     private readonly contextStream$ = new Subject<SessionMemoryContext>();
     private readonly emotionalStream$ = new Subject<EmotionalState>();
 
+    private nlpService: NLPService;
+    private conceptGraph: ConceptGraph;
+
     constructor(
         private workingMemory: WorkingMemory,
         private episodicMemory: EpisodicMemory
     ) {
         this.setupDefaultRules();
         this.setupEventStreams();
+
+        // Initialize NLP service and concept graph
+        this.nlpService = new NLPService('your-api-key'); // Replace with actual API key
+        this.conceptGraph = new ConceptGraph();
     }
 
     private monitorMemoryOperations() {
@@ -67,12 +76,36 @@ export class MemoryTransitionManager {
                 this.handleEmotionalTransition(emotion, memories)
             )
         ).subscribe();
+
+        // Process semantic memory periodically
+        interval(60000).pipe(
+            mergeMap(() => this.processSemanticMemory())
+        ).subscribe();
+    }
+
+    private async processSemanticMemory(): Promise<void> {
+        const filter: MemoryFilter = { types: [MemoryType.WORKING] };
+        const memories = await this.workingMemory.query(filter);
+
+        for (const memory of memories) {
+            if (!memory) continue;
+            const content = typeof memory.content === 'string' ? memory.content : memory.content.data.advice;
+            const extractedConcepts = await this.nlpService.extractConcepts(content);
+
+            for (const concept of extractedConcepts.concepts) {
+                await this.conceptGraph.addNode(concept);
+            }
+            for (const relation of extractedConcepts.relations) {
+                await this.conceptGraph.addRelation(relation);
+            }
+        }
     }
 
     private getActiveMemories(): Observable<IMemoryUnit[]> {
-        return from(this.workingMemory.retrieve({
-            types: [MemoryType.WORKING, MemoryType.EPISODIC]
-        }));
+        const filter: MemoryFilter = { types: [MemoryType.WORKING, MemoryType.EPISODIC] };
+        return from(this.workingMemory.query(filter)).pipe(
+            map(memories => memories.filter((memory): memory is IMemoryUnit => memory !== null))
+        );
     }
 
     private analyzeAccessPatterns(accesses: { memoryId: string, timestamp: Date }[]): void {
@@ -148,10 +181,7 @@ export class MemoryTransitionManager {
                 metadata: new Map(memory.metadata).set('transitionReason', reason)
             };
 
-            await this.episodicMemory.store(
-                transitionedMemory.content,
-                transitionedMemory.metadata
-            );
+            await this.episodicMemory.store(transitionedMemory);
             await this.workingMemory.delete(memory.id);
 
             this.eventsSubject$.next({
@@ -276,7 +306,7 @@ export class MemoryTransitionManager {
 
         // Store in target memory and remove from source
         if (rule.targetMemoryType === MemoryType.EPISODIC) {
-            await this.episodicMemory.store(transitionedMemory.content, transitionedMemory.metadata);
+            await this.episodicMemory.store(transitionedMemory);
             await this.workingMemory.delete(memory.id);
         }
     }

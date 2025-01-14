@@ -1,6 +1,6 @@
 import { ConceptNode, ConceptRelation, RelationType } from '../types';
 import { OpenAI } from 'openai';
-import { logger } from '../../../Logger';
+import { logger } from '../../../../Logger';
 
 interface ExtractedConcepts {
     concepts: ConceptNode[];
@@ -64,6 +64,7 @@ Format your response as JSON with:
     }
 
     async extractConcepts(text: string): Promise<ExtractedConcepts> {
+        logger.info('NLPService.extractConcepts called with text:', text);
         try {
             const response = await this.openai.chat.completions.create({
                 model: this.model,
@@ -171,12 +172,13 @@ Return as JSON:
     private convertToExtractedConcepts(response: NLPResponse): ExtractedConcepts {
         const concepts: ConceptNode[] = response.concepts.map(concept => ({
             id: crypto.randomUUID(),
+            name: concept.concept,
             label: concept.concept,
             type: concept.type,
             properties: new Map(Object.entries(concept.properties)),
             confidence: concept.confidence,
-            lastUpdated: new Date(),
-            source: []
+            lastVerified: new Date(),
+            source: 'NLPService'
         }));
 
         const relations: ConceptRelation[] = response.relations.map(relation => ({
@@ -184,10 +186,11 @@ Return as JSON:
             sourceId: concepts.find(c => c.label === relation.source)?.id || '',
             targetId: concepts.find(c => c.label === relation.target)?.id || '',
             type: relation.type,
+            weight: 1.0,
             properties: new Map(),
             confidence: relation.confidence,
             lastUpdated: new Date(),
-            source: []
+            source: 'NLPService'
         }));
 
         return { concepts, relations };

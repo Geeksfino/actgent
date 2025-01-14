@@ -1,5 +1,5 @@
 import { ConversationMessage, IHistoryManager, InteractionFlow } from './types';
-import { WorkingMemory } from '../memory/WorkingMemory';
+import { WorkingMemory } from '../memory/modules/working/WorkingMemory';
 import { IOptimizer } from './optimizers/types';
 import { MemoryType } from '../memory/types';
 
@@ -65,11 +65,10 @@ export class SmartHistoryManager implements IHistoryManager {
 
         await this.workingMemory.store({
             id: message.id,
-            type: MemoryType.WORKING,
             content: message.content,
             metadata,
             timestamp: message.timestamp,
-            source: 'conversation'
+            memoryType: MemoryType.WORKING
         });
     }
 
@@ -113,14 +112,14 @@ export class SmartHistoryManager implements IHistoryManager {
         }
 
         // Ensure working memory is in sync
-        const existingMemories = await this.workingMemory.retrieve({
-            types: [MemoryType.WORKING]
-        });
+        const existingMemories = await this.workingMemory.getAll();
 
         // Remove old memories
-        for (const memory of existingMemories) {
-            if (!optimizedIds.has(memory.id)) {
-                await this.workingMemory.delete(memory.id);
+        if (existingMemories) {
+            for (const memory of existingMemories) {
+                if (!optimizedIds.has(memory.id)) {
+                    await this.workingMemory.delete(memory.id);
+                }
             }
         }
 
@@ -214,11 +213,10 @@ export class SmartHistoryManager implements IHistoryManager {
 
             await this.workingMemory.store({
                 id: node.message.id,
-                type: MemoryType.WORKING,
                 content: node.message.content,
                 metadata,
                 timestamp: node.message.timestamp,
-                source: 'conversation'
+                memoryType: MemoryType.WORKING
             });
         }
     }

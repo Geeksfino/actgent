@@ -136,11 +136,31 @@ export class InMemoryStorage implements IMemoryStorage {
         return memories;
     }
 
-    public getSize(): number {
+    async add(id: string, memory: IMemoryUnit): Promise<void> {
+        this.memories.set(id, memory);
+    }
+
+    async get(id: string): Promise<IMemoryUnit | null> {
+        return this.memories.get(id) || null;
+    }
+
+    async remove(id: string): Promise<void> {
+        this.memories.delete(id);
+    }
+
+    async clear(): Promise<void> {
+        this.memories.clear();
+    }
+
+    async getAll(): Promise<IMemoryUnit[]> {
+        return Array.from(this.memories.values());
+    }
+
+    getSize(): number {
         return this.memories.size;
     }
 
-    public getCapacity(): number {
+    getCapacity(): number {
         return this.maxCapacity;
     }
 

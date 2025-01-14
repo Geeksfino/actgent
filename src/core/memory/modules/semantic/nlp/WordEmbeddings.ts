@@ -1,4 +1,4 @@
-import { logger } from '../../../Logger';
+import { logger } from '../../../../Logger';
 
 /**
  * Simple word embeddings service using cosine similarity

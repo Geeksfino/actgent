@@ -1,7 +1,7 @@
 import { ConversationMessage, UserGoal, DomainContext, InteractionFlow } from './types';
 import { SmartHistoryManager } from './SmartHistoryManager';
-import { WorkingMemory } from '../memory/WorkingMemory';
-import { NLPService } from '../memory/semantic/nlp/NLPService';
+import { WorkingMemory } from '../memory/modules/working/WorkingMemory';
+import { NLPService } from '../memory/modules/semantic/nlp/NLPService';
 import crypto from 'crypto';
 
 /**
@@ -173,9 +173,13 @@ export class ConversationContextManager {
         try {
             const result = await this.nlpService.extractConcepts(content);
             // Convert ConceptNode[] to string[] using the label field
-            return result.concepts.map(concept => 
+            const stringArray: (string | undefined)[] = result.concepts.map((concept: { label?: string } | string) => 
                 typeof concept === 'string' ? concept : concept.label
             );
+            const filteredArray: string[] = stringArray.filter((value): value is string => 
+                value !== undefined
+            );
+            return filteredArray;
         } catch (error) {
             console.error('Error extracting concepts:', error);
             return [];

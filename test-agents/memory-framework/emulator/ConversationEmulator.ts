@@ -90,11 +90,32 @@ export class ConversationEmulator {
         const semanticMemories = await this.memorySystem.recall({
             types: [MemoryType.SEMANTIC]
         });
-        console.table(semanticMemories.map(m => ({
-            id: m.id,
-            content: (typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).padEnd(30).slice(0, 30),
-            type: m.metadata.get('type')
-        })));
+
+        // Print nodes
+        console.log('Nodes:');
+        semanticMemories.forEach(m => {
+            console.log(`- Node [${m.id}]: ${m.content.name} - Properties: ${JSON.stringify(m.content.properties)}`);
+        });
+
+        // Print relations
+        console.log('\nRelations:');
+        semanticMemories.forEach(m => {
+            if (m.content.relations) {
+                m.content.relations.forEach((relation: any) => {
+                    console.log(`- Relation [${relation.type}]: Node [${relation.sourceId}] -> Node [${relation.targetId}]`);
+                });
+            }
+        });
+
+        // Optionally, print a simple graph visualization
+        console.log('\nGraph:');
+        semanticMemories.forEach(m => {
+            if (m.content.relations) {
+                m.content.relations.forEach((relation: any) => {
+                    console.log(`[${relation.sourceId}] ----> [${relation.targetId}]`);
+                });
+            }
+        });
 
         // Display episodic memory
         console.log('\n=== Episodic Memory ===');
