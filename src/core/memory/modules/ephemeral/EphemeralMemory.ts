@@ -5,9 +5,11 @@ import crypto from 'crypto';
 class EphemeralMemory implements IMemory<EphemeralMemoryItem> {
     private duration: number;
     private items: { [id: string]: { item: EphemeralMemoryItem; expiry: number } };
+    private maxItems: number;
 
-    constructor(duration: number = 2000) { // Default duration is 2 seconds
+    constructor(duration: number = 2000, maxItems: number = 1000) { // Default duration is 2 seconds, max 1000 items
         this.duration = duration;
+        this.maxItems = maxItems;
         this.items = {};
     }
 
@@ -25,6 +27,9 @@ class EphemeralMemory implements IMemory<EphemeralMemoryItem> {
 
     async store(item: Omit<EphemeralMemoryItem, 'id' | 'timestamp' | 'source' | 'type' | 'memoryType'>): Promise<void> {
         const memoryUnit = this.createMemoryUnit(item.content, item.metadata);
+        if (Object.keys(this.items).length >= this.maxItems) {
+            throw new Error('Memory is full');
+        }
         this.items[memoryUnit.id] = {
             item: memoryUnit,
             expiry: Date.now() + this.duration
@@ -75,6 +80,17 @@ class EphemeralMemory implements IMemory<EphemeralMemoryItem> {
 
     isMemoryUnitOfType(unit: any): unit is EphemeralMemoryItem {
         return unit && typeof unit === 'object' && 'type' in unit && unit.type === 'ephemeral';
+    }
+
+    /** Get current number of items in memory */
+    public size(): number {
+        this.purgeExpired();
+        return Object.keys(this.items).length;
+    }
+
+    /** Get maximum capacity */
+    public capacity(): number {
+        return this.maxItems;
     }
 }
 

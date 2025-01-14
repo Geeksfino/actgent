@@ -39,10 +39,7 @@ export class AgentMemorySystem {
         this.workingMemory = new WorkingMemory(storage, index);
         this.episodicMemory = new EpisodicMemory(storage, index);
         this.proceduralMemory = new ProceduralMemory(storage, index);
-        this.transitionManager = new MemoryTransitionManager(
-            this.workingMemory,
-            this.episodicMemory
-        );
+        this.transitionManager = new MemoryTransitionManager();
         this.contextManager = new SessionMemoryContextManager(storage, index);
 
         this.setupEventHandlers();
@@ -72,7 +69,12 @@ export class AgentMemorySystem {
      * Handle memory access
      */
     private handleMemoryAccess(memoryId: string): void {
-        this.transitionManager.onMemoryAccess(memoryId);
+        this.transitionManager.emitEvent({
+            type: MemoryEventType.MEMORY_ACCESS,
+            timestamp: new Date(),
+            memory: null,
+            metadata: new Map([['memoryId', memoryId]])
+        });
     }
 
     /**
@@ -91,21 +93,36 @@ export class AgentMemorySystem {
             userPreferences: new Map(),
             interactionPhase: 'main'
         };
-        this.transitionManager.onContextChange(context);
+        this.transitionManager.emitEvent({
+            type: MemoryEventType.CONTEXT_CHANGE,
+            timestamp: new Date(),
+            memory: null,
+            context
+        });
     }
 
     /**
      * Handle context change
      */
     private handleContextChange(context: SessionMemoryContext): void {
-        this.transitionManager.onContextChange(context);
+        this.transitionManager.emitEvent({
+            type: MemoryEventType.CONTEXT_CHANGE,
+            timestamp: new Date(),
+            memory: null,
+            context
+        });
     }
 
     /**
      * Handle emotional peak
      */
     private handleEmotionalPeak(emotion: EmotionalState): void {
-        this.transitionManager.onEmotionalChange(emotion);
+        this.transitionManager.emitEvent({
+            type: MemoryEventType.EMOTIONAL_PEAK,
+            timestamp: new Date(),
+            memory: null,
+            emotion
+        });
     }
 
     /**
@@ -114,9 +131,9 @@ export class AgentMemorySystem {
     private handleGoalCompletion(goalId: string): void {
         this.transitionManager.emitEvent({
             type: MemoryEventType.GOAL_COMPLETED,
+            timestamp: new Date(),
             memory: null,
-            metadata: new Map([['goalId', goalId]]),
-            timestamp: new Date()
+            metadata: new Map([['goalId', goalId]])
         });
     }
 
