@@ -1,6 +1,6 @@
 import { MemoryType } from '../../types';
 import { DeclarativeMemory } from '../../DeclarativeMemory';
-import { IMemoryStorage, IMemoryIndex, EmotionalState, MemoryFilter } from '../../types';
+import { IMemoryStorage, IMemoryIndex, EmotionalState, MemoryFilter, EmotionalContextImpl } from '../../types';
 import { IEpisodicMemoryUnit } from './types';
 import { EpisodicMemoryFactory } from './EpisodicMemoryFactory';
 import crypto from 'crypto';
@@ -17,8 +17,40 @@ export class EpisodicMemory extends DeclarativeMemory {
     /**
      * Create an episodic memory unit
      */
-    protected createMemoryUnit(content: any, metadata?: Map<string, any>): IEpisodicMemoryUnit {
-        return EpisodicMemoryFactory.createMemory(content, metadata || new Map());
+    public createMemoryUnit(content: any, metadata?: Map<string, any>): IEpisodicMemoryUnit {
+        const now = new Date();
+        return {
+            id: crypto.randomUUID(),
+            content: {
+                timeSequence: Date.now(),
+                location: '',
+                actors: [],
+                actions: [],
+                emotions: new EmotionalContextImpl(),
+                context: {
+                    contextType: 'context_change',
+                    timestamp: now,
+                    userGoals: new Set(),
+                    domainContext: new Map(),
+                    interactionHistory: [],
+                    emotionalTrends: [],
+                    emotionalState: { valence: 0, arousal: 0 },
+                    topicHistory: [],
+                    userPreferences: new Map(),
+                    interactionPhase: 'main'
+                },
+                coherenceScore: 0,
+                emotionalIntensity: 0,
+                contextualRelevance: 0,
+                temporalDistance: 0,
+                timestamp: now
+            },
+            metadata: metadata || new Map(),
+            timestamp: now,
+            memoryType: MemoryType.EPISODIC,
+            accessCount: 0,
+            lastAccessed: now
+        };
     }
 
     /**
@@ -51,8 +83,10 @@ export class EpisodicMemory extends DeclarativeMemory {
     /**
      * Store an episodic memory unit
      */
-    public async store(memory: IEpisodicMemoryUnit): Promise<void> {
-        await this.storage.store(memory);
+    public async store(content: Omit<IEpisodicMemoryUnit, 'id' | 'timestamp' | 'memoryType'>): Promise<void> {
+        const memoryUnit = this.createMemoryUnit(content.content, content.metadata);
+        Object.assign(memoryUnit, content);
+        await this.storage.store(memoryUnit);
     }
 
     /**

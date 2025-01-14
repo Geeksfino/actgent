@@ -28,8 +28,24 @@ export class SemanticMemory extends DeclarativeMemory {
     /**
      * Create a semantic memory unit
      */
-    protected createMemoryUnit(content: any, metadata?: Map<string, any>): ISemanticMemoryUnit {
-        return SemanticMemoryFactory.createMemoryUnit(content, metadata);
+    public createMemoryUnit(content: any, metadata?: Map<string, any>): ISemanticMemoryUnit {
+        const now = new Date();
+        return {
+            id: crypto.randomUUID(),
+            content: {
+                id: crypto.randomUUID(),
+                name: '',
+                confidence: 1,
+                source: 'semantic',
+                lastVerified: now,
+                properties: new Map()
+            } as ConceptNode,
+            metadata: metadata || new Map(),
+            timestamp: now,
+            memoryType: MemoryType.SEMANTIC,
+            accessCount: 0,
+            lastAccessed: now
+        };
     }
 
     /**
@@ -42,8 +58,10 @@ export class SemanticMemory extends DeclarativeMemory {
     /**
      * Store a semantic memory unit
      */
-    public async store(memory: ISemanticMemoryUnit): Promise<void> {
-        await this.storage.store(memory);
+    public async store(content: Omit<ISemanticMemoryUnit, 'id' | 'timestamp' | 'memoryType'>): Promise<void> {
+        const memoryUnit = this.createMemoryUnit(content.content, content.metadata);
+        Object.assign(memoryUnit, content);
+        await this.storage.store(memoryUnit);
     }
 
     /**

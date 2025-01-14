@@ -17,6 +17,9 @@ export interface IEpisodicMemoryUnit extends IMemoryUnit {
         emotions: EmotionalContext;
         context: SessionMemoryContext;
         coherenceScore: number;
+        emotionalIntensity: number;
+        contextualRelevance: number;
+        temporalDistance: number;
         userInstruction?: string;
         consolidationStatus?: ConsolidationStatus;
         originalMemories?: string[];  // IDs of memories that were consolidated
@@ -25,5 +28,3 @@ export interface IEpisodicMemoryUnit extends IMemoryUnit {
     };
     metadata: Map<string, any>;
 }
-
-

@@ -5,7 +5,7 @@ export interface IMemory<T extends IMemoryUnit> {
     /**
      * Store content with metadata
      */
-    store(content: T): Promise<void>;
+    store(content: Omit<T, 'memoryType'>): Promise<void>;
 
     /**
      * Retrieve a memory unit by ID
@@ -36,6 +36,11 @@ export interface IMemory<T extends IMemoryUnit> {
      * Type guard to ensure retrieved memory unit is of correct type
      */
     isMemoryUnitOfType(unit: any): unit is T;
+
+    /**
+     * Create a new memory unit with the given content and metadata
+     */
+    createMemoryUnit(content: any, metadata?: Map<string, any>): T;
 }
 
 /**
@@ -199,7 +204,8 @@ export enum MemoryType {
     PROCEDURAL = 'procedural',
     CONTEXTUAL = 'contextual',
     SYSTEM = 'system',
-    GENERIC = 'generic'
+    GENERIC = 'generic',
+    EPHEMERAL = 'ephemeral'
 }
 
 /**
@@ -460,4 +466,3 @@ export interface MemoryFilter {
     orderBy?: 'lastAccessed' | 'accessCount' | 'timestamp';
     limit?: number;
 }
-

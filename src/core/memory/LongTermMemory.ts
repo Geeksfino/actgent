@@ -60,18 +60,20 @@ export abstract class LongTermMemory<T extends IMemoryUnit> implements IMemory<T
      * Create a new memory unit of type T
      * This must be implemented by concrete classes to ensure type safety
      */
-    protected abstract createMemoryUnit(content: any, metadata?: Map<string, any>): T;
+    public abstract createMemoryUnit(content: any, metadata?: Map<string, any>): T;
 
     /**
      * Store a memory unit
      */
-    async store(content: any, metadata?: Map<string, any>): Promise<void> {
-        const unit = this.createMemoryUnit(content, metadata);
-        unit.id = crypto.randomUUID();
-        await this.storage.store(unit);
-        await this.index.add(unit);
-        this.cache.set(unit.id, unit);
-        this.events.next(unit);
+    public async store(content: Omit<T, 'memoryType'>): Promise<void> {
+        const memoryUnit = {
+            ...content,
+            memoryType: this.memoryType
+        } as T;
+
+        await this.storage.add(memoryUnit.id, memoryUnit);
+        this.cache.set(memoryUnit.id, memoryUnit);
+        this.events.next(memoryUnit);
     }
 
     /**

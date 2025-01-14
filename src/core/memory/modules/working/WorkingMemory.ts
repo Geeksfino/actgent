@@ -8,30 +8,47 @@ import { Subject } from 'rxjs';
 export class WorkingMemory implements IMemory<IMemoryUnit> {
     private storage: IMemoryStorage;
     private index: IMemoryIndex;
-    private maxCapacity: number;
+    private maxSize: number;
     private events: Subject<IMemoryUnit>;
-    protected readonly DEFAULT_TTL = 30 * 60 * 1000; // 30 minutes
-    protected readonly expirationTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
     protected size: number = 0;
 
-    constructor(storage: IMemoryStorage, index: IMemoryIndex, maxCapacity: number = 100) {
+    constructor(storage: IMemoryStorage, index: IMemoryIndex, maxSize: number = 100) {
         this.storage = storage;
         this.index = index;
-        this.maxCapacity = maxCapacity;
+        this.maxSize = maxSize;
         this.events = new Subject<IMemoryUnit>();
     }
 
     public getCapacity(): number {
-        return this.maxCapacity;
+        return this.maxSize;
     }
 
     public getCurrentSize(): number {
         return this.size;
     }
 
-    async store(memory: IMemoryUnit): Promise<void> {
-        await this.storage.add(memory.id, memory);
-        this.events.next(memory);
+    createMemoryUnit(content: any, metadata?: Map<string, any>): IMemoryUnit {
+        const now = new Date();
+        return {
+            id: crypto.randomUUID(),
+            content,
+            metadata: metadata || new Map(),
+            timestamp: now,
+            memoryType: MemoryType.WORKING,
+            accessCount: 0,
+            lastAccessed: now,
+            priority: metadata?.get('priority') as number || 0.5
+        };
+    }
+
+    async store(content: Omit<IMemoryUnit, 'memoryType'>): Promise<void> {
+        const memoryUnit = {
+            ...content,
+            memoryType: MemoryType.WORKING
+        } as IMemoryUnit;
+
+        await this.storage.add(memoryUnit.id, memoryUnit);
+        this.events.next(memoryUnit);
         this.size++;
         await this.ensureCapacity();
     }
@@ -75,59 +92,34 @@ export class WorkingMemory implements IMemory<IMemoryUnit> {
     }
 
     /**
-     * Create a working memory unit
-     */
-    private createMemoryUnit(content: any, metadata?: Map<string, any>): IMemoryUnit {
-        const priority = metadata?.get('priority') as number || 0.5;
-        const relevance = metadata?.get('relevance') as number || 0.5;
-        return WorkingMemoryFactory.createMemoryUnit(content, priority, relevance);
-    }
-
-    /**
      * Ensure working memory stays within capacity
      */
     private async ensureCapacity(): Promise<void> {
-        const memories = await this.getAll();
+        if (this.size <= this.maxSize) {
+            return;
+        }
 
-        if (this.getCurrentSize() > this.maxCapacity) {
-            // Sort by priority and recency
-            const sortedMemories = memories.sort((a, b) => {
-                const aPriority = a.metadata.get('priority') || 0;
-                const bPriority = b.metadata.get('priority') || 0;
-                if (aPriority !== bPriority) {
-                    return bPriority - aPriority;
-                }
-                return b.timestamp.getTime() - a.timestamp.getTime();
-            });
+        // Get all items sorted by priority and last access time
+        const items = await this.storage.getAll();
+        items.sort((a, b) => {
+            const priorityA = a.metadata?.get('priority') as number || 0;
+            const priorityB = b.metadata?.get('priority') as number || 0;
+            
+            if (priorityA !== priorityB) {
+                return priorityB - priorityA; // Higher priority items stay
+            }
+            
+            // If priorities are equal, compare last access times
+            return (b.lastAccessed?.getTime() || 0) - (a.lastAccessed?.getTime() || 0);
+        });
 
-            // Move excess memories to episodic
-            const excessMemories = sortedMemories.slice(this.maxCapacity);
-            for (const memory of excessMemories) {
-                await this.moveToEpisodicMemory(memory);
+        // Remove lowest priority/least recently used items
+        while (this.size > this.maxSize && items.length > 0) {
+            const itemToRemove = items.pop();
+            if (itemToRemove) {
+                await this.storage.remove(itemToRemove.id);
+                this.size--;
             }
         }
-    }
-
-    /**
-     * Move a single memory to episodic storage immediately
-     * Used for immediate transitions (expiration, capacity)
-     */
-    private async moveToEpisodicMemory(memory: IMemoryUnit): Promise<void> {
-        // Create episodic memory
-        const episodicMemory: IMemoryUnit = {
-            id: crypto.randomUUID(),
-            content: memory.content,
-            metadata: new Map(memory.metadata),
-            timestamp: new Date(),
-            memoryType: MemoryType.EPISODIC,
-            accessCount: 0,
-            lastAccessed: new Date()
-        };
-
-        // Store in episodic memory
-        await this.storage.add(episodicMemory.id, episodicMemory);
-        await this.index.add(episodicMemory);
-        await this.storage.remove(memory.id);
-        this.size--;
     }
 }

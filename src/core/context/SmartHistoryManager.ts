@@ -68,7 +68,8 @@ export class SmartHistoryManager implements IHistoryManager {
             content: message.content,
             metadata,
             timestamp: message.timestamp,
-            memoryType: MemoryType.WORKING
+            accessCount: 0,
+            lastAccessed: new Date()
         });
     }
 
@@ -216,7 +217,8 @@ export class SmartHistoryManager implements IHistoryManager {
                 content: node.message.content,
                 metadata,
                 timestamp: node.message.timestamp,
-                memoryType: MemoryType.WORKING
+                accessCount: 0,
+                lastAccessed: new Date()
             });
         }
     }

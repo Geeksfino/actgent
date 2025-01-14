@@ -24,7 +24,7 @@ export class ProceduralMemory extends LongTermMemory<IProceduralMemoryUnit> {
     /**
      * Create a procedural memory unit
      */
-    protected createMemoryUnit(content: any, metadata?: Map<string, any>): IProceduralMemoryUnit {
+    public createMemoryUnit(content: any, metadata?: Map<string, any>): IProceduralMemoryUnit {
         return ProceduralMemoryFactory.createMemoryUnit(content, metadata);
     }
 
