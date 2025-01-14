@@ -2,7 +2,11 @@ import { Subject, merge, from, Observable, EMPTY, interval } from 'rxjs';
 import { debounceTime, filter, mergeMap, distinctUntilChanged, map, bufferTime, retry, catchError, withLatestFrom } from 'rxjs/operators';
 import { WorkingMemory } from './modules/working/WorkingMemory';
 import { EpisodicMemory } from './modules/episodic/EpisodicMemory';
-import { IMemoryUnit, MemoryType, MemoryEvent, MemoryEventType, ConsolidationRule, EmotionalState, SessionMemoryContext, MemoryFilter } from './types';
+import { 
+    IMemoryUnit, MemoryType, MemoryEvent, MemoryEventType, 
+    ConsolidationRule, EmotionalState, SessionMemoryContext, 
+    MemoryFilter, IMemoryEventHandler, IMemoryMonitor 
+} from './types';
 import { logger } from '../Logger';
 import { NLPService } from './modules/semantic/nlp/NLPService';
 import { ConceptGraph } from './modules/semantic/ConceptGraph';
@@ -11,6 +15,8 @@ export class MemoryTransitionManager {
     private consolidationRules: ConsolidationRule[] = [];
     private eventsSubject$ = new Subject<MemoryEvent>();
     public readonly events$ = this.eventsSubject$.asObservable();
+    private handlers: Map<MemoryEventType, IMemoryEventHandler[]> = new Map();
+    private monitors: Map<string, IMemoryMonitor> = new Map();
 
     // Memory operation streams
     private readonly accessStream$ = new Subject<{ memoryId: string, timestamp: Date }>();
@@ -31,6 +37,130 @@ export class MemoryTransitionManager {
         // Initialize NLP service and concept graph
         this.nlpService = new NLPService('your-api-key'); // Replace with actual API key
         this.conceptGraph = new ConceptGraph();
+    }
+
+    /**
+     * Register a memory event handler
+     */
+    public registerHandler(handler: IMemoryEventHandler): void {
+        const eventTypes = handler.canHandleEventTypes();
+        
+        for (const eventType of eventTypes) {
+            if (!this.handlers.has(eventType)) {
+                this.handlers.set(eventType, []);
+            }
+            this.handlers.get(eventType)!.push(handler);
+
+            // Subscribe to events of this type
+            this.events$.pipe(
+                filter(event => event.type === eventType)
+            ).subscribe(async (event) => {
+                try {
+                    await handler.onEvent(event);
+                } catch (error) {
+                    logger.error(`Error in memory event handler for ${eventType}:`, error);
+                }
+            });
+        }
+    }
+
+    /**
+     * Unregister a memory event handler
+     */
+    public unregisterHandler(handler: IMemoryEventHandler): void {
+        const eventTypes = handler.canHandleEventTypes();
+        
+        for (const eventType of eventTypes) {
+            const handlers = this.handlers.get(eventType);
+            if (handlers) {
+                const index = handlers.indexOf(handler);
+                if (index !== -1) {
+                    handlers.splice(index, 1);
+                }
+                if (handlers.length === 0) {
+                    this.handlers.delete(eventType);
+                }
+            }
+        }
+    }
+
+    /**
+     * Emit a memory event
+     */
+    public emitEvent(event: MemoryEvent): void {
+        this.eventsSubject$.next(event);
+    }
+
+    private isMonitoring = false;
+
+    /**
+     * Register a memory monitor
+     */
+    public registerMonitor(monitor: IMemoryMonitor): void {
+        if (this.monitors.has(monitor.id)) {
+            logger.warn(`Monitor with ID ${monitor.id} already exists. Stopping existing monitor.`);
+            this.monitors.get(monitor.id)?.stop();
+        }
+        
+        this.monitors.set(monitor.id, monitor);
+        
+        // If monitoring is already active, start the new monitor
+        if (this.isMonitoring) {
+            monitor.start();
+        }
+    }
+
+    /**
+     * Unregister a memory monitor
+     */
+    public unregisterMonitor(monitorId: string): void {
+        const monitor = this.monitors.get(monitorId);
+        if (monitor) {
+            monitor.stop();
+            this.monitors.delete(monitorId);
+        }
+    }
+
+    /**
+     * Start all registered monitors
+     */
+    public startMonitoring(): void {
+        if (this.isMonitoring) {
+            return;
+        }
+
+        this.isMonitoring = true;
+        for (const monitor of this.monitors.values()) {
+            monitor.start();
+        }
+    }
+
+    /**
+     * Stop all registered monitors
+     */
+    public stopMonitoring(): void {
+        if (!this.isMonitoring) {
+            return;
+        }
+
+        this.isMonitoring = false;
+        for (const monitor of this.monitors.values()) {
+            monitor.stop();
+        }
+    }
+
+    /**
+     * Get a monitor by ID
+     */
+    public getMonitor(monitorId: string): IMemoryMonitor | undefined {
+        return this.monitors.get(monitorId);
+    }
+
+    /**
+     * Get all registered monitors
+     */
+    public getMonitors(): Map<string, IMemoryMonitor> {
+        return new Map(this.monitors);
     }
 
     private monitorMemoryOperations() {
@@ -266,10 +396,6 @@ export class MemoryTransitionManager {
                 )
             )
         ).subscribe();
-    }
-
-    public emitEvent(event: MemoryEvent): void {
-        this.eventsSubject$.next(event);
     }
 
     private async processEvents(events: MemoryEvent[]): Promise<void> {
