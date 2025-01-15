@@ -1,4 +1,5 @@
-import { IMemoryUnit, IMemoryStorage, IMemoryIndex, IMemoryAssociation } from './types';
+import { IMemoryUnit,  IMemoryAssociation } from './base';
+import { IMemoryStorage, IMemoryIndex } from './storage';
 
 export class MemoryAssociator implements IMemoryAssociation {
     private storage: IMemoryStorage;

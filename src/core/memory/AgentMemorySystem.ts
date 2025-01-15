@@ -1,13 +1,7 @@
-import { 
-    IMemoryUnit, 
-    IMemoryStorage, 
-    IMemoryIndex,
-    MemoryEvent,
-    MemoryEventType,
-    MemoryFilter,
-    SessionMemoryContext,
-    EmotionalState
-} from './types';
+import { IMemoryUnit, MemoryFilter } from './base';
+import { IMemoryStorage, IMemoryIndex } from './storage';
+import { MemoryEventType } from './events';
+import { SessionMemoryContext, EmotionalState } from './context';
 import { IEpisodicMemoryUnit } from './modules/episodic/types';
 import { IProceduralMemoryUnit } from './modules/procedural/types';
 import { SessionMemoryContextManager } from './SessionMemoryContextManager';

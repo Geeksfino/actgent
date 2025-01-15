@@ -1,5 +1,6 @@
 import { LongTermMemory } from './LongTermMemory';
-import { IMemoryUnit, IMemoryStorage, IMemoryIndex, MemoryFilter, MemoryType } from './types';
+import { IMemoryUnit, MemoryType } from './base';
+import { IMemoryStorage, IMemoryIndex } from './storage';
 
 /**
  * Base class for declarative (explicit) memory types.

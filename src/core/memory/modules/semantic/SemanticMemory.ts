@@ -1,13 +1,12 @@
 import { 
-    IMemoryUnit, 
     MemoryType,
     MemoryFilter,
-} from '../../types';
+} from '../../base';
 import { DeclarativeMemory } from '../../DeclarativeMemory';
-import { IMemoryStorage, IMemoryIndex } from '../../types';
+import { IMemoryStorage, IMemoryIndex } from '../../storage';
 import { ISemanticMemoryUnit, ConceptNode, ConceptRelation, RelationType, createSemanticMetadata } from './types';
-import crypto from 'crypto';
 import { SemanticMemoryFactory } from './SemanticMemoryFactory';
+import crypto from 'crypto';
 
 /**
  * Semantic memory implementation

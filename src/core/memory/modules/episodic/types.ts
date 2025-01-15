@@ -1,9 +1,9 @@
-import { IMemoryUnit, 
-    MemoryType, 
+import { 
     SessionMemoryContext, 
-    ConsolidationStatus,
     EmotionalContext
-} from '../../types'
+} from '../../context';
+import { IMemoryUnit } from '../../base';
+import { ConsolidationStatus } from '../../transition';
 
 /**
  * Interface for episodic memory units, representing experiences and events

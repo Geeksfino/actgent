@@ -1,4 +1,4 @@
-import { IMemoryUnit, MemoryType } from '../../types';
+import { IMemoryUnit, MemoryType } from '../../base';
 
 export interface EphemeralMemoryItem extends IMemoryUnit {
     source: string;

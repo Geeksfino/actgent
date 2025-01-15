@@ -1,6 +1,9 @@
-import { MemoryType } from '../../types';
+import { MemoryType } from '../../base';
 import { DeclarativeMemory } from '../../DeclarativeMemory';
-import { IMemoryStorage, IMemoryIndex, EmotionalState, MemoryFilter, EmotionalContextImpl } from '../../types';
+import { IMemoryStorage, IMemoryIndex } from '../../storage';
+import { MemoryFilter } from '../../base';
+import { EmotionalState } from '../../context';
+import { EmotionalContextImpl } from '../../context/EmotionalContextImpl';
 import { IEpisodicMemoryUnit } from './types';
 import { EpisodicMemoryFactory } from './EpisodicMemoryFactory';
 import crypto from 'crypto';

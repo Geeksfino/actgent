@@ -1,4 +1,4 @@
-import { IMemoryEventHandler, MemoryEvent, MemoryEventType } from './types';
+import { IMemoryEventHandler, MemoryEvent, MemoryEventType } from './events';
 
 /**
  * Abstract base class for memory event handlers that use LLM inference

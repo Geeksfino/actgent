@@ -1,4 +1,5 @@
-import { IMemoryStorage, IMemoryUnit, MemoryFilter, MemoryType, ConsolidationMetrics } from '../types';
+import { IMemoryUnit, MemoryFilter, MemoryType } from '../base';
+import { IMemoryStorage } from '../storage';
 import crypto from 'crypto';
 import { logger } from '../../Logger';
 

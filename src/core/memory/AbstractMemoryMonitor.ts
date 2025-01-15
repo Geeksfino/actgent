@@ -1,6 +1,6 @@
 import { Observable, Subscription, Subject } from 'rxjs';
 import { filter } from 'rxjs/operators';
-import { IMemoryMonitor, IMemoryMonitorConfig, IMemoryMonitorMetrics, MemoryEvent } from './types';
+import { IMemoryMonitor, IMemoryMonitorConfig, IMemoryMonitorMetrics, MemoryEvent } from './events';
 
 /**
  * Abstract base class for memory monitors

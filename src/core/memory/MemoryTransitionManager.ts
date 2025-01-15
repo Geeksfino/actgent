@@ -3,7 +3,7 @@ import { filter } from 'rxjs/operators';
 import { 
     MemoryEvent, MemoryEventType, 
     IMemoryEventHandler, IMemoryMonitor 
-} from './types';
+} from './events';
 import { logger } from '../Logger';
 
 /**

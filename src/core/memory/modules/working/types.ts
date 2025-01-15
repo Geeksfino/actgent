@@ -1,4 +1,4 @@
-import { IMemoryUnit, MemoryType } from '../../types';
+import { IMemoryUnit, MemoryType } from '../../base';
 
 /**
  * Working memory metadata interface

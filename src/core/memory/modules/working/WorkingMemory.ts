@@ -1,5 +1,5 @@
-import { IMemory, IMemoryUnit, MemoryFilter, MemoryType } from '../../types';
-import { IMemoryStorage, IMemoryIndex } from '../../types';
+import { IMemory, IMemoryUnit, MemoryFilter, MemoryType } from '../../base';
+import { IMemoryStorage, IMemoryIndex } from '../../storage';
 import { logger } from '../../../Logger';
 import crypto from 'crypto';
 import { WorkingMemoryFactory } from './WorkingMemoryFactory';

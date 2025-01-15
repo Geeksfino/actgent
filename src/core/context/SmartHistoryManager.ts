@@ -1,14 +1,6 @@
 import { ConversationMessage, IHistoryManager, InteractionFlow } from './types';
 import { WorkingMemory } from '../memory/modules/working/WorkingMemory';
 import { IOptimizer } from './optimizers/types';
-import { MemoryType } from '../memory/types';
-
-interface MessageNode {
-    message: ConversationMessage;
-    references: Set<string>;
-    referencedBy: Set<string>;
-    relevanceScore: number;
-}
 
 /**
  * Enhanced history manager with smart context tracking and optimization
@@ -239,4 +231,11 @@ export class SmartHistoryManager implements IHistoryManager {
             this.messages.delete(id);
         }
     }
+}
+
+interface MessageNode {
+    message: ConversationMessage;
+    references: Set<string>;
+    referencedBy: Set<string>;
+    relevanceScore: number;
 }

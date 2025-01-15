@@ -1,17 +1,12 @@
 import { 
-    IMemoryUnit, 
-    IMemoryStorage, 
-    IMemoryIndex,
     SessionMemoryContext,
     EmotionalState,
     EmotionalContext,
     EmotionalTrendEntry,
-    MemoryType,
-    MemoryFilter,
     IMemoryContextManager,
-    ConsolidationMetrics,
-    EmotionalContextImpl
-} from './types';
+} from './context';
+import { IMemoryStorage, IMemoryIndex } from './storage';
+import { IMemoryUnit, MemoryType, } from './base';
 import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import { Subject, Observable } from 'rxjs';

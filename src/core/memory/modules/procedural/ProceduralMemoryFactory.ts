@@ -1,5 +1,5 @@
 import { IProceduralMemoryUnit, ProceduralMetadata } from './types';
-import { MemoryType } from '../../types';
+import { MemoryType } from '../../base';
 import crypto from 'crypto';
 
 /**

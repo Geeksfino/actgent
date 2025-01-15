@@ -1,7 +1,7 @@
 import { 
     IMemoryUnit, 
     MemoryType
-} from '../../types'
+} from '../../base';
 import crypto from 'crypto';
 
 /**

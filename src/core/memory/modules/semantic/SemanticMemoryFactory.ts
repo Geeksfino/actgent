@@ -1,4 +1,4 @@
-import { MemoryType } from '../../types';
+import { MemoryType } from '../../base';
 import { ISemanticMemoryUnit, ConceptNode, ConceptRelation, createSemanticMetadata, RelationType } from './types';
 import crypto from 'crypto';
 

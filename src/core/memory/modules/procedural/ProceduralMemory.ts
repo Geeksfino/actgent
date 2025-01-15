@@ -1,5 +1,6 @@
 import { LongTermMemory } from '../../LongTermMemory';
-import { IMemoryUnit, IMemoryStorage, IMemoryIndex, MemoryFilter, MemoryType } from '../../types';
+import { IMemoryStorage, IMemoryIndex } from '../../storage';
+import { MemoryType, MemoryFilter } from '../../base';
 import { IProceduralMemoryUnit, ProceduralMetadata } from './types';
 import crypto from 'crypto';
 import { ProceduralMemoryFactory } from './ProceduralMemoryFactory';

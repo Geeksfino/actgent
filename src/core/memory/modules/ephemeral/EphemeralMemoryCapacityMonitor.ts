@@ -1,7 +1,7 @@
 import { interval, Observable } from 'rxjs';
 import { map, filter, distinctUntilChanged } from 'rxjs/operators';
 import { AbstractMemoryMonitor } from '../../AbstractMemoryMonitor';
-import { MemoryEvent, MemoryEventType, IMemoryMonitorConfig } from '../../types';
+import { MemoryEvent, MemoryEventType, IMemoryMonitorConfig } from '../../events';
 import { EphemeralMemory } from './EphemeralMemory';
 
 interface EphemeralCapacityConfig extends IMemoryMonitorConfig {

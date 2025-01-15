@@ -1,4 +1,4 @@
-import { BaseMetadata, MemoryFilter } from '../types';
+import { BaseMetadata, MemoryFilter } from '../base';
 
 // Helper functions for memory module
 

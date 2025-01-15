@@ -1,4 +1,5 @@
-import { IMemoryIndex, IMemoryUnit } from '../types';
+import { IMemoryIndex } from '../storage';
+import { IMemoryUnit } from '../base';
 
 /**
  * In-memory implementation of IMemoryIndex

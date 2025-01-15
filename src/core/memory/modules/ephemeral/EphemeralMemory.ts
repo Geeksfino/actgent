@@ -1,4 +1,4 @@
-import { IMemory, MemoryFilter, MemoryType } from '../../types';
+import { IMemory, MemoryFilter, MemoryType } from '../../base';
 import { EphemeralMemoryItem } from './types';
 import crypto from 'crypto';
 

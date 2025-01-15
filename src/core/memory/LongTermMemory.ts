@@ -1,6 +1,7 @@
-import { IMemoryUnit, IMemoryStorage, IMemoryIndex, MemoryFilter, MemoryType, IMemory } from './types';
+import { IMemoryUnit, MemoryFilter, MemoryType, IMemory } from './base';
+import { IMemoryStorage, IMemoryIndex } from './storage';
 import { Subject } from 'rxjs';
-import crypto from 'crypto';
+
 
 /**
  * Cache for memory units
