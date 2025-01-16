@@ -2,10 +2,10 @@ import {
     IMemoryUnit, 
     MemoryType,
     MemoryFilter,
-    ConsolidationMetrics
+    ConsolidationMetrics,
 } from './base';
 import { IMemoryStorage, IMemoryIndex } from './storage';
-import { IMemoryConsolidation } from './transition';
+import { IMemoryConsolidation } from './consolidation';
 import crypto from 'crypto';
 
 export interface ConsolidationTrigger {

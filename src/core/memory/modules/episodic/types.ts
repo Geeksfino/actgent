@@ -2,8 +2,8 @@ import {
     WorkingMemoryContext, 
     EmotionalContext
 } from '../../context';
-import { IMemoryUnit } from '../../base';
-import { ConsolidationStatus } from '../../transition';
+import { IMemoryUnit, MemoryType } from '../../base';
+import { ConsolidationStatus } from '../../consolidation';
 
 /**
  * Interface for episodic memory units, representing experiences and events

@@ -127,4 +127,78 @@ export class WorkingContextManager {
     public onContextChange(listener: (context: WorkingMemoryContext) => void): void {
         this.contextChanges$.subscribe(listener);
     }
+
+    /**
+     * Set a context value with timestamp
+     */
+    public async setContextWithTimestamp(key: string, value: { content: any, timestamp: Date }): Promise<void> {
+        this.contextCache.set(key, { value: value.content, timestamp: value.timestamp.getTime() });
+        this.updateCurrentContext();
+        this.contextChanges$.next(this.currentContext);
+    }
+
+    /**
+     * Update the current context based on cache
+     */
+    private updateCurrentContext(): void {
+        // Update context based on cache values
+        // This will vary based on your context structure
+        this.currentContext = {
+            ...this.currentContext,
+            timestamp: new Date(),
+            // Add other context updates as needed
+        };
+    }
+
+    /**
+     * Initialize context manager
+     */
+    public initialize(): void {
+        this.contextCache = new Map();
+        
+        // Initialize with default values
+        const defaultEmotionalState: EmotionalState = {
+            valence: 0,  // Neutral valence
+            arousal: 0   // Low arousal
+        };
+
+        this.currentContext = {
+            contextType: 'context_change',
+            timestamp: new Date(),
+            userGoals: new Set<string>(),
+            domainContext: new Map<string, any>(),
+            interactionHistory: [],
+            emotionalTrends: [],
+            emotionalState: defaultEmotionalState,
+            topicHistory: [],
+            userPreferences: new Map<string, any>(),
+            interactionPhase: 'introduction'
+        };
+
+        // Create emotional context with required methods
+        this.emotionalContext = {
+            currentEmotion: defaultEmotionalState,
+            emotionalTrends: [],
+            addEmotion: (emotion: EmotionalState) => {
+                this.emotionalContext.currentEmotion = emotion;
+                this.emotionalContext.emotionalTrends.push({
+                    timestamp: new Date(),
+                    emotion: emotion
+                });
+            },
+            getEmotionalTrend: (timeRange: { start: Date; end: Date }) => {
+                return this.emotionalContext.emotionalTrends.filter(entry => 
+                    entry.timestamp >= timeRange.start && entry.timestamp <= timeRange.end
+                );
+            }
+        };
+    }
+
+    /**
+     * Clean up resources
+     */
+    public dispose(): void {
+        this.contextCache.clear();
+        this.contextChanges$.complete();
+    }
 }

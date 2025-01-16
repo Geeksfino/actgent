@@ -7,6 +7,7 @@ import { SemanticMemory } from './modules/semantic/SemanticMemory';
 import { ProceduralMemory } from './modules/procedural/ProceduralMemory';
 import { EphemeralMemory } from './modules/ephemeral/EphemeralMemory';
 import { MemoryTransitionManager } from './MemoryTransitionManager';
+import { logger } from '../Logger';
 
 // Import storage factories
 import { WorkingMemoryStorageFactory } from './modules/working/WorkingMemoryStorageFactory';
@@ -170,6 +171,64 @@ export class AgentMemorySystem {
                 memories.map(memory => this.forget(memory.id))
             );
         }
+    }
+
+    /**
+     * Process a user's message/action, marking the end of a user turn
+     */
+    public async processUserTurn(input: string): Promise<void> {
+        try {
+            // Process user input...
+            
+            // Signal end of user turn to transition manager
+            this.transitionManager.onUserTurnEnd();
+            
+            // Update context
+            await this.contextManager.setContext('lastUserInput', {
+                content: input,
+                timestamp: new Date()
+            });
+        } catch (error) {
+            logger.error('Error processing user turn:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Process assistant's response, marking the end of an assistant turn
+     */
+    public async processAssistantTurn(response: string): Promise<void> {
+        try {
+            // Process assistant response...
+            
+            // Signal end of assistant turn to transition manager
+            this.transitionManager.onAssistantTurnEnd();
+            
+            // Update context
+            await this.contextManager.setContext('lastAssistantResponse', {
+                content: response,
+                timestamp: new Date()
+            });
+        } catch (error) {
+            logger.error('Error processing assistant turn:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Start the memory system
+     */
+    public start(): void {
+        this.transitionManager.startMonitoring();
+        this.contextManager.initialize();
+    }
+
+    /**
+     * Stop the memory system
+     */
+    public stop(): void {
+        this.transitionManager.stopMonitoring();
+        this.contextManager.dispose();
     }
 
 }

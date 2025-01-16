@@ -1,117 +1,82 @@
-import { Observable, Subscription, Subject } from 'rxjs';
-import { filter } from 'rxjs/operators';
-import { IMemoryMonitor, IMemoryMonitorConfig, IMemoryMonitorMetrics, MemoryEvent } from './events';
+import { Subject, Observable } from 'rxjs';
+import { MemoryEvent } from './events';
+import { IMemoryMonitor, MonitorConfig, MonitorMetrics } from './monitors';
+import { logger } from '../Logger';
 
 /**
  * Abstract base class for memory monitors
+ * Monitors are invoked by the TransitionManager based on system signals
+ * and produce events by reading their associated memory
  */
 export abstract class AbstractMemoryMonitor implements IMemoryMonitor {
-    private subscription?: Subscription;
-    private metricsSubject = new Subject<IMemoryMonitorMetrics>();
-    
-    public metrics: IMemoryMonitorMetrics = {
-        lastCheck: new Date(),
+    protected eventsSubject$ = new Subject<MemoryEvent>();
+    protected isActive = false;
+    private _metrics: MonitorMetrics = {
+        lastInvoked: new Date(),
         eventCount: 0,
         status: 'inactive'
     };
 
     constructor(
         public readonly id: string,
-        public config: IMemoryMonitorConfig
+        public readonly config: MonitorConfig
     ) {}
 
     /**
-     * Start monitoring
+     * Get current monitor metrics
      */
-    public start(): void {
-        if (this.subscription || !this.config.enabled) {
-            return;
-        }
-
-        this.metrics.status = 'active';
-        this.metricsSubject.next(this.metrics);
-        
-        this.subscription = this.monitor().pipe(
-            filter(() => this.config.enabled)
-        ).subscribe({
-            next: (event) => {
-                this.metrics.lastCheck = new Date();
-                this.metrics.eventCount++;
-                this.metricsSubject.next(this.metrics);
-            },
-            error: (error) => {
-                console.error(`Error in memory monitor ${this.id}:`, error);
-                this.stop();
-            }
-        });
+    public get metrics(): MonitorMetrics {
+        return { ...this._metrics };
     }
 
     /**
-     * Stop monitoring
+     * Start accepting invocations from TransitionManager
+     */
+    public start(): void {
+        if (this.isActive) return;
+        this.isActive = true;
+        this._metrics.status = 'active';
+        logger.debug(`Monitor ${this.id} started`);
+    }
+
+    /**
+     * Stop accepting invocations from TransitionManager
      */
     public stop(): void {
-        this.subscription?.unsubscribe();
-        this.subscription = undefined;
-        this.metrics.status = 'inactive';
-        this.metricsSubject.next(this.metrics);
+        if (!this.isActive) return;
+        this.isActive = false;
+        this._metrics.status = 'inactive';
+        logger.debug(`Monitor ${this.id} stopped`);
     }
 
     /**
      * Reset monitor state
      */
     public reset(): void {
-        this.stop();
-        this.metrics = {
-            lastCheck: new Date(),
+        this._metrics = {
+            lastInvoked: new Date(),
             eventCount: 0,
-            status: 'inactive'
+            status: this.isActive ? 'active' : 'inactive'
         };
-        this.metricsSubject.next(this.metrics);
+        logger.debug(`Monitor ${this.id} reset`);
     }
 
     /**
-     * Update monitor configuration
-     */
-    public updateConfig(config: Partial<IMemoryMonitorConfig>): void {
-        this.config = { ...this.config, ...config };
-        
-        // If disabled, stop monitoring
-        if (!this.config.enabled) {
-            this.stop();
-        }
-        // If enabled and not running, start monitoring
-        else if (this.config.enabled && !this.subscription) {
-            this.start();
-        }
-    }
-
-    /**
-     * Get the monitor's configuration
-     */
-    public getConfig(): IMemoryMonitorConfig {
-        return { ...this.config };
-    }
-
-    /**
-     * Get metrics updates as an observable
-     */
-    public getMetricsUpdates(): Observable<IMemoryMonitorMetrics> {
-        return this.metricsSubject.asObservable();
-    }
-
-    /**
-     * Abstract method to implement the actual monitoring logic
-     * @returns Observable stream of memory events
+     * Called by TransitionManager when signals match this monitor's config.
+     * Implementations should read their associated memory and emit events.
      */
     public abstract monitor(): Observable<MemoryEvent>;
 
     /**
-     * Protected helper to create a base event
+     * Helper method for implementations to emit events
      */
-    protected createBaseEvent(): Partial<MemoryEvent> {
-        return {
-            timestamp: new Date(),
-            metadata: new Map([['monitorId', this.id]])
-        };
+    protected emitEvent(event: MemoryEvent): void {
+        if (!this.isActive) return;
+        
+        this._metrics.lastInvoked = new Date();
+        this._metrics.eventCount++;
+        
+        this.eventsSubject$.next(event);
+        logger.debug(`Monitor ${this.id} emitted event:`, event);
     }
 }
