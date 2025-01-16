@@ -55,7 +55,7 @@ export class AgentMemorySystem {
      * All input first goes to ephemeral memory, then gets processed by memory handlers
      * based on events from MemoryTransitionManager.
      */
-    public async remember<C>(content: C, schema: z.ZodSchema<C>, metadata?: Map<string, any>): Promise<void> {
+    public async remember<C>(content: C | string, schema?: z.ZodSchema<C>, metadata?: Map<string, any>): Promise<void> {
         const memoryUnit = this.ephemeralMemory.createMemoryUnit(content, schema, metadata);
         await this.ephemeralMemory.store(memoryUnit);
     }
@@ -80,15 +80,16 @@ export class AgentMemorySystem {
         }
 
         // Search in each memory store
-        const [workingResults, episodicResults, semanticResults, proceduralResults] = await Promise.all([
+        const [workingResults, episodicResults, semanticResults, proceduralResults, ephemeralResults] = await Promise.all([
             this.workingMemory.query(filter),
             this.episodicMemory.query(filter),
             this.semanticMemory.query(filter),
-            this.proceduralMemory.query(filter)
+            this.proceduralMemory.query(filter),
+            this.ephemeralMemory.query(filter)
         ]);
 
         // Combine and rank results
-        const allResults = [...workingResults, ...episodicResults, ...semanticResults, ...proceduralResults];
+        const allResults = [...workingResults, ...episodicResults, ...semanticResults, ...proceduralResults, ...ephemeralResults];
         return this.rankMemories(allResults, this.contextManager.getCurrentContext());
     }
 
