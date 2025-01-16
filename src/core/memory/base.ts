@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 /**
  * Memory Consolidation
  */
@@ -97,8 +99,11 @@ export interface IMemory<T extends IMemoryUnit> {
 
     /**
      * Create a new memory unit with the given content and metadata
+     * @param content The content to store, can be either a string or an object of type C
+     * @param schema Optional schema for validating object content
+     * @param metadata Optional metadata for the memory unit
      */
-    createMemoryUnit(content: any, metadata?: Map<string, any>): T;
+    createMemoryUnit<C>(content: C | string, schema?: z.ZodType<C>, metadata?: Map<string, any>): T;
 }
 
 /**

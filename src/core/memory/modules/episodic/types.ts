@@ -1,5 +1,5 @@
 import { 
-    SessionMemoryContext, 
+    WorkingMemoryContext, 
     EmotionalContext
 } from '../../context';
 import { IMemoryUnit } from '../../base';
@@ -15,7 +15,6 @@ export interface IEpisodicMemoryUnit extends IMemoryUnit {
         actors: string[];
         actions: string[];
         emotions: EmotionalContext;
-        context: SessionMemoryContext;
         coherenceScore: number;
         emotionalIntensity: number;
         contextualRelevance: number;

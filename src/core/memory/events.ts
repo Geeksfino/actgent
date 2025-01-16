@@ -1,21 +1,25 @@
 import { Observable } from 'rxjs';
 import { IMemoryUnit, MemoryType } from './base';
-import { SessionMemoryContext, EmotionalState } from './context';
+import { WorkingMemoryContext, EmotionalState } from './context';
 
 // Memory Events
-export enum MemoryEventType {
-    ACCESS = 'access',
-    STORE = 'store',
-    MODIFY = 'modify',
-    UPDATE = 'update',
-    DELETE = 'delete',
-    CONSOLIDATE = 'consolidate',
-    CAPACITY_WARNING = 'capacity_warning',
-    CONTEXT_CHANGE = 'context_change',
-    EMOTIONAL_PEAK = 'emotional_peak',
-    GOAL_COMPLETED = 'goal_completed',
-    MEMORY_ACCESS = 'memory_access'
-}
+export type MemoryEventType =
+    | 'ephemeral:add:item'
+    | 'ephemeral:clear:all'
+    | 'working:add:item'
+    | 'working:update:items'
+    | 'working:forget:item'
+    | 'semantic:extract:entities'
+    | 'semantic:update:triples'
+    | 'semantic:updated:items'
+    | 'episodic:create:entry'
+    | 'episodic:update:items'
+    | 'procedural:learn:procedure'
+    | 'procedural:forget:procedure'
+    | 'procedural:updated:items'
+    | 'system:warn:capacity'
+    | 'system:complete:task'
+    | 'system:change:context';
 
 /**
  * Memory Event
@@ -23,7 +27,7 @@ export enum MemoryEventType {
 export type MemoryEvent = {
     type: MemoryEventType;
     memory: IMemoryUnit | null;  // null for system events like capacity warnings
-    context?: SessionMemoryContext;
+    context?: WorkingMemoryContext;
     emotion?: EmotionalState;
     timestamp: Date;
     metadata?: Map<string, any>;

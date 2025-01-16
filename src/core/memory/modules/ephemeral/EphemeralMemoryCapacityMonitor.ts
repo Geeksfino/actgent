@@ -52,7 +52,7 @@ export class EphemeralMemoryCapacityMonitor extends AbstractMemoryMonitor {
             ),
             // Create capacity warning event
             map(stats => ({
-                type: MemoryEventType.CAPACITY_WARNING,
+                type: 'system:capacity_warning' as MemoryEventType,
                 timestamp: new Date(),
                 memory: null,
                 metadata: new Map([

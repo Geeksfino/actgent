@@ -7,6 +7,7 @@ import { IMemoryStorage, IMemoryIndex } from '../../storage';
 import { ISemanticMemoryUnit, ConceptNode, ConceptRelation, RelationType, createSemanticMetadata } from './types';
 import { SemanticMemoryFactory } from './SemanticMemoryFactory';
 import crypto from 'crypto';
+import { z } from 'zod';
 
 /**
  * Semantic memory implementation
@@ -27,38 +28,82 @@ export class SemanticMemory extends DeclarativeMemory {
     /**
      * Create a semantic memory unit
      */
-    public createMemoryUnit(content: any, metadata?: Map<string, any>): ISemanticMemoryUnit {
+    public createMemoryUnit<C>(
+        content: C | string, 
+        schema?: z.ZodType<C>, 
+        metadata?: Map<string, any>
+    ): ISemanticMemoryUnit {
+        let validatedContent: ConceptNode | ConceptRelation;
+
+        if (typeof content === 'string') {
+            validatedContent = {
+                id: crypto.randomUUID(),
+                name: content,
+                confidence: 1.0,
+                source: 'direct-input',
+                lastVerified: new Date(),
+                properties: new Map()
+            } as ConceptNode;
+        } else {
+            if (!schema) {
+                throw new Error('Schema is required for object content');
+            }
+            const validationResult = schema.safeParse(content);
+            if (!validationResult.success) {
+                throw new Error(`Invalid semantic memory content: ${validationResult.error}`);
+            }
+            
+            if (!this.isValidSemanticContent(validationResult.data)) {
+                throw new Error('Content must be either a ConceptNode or ConceptRelation');
+            }
+            validatedContent = validationResult.data;
+        }
+
         const now = new Date();
+        const memoryMetadata = createSemanticMetadata(now);
+        if (metadata) {
+            for (const [key, value] of metadata) {
+                memoryMetadata.set(key, value);
+            }
+        }
+
         return {
             id: crypto.randomUUID(),
-            content: {
-                id: crypto.randomUUID(),
-                name: '',
-                confidence: 1,
-                source: 'semantic',
-                lastVerified: now,
-                properties: new Map()
-            } as ConceptNode,
-            metadata: metadata || new Map(),
+            content: validatedContent,
+            metadata: memoryMetadata,
             timestamp: now,
-            memoryType: MemoryType.SEMANTIC,
-            accessCount: 0,
-            lastAccessed: now
+            memoryType: MemoryType.SEMANTIC
         };
+    }
+
+    private isValidSemanticContent(content: any): content is ConceptNode | ConceptRelation {
+        if (!content || typeof content !== 'object') return false;
+        
+        // Check if it's a ConceptNode
+        if ('name' in content && 'properties' in content) {
+            return true;
+        }
+        
+        // Check if it's a ConceptRelation
+        if ('sourceId' in content && 'targetId' in content && 'relationType' in content) {
+            return true;
+        }
+        
+        return false;
     }
 
     /**
      * Construct a semantic memory unit
      */
     public constructMemoryUnit(content: any, metadata?: Map<string, any>): ISemanticMemoryUnit {
-        return this.createMemoryUnit(content, metadata);
+        return this.createMemoryUnit(content, z.any(), metadata);
     }
 
     /**
      * Store a semantic memory unit
      */
     public async store(content: Omit<ISemanticMemoryUnit, 'id' | 'timestamp' | 'memoryType'>): Promise<void> {
-        const memoryUnit = this.createMemoryUnit(content.content, content.metadata);
+        const memoryUnit = this.createMemoryUnit(content.content, z.any(), content.metadata);
         Object.assign(memoryUnit, content);
         await this.storage.store(memoryUnit);
     }
@@ -136,5 +181,12 @@ export class SemanticMemory extends DeclarativeMemory {
     public async getAllRelations(): Promise<ConceptRelation[]> {
         const memories = await this.retrieveByFilter({ types: [MemoryType.SEMANTIC] });
         return memories.map(memory => memory.content as ConceptRelation);
+    }
+
+    isMemoryUnitOfType(unit: any): unit is ISemanticMemoryUnit {
+        return unit && 
+               typeof unit === 'object' && 
+               unit.memoryType === MemoryType.SEMANTIC &&
+               this.isValidSemanticContent(unit.content);
     }
 }

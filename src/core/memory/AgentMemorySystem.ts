@@ -1,16 +1,20 @@
 import { IMemoryUnit, MemoryFilter } from './base';
-import { IMemoryStorage, IMemoryIndex } from './storage';
-import { MemoryEventType } from './events';
-import { SessionMemoryContext, EmotionalState } from './context';
-import { IEpisodicMemoryUnit } from './modules/episodic/types';
-import { IProceduralMemoryUnit } from './modules/procedural/types';
-import { SessionMemoryContextManager } from './SessionMemoryContextManager';
+import { WorkingMemoryContext } from './context';
+import { WorkingContextManager } from './WorkingContextManager';
 import { WorkingMemory } from './modules/working/WorkingMemory';
 import { EpisodicMemory } from './modules/episodic/EpisodicMemory';
+import { SemanticMemory } from './modules/semantic/SemanticMemory';
 import { ProceduralMemory } from './modules/procedural/ProceduralMemory';
+import { EphemeralMemory } from './modules/ephemeral/EphemeralMemory';
 import { MemoryTransitionManager } from './MemoryTransitionManager';
-import { Subject, interval, Observable } from 'rxjs';
-import { map, filter, distinctUntilChanged } from 'rxjs/operators';
+
+// Import storage factories
+import { WorkingMemoryStorageFactory } from './modules/working/WorkingMemoryStorageFactory';
+import { EpisodicMemoryStorageFactory } from './modules/episodic/EpisodicMemoryStorageFactory';
+import { SemanticMemoryStorageFactory } from './modules/semantic/SemanticMemoryStorageFactory';
+import { ProceduralMemoryStorageFactory } from './modules/procedural/ProceduralMemoryStorageFactory';
+
+import { z } from 'zod';
 
 /**
  * Main entry point for the agent's memory system.
@@ -18,170 +22,42 @@ import { map, filter, distinctUntilChanged } from 'rxjs/operators';
  * while handling the complexity of memory management internally.
  */
 export class AgentMemorySystem {
-    private readonly contextChanges$ = new Subject<SessionMemoryContext>();
-
     private workingMemory: WorkingMemory;
     private episodicMemory: EpisodicMemory;
+    private semanticMemory: SemanticMemory;
     private proceduralMemory: ProceduralMemory;
-    private transitionManager: MemoryTransitionManager;
-    private contextManager: SessionMemoryContextManager;
+    private ephemeralMemory: EphemeralMemory;
 
-    constructor(
-        storage: IMemoryStorage,
-        index: IMemoryIndex
-    ) {
-        this.workingMemory = new WorkingMemory(storage, index);
-        this.episodicMemory = new EpisodicMemory(storage, index);
-        this.proceduralMemory = new ProceduralMemory(storage, index);
+    private transitionManager: MemoryTransitionManager;
+    private contextManager: WorkingContextManager;
+
+    constructor() {
+        // Create memories with their module-specific storage
+        this.workingMemory = WorkingMemoryStorageFactory.create();
+        this.episodicMemory = EpisodicMemoryStorageFactory.create();
+        this.semanticMemory = SemanticMemoryStorageFactory.create();
+        this.proceduralMemory = ProceduralMemoryStorageFactory.create();
+        this.ephemeralMemory = new EphemeralMemory(5000);
+
         this.transitionManager = new MemoryTransitionManager();
-        this.contextManager = new SessionMemoryContextManager(storage, index);
+        this.contextManager = new WorkingContextManager(this.workingMemory);
 
         this.setupEventHandlers();
-
-        // Load initial context from working memory
-        this.contextManager.loadContextFromWorkingMemory().catch(console.error);
     }
 
     private setupEventHandlers(): void {
-        // Monitor working memory size
-        interval(1000).pipe(
-            map(() => ({
-                size: this.workingMemory.getCurrentSize(),
-                capacity: this.workingMemory.getCapacity()
-            })),
-            filter(({ size, capacity }) => size > capacity * 0.8),
-            distinctUntilChanged()
-        ).subscribe(() => this.handleCapacityWarning());
-
-        // Monitor context changes
-        this.contextManager.getContextChanges().subscribe(context => {
-            this.handleContextChange(context);
-        });
-    }
-
-    /**
-     * Handle memory access
-     */
-    private handleMemoryAccess(memoryId: string): void {
-        this.transitionManager.emitEvent({
-            type: MemoryEventType.MEMORY_ACCESS,
-            timestamp: new Date(),
-            memory: null,
-            metadata: new Map([['memoryId', memoryId]])
-        });
-    }
-
-    /**
-     * Handle capacity warning
-     */
-    private handleCapacityWarning(): void {
-        const context: SessionMemoryContext = {
-            contextType: 'capacity_warning',
-            timestamp: new Date(),
-            userGoals: new Set(),
-            domainContext: new Map(),
-            interactionHistory: [],
-            emotionalTrends: [],
-            emotionalState: { valence: 0, arousal: 0 },
-            topicHistory: [],
-            userPreferences: new Map(),
-            interactionPhase: 'main'
-        };
-        this.transitionManager.emitEvent({
-            type: MemoryEventType.CONTEXT_CHANGE,
-            timestamp: new Date(),
-            memory: null,
-            context
-        });
-    }
-
-    /**
-     * Handle context change
-     */
-    private handleContextChange(context: SessionMemoryContext): void {
-        this.transitionManager.emitEvent({
-            type: MemoryEventType.CONTEXT_CHANGE,
-            timestamp: new Date(),
-            memory: null,
-            context
-        });
-    }
-
-    /**
-     * Handle emotional peak
-     */
-    private handleEmotionalPeak(emotion: EmotionalState): void {
-        this.transitionManager.emitEvent({
-            type: MemoryEventType.EMOTIONAL_PEAK,
-            timestamp: new Date(),
-            memory: null,
-            emotion
-        });
-    }
-
-    /**
-     * Handle goal completion
-     */
-    private handleGoalCompletion(goalId: string): void {
-        this.transitionManager.emitEvent({
-            type: MemoryEventType.GOAL_COMPLETED,
-            timestamp: new Date(),
-            memory: null,
-            metadata: new Map([['goalId', goalId]])
-        });
-    }
-
-    private isEmotionalPeak(prevEmotion: EmotionalState, currentEmotion: EmotionalState): boolean {
-        const THRESHOLD = 0.5;
-        return Math.abs(currentEmotion.valence - prevEmotion.valence) > THRESHOLD ||
-               Math.abs(currentEmotion.arousal - prevEmotion.arousal) > THRESHOLD;
-    }
-
-    private async updateEmotionalState(prevState: EmotionalState, currentState: EmotionalState): Promise<void> {
-        if (this.isEmotionalPeak(prevState, currentState)) {
-            this.handleEmotionalPeak(currentState);
-        }
-    }
-
-    /**
-     * Store a new memory unit
-     */
-    public async store(memory: IMemoryUnit): Promise<void> {
-        await this.workingMemory.store(memory);
-        
-        // Check capacity after storing
-        if (this.workingMemory.getCurrentSize() >= this.workingMemory.getCapacity() * 0.8) {
-            this.handleCapacityWarning();
-        }
+        // Memory monitors and handlers will be registered here
     }
 
     /**
      * Remember something. The memory system will automatically determine
      * where and how to store it based on its characteristics.
+     * All input first goes to ephemeral memory, then gets processed by memory handlers
+     * based on events from MemoryTransitionManager.
      */
-    public async remember(content: any, metadata: Map<string, any> = new Map()): Promise<void> {
-        const memoryType = metadata?.get('type') || 'episodic';
-        let memory;
-        
-        switch (memoryType) {
-            case 'episodic':
-                memory = { content, metadata } as IEpisodicMemoryUnit;
-                await this.episodicMemory.store(memory);
-                break;
-            case 'procedural':
-                memory = {
-                    content,
-                    metadata,
-                    procedure: metadata.get('procedure') || 'defaultProcedure',
-                    expectedOutcomes: metadata.get('expectedOutcomes') || [],
-                    applicableContext: metadata.get('applicableContext') || 'defaultContext'
-                } as IProceduralMemoryUnit;
-                await this.proceduralMemory.store(memory);
-                break;
-            default:
-                memory = { content, metadata } as IMemoryUnit;
-                await this.workingMemory.store(memory);
-        }
+    public async remember<C>(content: C, schema: z.ZodSchema<C>, metadata?: Map<string, any>): Promise<void> {
+        const memoryUnit = this.ephemeralMemory.createMemoryUnit(content, schema, metadata);
+        await this.ephemeralMemory.store(memoryUnit);
     }
 
     /**
@@ -192,160 +68,107 @@ export class AgentMemorySystem {
     }
 
     /**
-     * Get current context information
-     */
-    public async getContext(key: string): Promise<any> {
-        return this.contextManager.getContext(key);
-    }
-
-    /**
-     * Get complete current session context state
-     */
-    public getCurrentContext(): SessionMemoryContext {
-        return this.contextManager.getCurrentContext();
-    }
-
-    /**
-     * Register a listener for session context changes
-     */
-    public onContextChange(listener: (context: SessionMemoryContext) => void): void {
-        this.contextManager.onContextChange(listener);
-    }
-
-    /**
      * Recall memories based on a query. The memory system will search
      * across all relevant memory stores.
      */
     public async recall(query: string | MemoryFilter): Promise<IMemoryUnit[]> {
-        const filter: MemoryFilter = typeof query === 'string' 
-            ? { query }  // Use query field for string searches
-            : query;     // Use provided filter directly
+        let filter: MemoryFilter;
+        if (typeof query === 'string') {
+            filter = { query };
+        } else {
+            filter = query;
+        }
 
-        // Search across all memory types
-        const memories = await Promise.all([
+        // Search in each memory store
+        const [workingResults, episodicResults, semanticResults, proceduralResults] = await Promise.all([
             this.workingMemory.query(filter),
             this.episodicMemory.query(filter),
+            this.semanticMemory.query(filter),
             this.proceduralMemory.query(filter)
         ]);
 
-        // Get all memories and filter out nulls
-        const allMemories = memories.flat().filter((memory): memory is IMemoryUnit => memory !== null);
-
-        // If we have a specific memory ID, also get related memories
-        if (filter.ids && filter.ids.length === 1) {
-            const relatedMemories = await this.findRelatedMemories(filter.ids[0]);
-            allMemories.push(...relatedMemories);
-        }
-
-        // Remove duplicates and sort by relevance/recency
-        const uniqueMemories = Array.from(new Set(allMemories));
-        return this.rankMemories(uniqueMemories, this.contextManager.getCurrentContext());
+        // Combine and rank results
+        const allResults = [...workingResults, ...episodicResults, ...semanticResults, ...proceduralResults];
+        return this.rankMemories(allResults, this.contextManager.getCurrentContext());
     }
 
     /**
      * Rank memories by their relevance, recency, and contextual alignment
      */
-    private rankMemories(memories: IMemoryUnit[], context: SessionMemoryContext): IMemoryUnit[] {
+    private rankMemories(memories: IMemoryUnit[], context: WorkingMemoryContext): IMemoryUnit[] {
         return memories.sort((a, b) => {
             // Get relevance scores (default to 0 if not set)
             const relevanceA = a.metadata.get('relevance') as number || 0;
             const relevanceB = b.metadata.get('relevance') as number || 0;
 
-            // Get timestamps (default to 0 if not set)
-            const timeA = a.metadata.get('timestamp') as number || 0;
-            const timeB = b.metadata.get('timestamp') as number || 0;
+            // Get recency scores based on timestamp
+            const recencyA = a.timestamp.getTime();
+            const recencyB = b.timestamp.getTime();
 
-            // Calculate contextual alignment
-            const contextScoreA = this.calculateContextualAlignment(a, context);
-            const contextScoreB = this.calculateContextualAlignment(b, context);
+            // Get contextual alignment scores
+            const alignmentA = this.calculateContextualAlignment(a, context);
+            const alignmentB = this.calculateContextualAlignment(b, context);
 
-            // Combine relevance, recency, and context (weighted)
-            const scoreA = (relevanceA * 0.4) + (timeA * 0.3) + (contextScoreA * 0.3);
-            const scoreB = (relevanceB * 0.4) + (timeB * 0.3) + (contextScoreB * 0.3);
+            // Combine scores with weights
+            const scoreA = (0.4 * relevanceA) + (0.3 * recencyA) + (0.3 * alignmentA);
+            const scoreB = (0.4 * relevanceB) + (0.3 * recencyB) + (0.3 * alignmentB);
 
-            return scoreB - scoreA;  // Sort in descending order
+            return scoreB - scoreA;
         });
     }
 
     /**
      * Calculate how well a memory aligns with current context
      */
-    private calculateContextualAlignment(memory: IMemoryUnit, context: SessionMemoryContext): number {
+    private calculateContextualAlignment(memory: IMemoryUnit, context: WorkingMemoryContext): number {
         let score = 0;
-        const memoryContext = memory.metadata.get('context') as SessionMemoryContext | undefined;
+        const memoryContext = memory.metadata.get('context') as WorkingMemoryContext | undefined;
         
         if (!memoryContext) return 0;
 
-        // Check topic alignment
-        const memoryTopics = memoryContext.topicHistory || [];
-        const commonTopics = memoryTopics.filter((topic: string) => context.topicHistory.includes(topic));
-        if (commonTopics.length > 0) {
-            score += 0.3 * (commonTopics.length / Math.max(memoryTopics.length, context.topicHistory.length));
-        }
+        // Compare goals
+        const sharedGoals = new Set(
+            [...memoryContext.userGoals].filter(x => context.userGoals.has(x))
+        );
+        score += sharedGoals.size * 0.2;
 
-        // Check goal alignment
-        const memoryGoals = memoryContext.userGoals || new Set<string>();
-        const commonGoals = Array.from(memoryGoals).filter((goal: string) => context.userGoals.has(goal));
-        if (commonGoals.length > 0) {
-            score += 0.4 * (commonGoals.length / Math.max(memoryGoals.size, context.userGoals.size));
-        }
+        // Compare topics
+        const sharedTopics = memoryContext.topicHistory.filter(
+            topic => context.topicHistory.includes(topic)
+        );
+        score += sharedTopics.length * 0.2;
 
-        // Check emotional alignment
-        const memoryEmotion = memoryContext.emotionalState;
-        const currentEmotion = context.emotionalState;
-        if (memoryEmotion && currentEmotion) {
-            const valenceDiff = Math.abs(memoryEmotion.valence - currentEmotion.valence);
-            const arousalDiff = Math.abs(memoryEmotion.arousal - currentEmotion.arousal);
-            score += 0.3 * (1 - ((valenceDiff + arousalDiff) / 4)); // Normalize to 0-1
+        // Compare emotional state
+        if (memoryContext.emotionalState && context.emotionalState) {
+            const valenceDiff = Math.abs(
+                memoryContext.emotionalState.valence - context.emotionalState.valence
+            );
+            const arousalDiff = Math.abs(
+                memoryContext.emotionalState.arousal - context.emotionalState.arousal
+            );
+            score += (2 - valenceDiff - arousalDiff) * 0.2;
         }
 
         return score;
     }
 
     /**
-     * Associate two memories together
-     */
-    public async associate(memoryId1: string, memoryId2: string): Promise<void> {
-        // TO DO: implement associate logic
-    }
-
-    /**
-     * Remove association between two memories
-     */
-    public async dissociate(memoryId1: string, memoryId2: string): Promise<void> {
-        // TO DO: implement dissociate logic
-    }
-
-    /**
-     * Find memories related to a given memory
-     */
-    public async findRelatedMemories(memoryId: string, maxResults: number = 10): Promise<IMemoryUnit[]> {
-        // TO DO: implement findRelatedMemories logic
-        return [];
-    }
-
-    /**
      * Forget a specific memory or set of memories
      */
     public async forget(idOrFilter: string | MemoryFilter): Promise<void> {
-        const filter: MemoryFilter = typeof idOrFilter === 'string'
-            ? { ids: [idOrFilter] }
-            : idOrFilter;
-
-        // For each memory ID, remove from all memory stores
-        const ids = filter.ids || [];
-        await Promise.all(ids.map(async id => {
+        if (typeof idOrFilter === 'string') {
             await Promise.all([
-                this.workingMemory.delete(id),
-                this.episodicMemory.delete(id),
-                this.proceduralMemory.delete(id)
+                this.workingMemory.delete(idOrFilter),
+                this.episodicMemory.delete(idOrFilter),
+                this.semanticMemory.delete(idOrFilter),
+                this.proceduralMemory.delete(idOrFilter)
             ]);
-        }));
+        } else {
+            const memories = await this.recall(idOrFilter);
+            await Promise.all(
+                memories.map(memory => this.forget(memory.id))
+            );
+        }
     }
 
-    /**
-     * Clean up resources
-     */
-    public dispose(): void {
-    }
 }

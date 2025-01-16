@@ -1,11 +1,9 @@
-import { MemoryType } from '../../base';
-import { DeclarativeMemory } from '../../DeclarativeMemory';
 import { IMemoryStorage, IMemoryIndex } from '../../storage';
-import { MemoryFilter } from '../../base';
-import { EmotionalState } from '../../context';
-import { EmotionalContextImpl } from '../../context/EmotionalContextImpl';
+import { MemoryType, MemoryFilter } from '../../base';
+import { DeclarativeMemory } from '../../DeclarativeMemory';
 import { IEpisodicMemoryUnit } from './types';
-import { EpisodicMemoryFactory } from './EpisodicMemoryFactory';
+import { EmotionalContext, EmotionalState } from '../../context';
+import { z } from 'zod';
 import crypto from 'crypto';
 
 /**
@@ -20,34 +18,45 @@ export class EpisodicMemory extends DeclarativeMemory {
     /**
      * Create an episodic memory unit
      */
-    public createMemoryUnit(content: any, metadata?: Map<string, any>): IEpisodicMemoryUnit {
+    public createMemoryUnit<C>(
+        content: C | string, 
+        schema?: z.ZodType<C>, 
+        metadata?: Map<string, any>
+    ): IEpisodicMemoryUnit {
+        let validatedContent: any;
         const now = new Date();
+
+        if (typeof content === 'string') {
+            validatedContent = {
+                timeSequence: Date.now(),
+                location: metadata?.get('location') || 'unknown',
+                actors: metadata?.get('actors') || [],
+                actions: metadata?.get('actions') || [],
+                emotions: metadata?.get('emotions') || {
+                    currentEmotion: { valence: 0, arousal: 0 },
+                    emotionalTrends: []
+                },
+                coherenceScore: metadata?.get('coherenceScore') || 1.0,
+                emotionalIntensity: metadata?.get('emotionalIntensity') || 0,
+                contextualRelevance: metadata?.get('contextualRelevance') || 1.0,
+                temporalDistance: 0,
+                userInstruction: content,
+                timestamp: now
+            };
+        } else {
+            if (!schema) {
+                throw new Error('Schema is required for object content');
+            }
+            const validationResult = schema.safeParse(content);
+            if (!validationResult.success) {
+                throw new Error(`Invalid episodic memory content: ${validationResult.error}`);
+            }
+            validatedContent = validationResult.data;
+        }
+
         return {
             id: crypto.randomUUID(),
-            content: {
-                timeSequence: Date.now(),
-                location: '',
-                actors: [],
-                actions: [],
-                emotions: new EmotionalContextImpl(),
-                context: {
-                    contextType: 'context_change',
-                    timestamp: now,
-                    userGoals: new Set(),
-                    domainContext: new Map(),
-                    interactionHistory: [],
-                    emotionalTrends: [],
-                    emotionalState: { valence: 0, arousal: 0 },
-                    topicHistory: [],
-                    userPreferences: new Map(),
-                    interactionPhase: 'main'
-                },
-                coherenceScore: 0,
-                emotionalIntensity: 0,
-                contextualRelevance: 0,
-                temporalDistance: 0,
-                timestamp: now
-            },
+            content: validatedContent,
             metadata: metadata || new Map(),
             timestamp: now,
             memoryType: MemoryType.EPISODIC,
@@ -65,7 +74,7 @@ export class EpisodicMemory extends DeclarativeMemory {
         if (!metadataMap.has('timestamp')) {
             metadataMap.set('timestamp', new Date());
         }
-        return this.createMemoryUnit(content, metadataMap);
+        return this.createMemoryUnit(content, z.any(), metadataMap);
     }
 
     /**
@@ -87,25 +96,22 @@ export class EpisodicMemory extends DeclarativeMemory {
      * Store an episodic memory unit
      */
     public async store(content: Omit<IEpisodicMemoryUnit, 'id' | 'timestamp' | 'memoryType'>): Promise<void> {
-        const memoryUnit = this.createMemoryUnit(content.content, content.metadata);
+        const memoryUnit = this.createMemoryUnit(content.content, z.any(), content.metadata);
         Object.assign(memoryUnit, content);
         await this.storage.store(memoryUnit);
     }
 
     /**
-     * Update emotional context for a memory
+     * Update the emotional context of a memory
      */
-    public async updateEmotionalContext(
-        memoryId: string,
-        emotionalState: EmotionalState
-    ): Promise<void> {
+    async updateEmotionalContext(memoryId: string, emotionalContext: EmotionalContext): Promise<void> {
         const memory = await this.retrieve(memoryId);
         if (!memory) {
-            throw new Error('Memory not found');
+            throw new Error(`Memory ${memoryId} not found`);
         }
 
-        memory.metadata.set('emotionalContext', emotionalState);
-        await this.storage.update(memory);
+        memory.content.emotions = emotionalContext;
+        await this.store(memory);
     }
 
     /**
@@ -123,15 +129,31 @@ export class EpisodicMemory extends DeclarativeMemory {
      * Calculate consolidation score for a memory
      */
     private calculateConsolidationScore(memory: IEpisodicMemoryUnit): number {
-        const emotionalState = memory.metadata.get('emotionalContext') as EmotionalState;
+        const emotionalContext = memory.content.emotions;
         const importance = memory.metadata.get('importance') as number || 0.5;
         
-        // Calculate emotional intensity from valence and arousal
-        const emotionalIntensity = emotionalState ? 
-            Math.sqrt(Math.pow(emotionalState.valence, 2) + Math.pow(emotionalState.arousal, 2)) / Math.sqrt(2) : 
-            0;
+        // Calculate emotional intensity from emotional context
+        const emotionalIntensity = Math.sqrt(
+            Math.pow(emotionalContext.currentEmotion.valence, 2) + 
+            Math.pow(emotionalContext.currentEmotion.arousal, 2)
+        ) / Math.sqrt(2);
 
-        // Combine factors for final score
-        return (emotionalIntensity * 0.6 + importance * 0.4);
+        return (emotionalIntensity + importance) / 2;
+    }
+
+    isMemoryUnitOfType(unit: any): unit is IEpisodicMemoryUnit {
+        return unit && 
+               typeof unit === 'object' && 
+               unit.memoryType === MemoryType.EPISODIC &&
+               unit.content &&
+               typeof unit.content.timeSequence === 'number' &&
+               typeof unit.content.location === 'string' &&
+               Array.isArray(unit.content.actors) &&
+               Array.isArray(unit.content.actions) &&
+               typeof unit.content.coherenceScore === 'number' &&
+               typeof unit.content.emotionalIntensity === 'number' &&
+               typeof unit.content.contextualRelevance === 'number' &&
+               typeof unit.content.temporalDistance === 'number' &&
+               unit.content.timestamp instanceof Date;
     }
 }

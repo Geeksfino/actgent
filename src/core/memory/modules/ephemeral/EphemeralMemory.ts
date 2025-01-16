@@ -1,10 +1,11 @@
 import { IMemory, MemoryFilter, MemoryType } from '../../base';
-import { EphemeralMemoryItem } from './types';
+import { EphemeralMemoryUnit } from './types';
+import { z } from 'zod';
 import crypto from 'crypto';
 
-class EphemeralMemory implements IMemory<EphemeralMemoryItem> {
+class EphemeralMemory implements IMemory<EphemeralMemoryUnit> {
     private duration: number;
-    private items: { [id: string]: { item: EphemeralMemoryItem; expiry: number } };
+    private items: { [id: string]: { item: EphemeralMemoryUnit; expiry: number } };
     private maxItems: number;
 
     constructor(duration: number = 2000, maxItems: number = 1000) { // Default duration is 2 seconds, max 1000 items
@@ -13,39 +14,62 @@ class EphemeralMemory implements IMemory<EphemeralMemoryItem> {
         this.items = {};
     }
 
-    createMemoryUnit(content: any, metadata?: Map<string, any>): EphemeralMemoryItem {
+    createMemoryUnit<C>(
+        content: C | string, 
+        schema?: z.ZodType<C>, 
+        metadata?: Map<string, any>
+    ): EphemeralMemoryUnit {
+        let validatedContent: any;
+
+        if (typeof content === 'string') {
+            validatedContent = content;
+        } else {
+            if (!schema) {
+                throw new Error('Schema is required for object content');
+            }
+            const validationResult = schema.safeParse(content);
+            if (!validationResult.success) {
+                throw new Error(`Invalid memory content: ${validationResult.error}`);
+            }
+            validatedContent = validationResult.data;
+        }
+
         return {
             id: crypto.randomUUID(),
-            content,
+            content: validatedContent,
             metadata: metadata || new Map(),
             timestamp: new Date(),
-            source: 'ephemeral',
-            type: 'ephemeral',
-            memoryType: MemoryType.EPHEMERAL,
+            memoryType: MemoryType.EPHEMERAL
         };
     }
 
-    async store(item: Omit<EphemeralMemoryItem, 'id' | 'timestamp' | 'source' | 'type' | 'memoryType'>): Promise<void> {
-        const memoryUnit = this.createMemoryUnit(item.content, item.metadata);
+    async store(item: Omit<EphemeralMemoryUnit, 'memoryType'>): Promise<void> {
         if (Object.keys(this.items).length >= this.maxItems) {
             throw new Error('Memory is full');
         }
-        this.items[memoryUnit.id] = {
-            item: memoryUnit,
-            expiry: Date.now() + this.duration
+
+        const memoryUnit: EphemeralMemoryUnit = {
+            ...item,
+            memoryType: MemoryType.EPHEMERAL
         };
+
+        const expiry = Date.now() + this.duration;
+        this.items[memoryUnit.id] = { item: memoryUnit, expiry };
+
+        // Cleanup expired items
+        this.purgeExpired();
     }
 
-    purgeExpired(): void {
+    private purgeExpired(): void {
         const now = Date.now();
-        for (const id in this.items) {
-            if (this.items[id].expiry <= now) {
+        for (const [id, entry] of Object.entries(this.items)) {
+            if (entry.expiry <= now) {
                 delete this.items[id];
             }
         }
     }
 
-    async getAll(): Promise<EphemeralMemoryItem[]> {
+    async getAll(): Promise<EphemeralMemoryUnit[]> {
         this.purgeExpired();
         return Object.values(this.items).map(i => i.item);
     }
@@ -54,19 +78,20 @@ class EphemeralMemory implements IMemory<EphemeralMemoryItem> {
         this.items = {};
     }
 
-    async retrieve(id: string): Promise<EphemeralMemoryItem | null> {
+    async retrieve(id: string): Promise<EphemeralMemoryUnit | null> {
         this.purgeExpired();
         const entry = this.items[id];
         return entry ? entry.item : null;
     }
 
-    async query(filter: MemoryFilter): Promise<EphemeralMemoryItem[]> {
+    async query(filter: MemoryFilter): Promise<EphemeralMemoryUnit[]> {
         this.purgeExpired();
         return Object.values(this.items)
             .map(entry => entry.item)
             .filter(item => {
-                // Implement filter logic based on MemoryFilter criteria
-                return true; // Placeholder for actual filtering logic
+                if (filter.types && !filter.types.includes(item.memoryType)) return false;
+                if (filter.query && !item.content.toString().includes(filter.query)) return false;
+                return true;
             });
     }
 
@@ -74,12 +99,12 @@ class EphemeralMemory implements IMemory<EphemeralMemoryItem> {
         delete this.items[id];
     }
 
-    onEvent(callback: (unit: EphemeralMemoryItem) => void): void {
+    onEvent(callback: (unit: EphemeralMemoryUnit) => void): void {
         // Ephemeral memory typically doesn't use events, so this is a no-op
     }
 
-    isMemoryUnitOfType(unit: any): unit is EphemeralMemoryItem {
-        return unit && typeof unit === 'object' && 'type' in unit && unit.type === 'ephemeral';
+    isMemoryUnitOfType(unit: any): unit is EphemeralMemoryUnit {
+        return unit && typeof unit === 'object' && unit.memoryType === MemoryType.EPHEMERAL;
     }
 
     /** Get current number of items in memory */

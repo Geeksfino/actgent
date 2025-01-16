@@ -4,6 +4,7 @@ import { logger } from '../../../Logger';
 import crypto from 'crypto';
 import { WorkingMemoryFactory } from './WorkingMemoryFactory';
 import { Subject } from 'rxjs';
+import { z } from 'zod';
 
 export class WorkingMemory implements IMemory<IMemoryUnit> {
     private storage: IMemoryStorage;
@@ -27,11 +28,30 @@ export class WorkingMemory implements IMemory<IMemoryUnit> {
         return this.size;
     }
 
-    createMemoryUnit(content: any, metadata?: Map<string, any>): IMemoryUnit {
+    createMemoryUnit<C>(
+        content: C | string, 
+        schema?: z.ZodType<C>, 
+        metadata?: Map<string, any>
+    ): IMemoryUnit {
+        let validatedContent: any;
+
+        if (typeof content === 'string') {
+            validatedContent = content;
+        } else {
+            if (!schema) {
+                throw new Error('Schema is required for object content');
+            }
+            const validationResult = schema.safeParse(content);
+            if (!validationResult.success) {
+                throw new Error(`Invalid working memory content: ${validationResult.error}`);
+            }
+            validatedContent = validationResult.data;
+        }
+
         const now = new Date();
         return {
             id: crypto.randomUUID(),
-            content,
+            content: validatedContent,
             metadata: metadata || new Map(),
             timestamp: now,
             memoryType: MemoryType.WORKING,
@@ -88,7 +108,10 @@ export class WorkingMemory implements IMemory<IMemoryUnit> {
     }
 
     isMemoryUnitOfType(unit: any): unit is IMemoryUnit {
-        return unit && typeof unit === 'object' && 'memoryType' in unit && unit.memoryType === MemoryType.WORKING;
+        return unit && 
+               typeof unit === 'object' && 
+               'memoryType' in unit && 
+               unit.memoryType === MemoryType.WORKING;
     }
 
     /**

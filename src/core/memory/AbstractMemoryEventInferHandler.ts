@@ -25,12 +25,15 @@ export abstract class AbstractMemoryEventInferHandler implements IMemoryEventHan
      */
     public canHandleEventTypes(): MemoryEventType[] {
         return [
-            MemoryEventType.MEMORY_ACCESS,
-            MemoryEventType.CONTEXT_CHANGE,
-            MemoryEventType.EMOTIONAL_PEAK,
-            MemoryEventType.GOAL_COMPLETED,
-            MemoryEventType.CAPACITY_WARNING,
-            MemoryEventType.CONSOLIDATE,
+            'working:add:item',
+            'working:update:items',
+            'working:forget:item',
+            'semantic:extract:entities',
+            'semantic:update:triples',
+            'episodic:create:entry',
+            'system:warn:capacity',
+            'system:change:context',
+            'system:complete:task'
         ];
     }
 
@@ -41,25 +44,34 @@ export abstract class AbstractMemoryEventInferHandler implements IMemoryEventHan
         const basePrompt = `Process the following memory event:\nType: ${event.type}\nTimestamp: ${event.timestamp}\n`;
         
         switch (event.type) {
-            case MemoryEventType.MEMORY_ACCESS:
-                return `${basePrompt}Memory ID: ${event.metadata?.get('memoryId')}\n`;
+            case 'working:add:item':
+                return `${basePrompt}Memory added to working memory: ${JSON.stringify(event.memory)}\n`;
                 
-            case MemoryEventType.CONTEXT_CHANGE:
-                return `${basePrompt}New Context: ${JSON.stringify(event.context)}\n`;
+            case 'working:update:items':
+                return `${basePrompt}Working memory updated: ${JSON.stringify(event.memory)}\n`;
                 
-            case MemoryEventType.EMOTIONAL_PEAK:
-                return `${basePrompt}Emotion: ${JSON.stringify(event.emotion)}\n`;
+            case 'working:forget:item':
+                return `${basePrompt}Memory forgotten from working memory: ${JSON.stringify(event.memory)}\n`;
                 
-            case MemoryEventType.GOAL_COMPLETED:
-                return `${basePrompt}Goal ID: ${event.metadata?.get('goalId')}\n`;
+            case 'semantic:extract:entities':
+                return `${basePrompt}Extracting entities from: ${JSON.stringify(event.memory)}\n`;
                 
-            case MemoryEventType.CAPACITY_WARNING:
-                return `${basePrompt}Memory capacity warning\n`;
+            case 'semantic:update:triples':
+                return `${basePrompt}Updating semantic triples: ${JSON.stringify(event.memory)}\n`;
                 
-            case MemoryEventType.CONSOLIDATE:
-                return `${basePrompt}Memory consolidation event\n${
-                    event.memory ? `Memory: ${JSON.stringify(event.memory)}\n` : ''
+            case 'episodic:create:entry':
+                return `${basePrompt}New episodic memory: ${JSON.stringify(event.memory)}\n`;
+                
+            case 'system:warn:capacity':
+                return `${basePrompt}Memory capacity warning\n${
+                    event.metadata ? `Details: ${JSON.stringify(Object.fromEntries(event.metadata))}\n` : ''
                 }`;
+                
+            case 'system:change:context':
+                return `${basePrompt}Context changed: ${JSON.stringify(event.context)}\n`;
+                                
+            case 'system:complete:task':
+                return `${basePrompt}Task completed: ${JSON.stringify(event.metadata?.get('taskId'))}\n`;
                 
             default:
                 return `${basePrompt}${

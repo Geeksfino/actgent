@@ -3,7 +3,7 @@ import { IMemoryStorage, IMemoryIndex } from '../../storage';
 import { MemoryType, MemoryFilter } from '../../base';
 import { IProceduralMemoryUnit, ProceduralMetadata } from './types';
 import crypto from 'crypto';
-import { ProceduralMemoryFactory } from './ProceduralMemoryFactory';
+import { z } from 'zod';
 
 /**
  * Interface for procedural actions
@@ -25,8 +25,46 @@ export class ProceduralMemory extends LongTermMemory<IProceduralMemoryUnit> {
     /**
      * Create a procedural memory unit
      */
-    public createMemoryUnit(content: any, metadata?: Map<string, any>): IProceduralMemoryUnit {
-        return ProceduralMemoryFactory.createMemoryUnit(content, metadata);
+    public createMemoryUnit<C>(
+        content: C | string, 
+        schema?: z.ZodType<C>, 
+        metadata?: Map<string, any>
+    ): IProceduralMemoryUnit {
+        let validatedContent: C | string;
+
+        if (typeof content === 'string') {
+            validatedContent = content;
+        } else {
+            if (!schema) {
+                throw new Error('Schema is required for object content');
+            }
+            const validationResult = schema.safeParse(content);
+            if (!validationResult.success) {
+                throw new Error(`Invalid procedural memory content: ${validationResult.error}`);
+            }
+            validatedContent = validationResult.data;
+        }
+
+        const now = new Date();
+        const proceduralMetadata = new Map<string, any>([
+            ['type', MemoryType.PROCEDURAL],
+            ['timestamp', now],
+            ['proficiency', metadata?.get('proficiency') || 0],
+            ['successCount', metadata?.get('successCount') || 0],
+            ['failureCount', metadata?.get('failureCount') || 0],
+            ['lastExecuted', metadata?.get('lastExecuted') || now]
+        ]) as ProceduralMetadata;
+
+        return {
+            id: crypto.randomUUID(),
+            content: validatedContent,
+            metadata: proceduralMetadata,
+            timestamp: now,
+            memoryType: MemoryType.PROCEDURAL,
+            procedure: typeof validatedContent === 'string' ? validatedContent : JSON.stringify(validatedContent),
+            expectedOutcomes: metadata?.get('expectedOutcomes') || [],
+            applicableContext: metadata?.get('applicableContext') || []
+        };
     }
 
     /**
@@ -93,5 +131,14 @@ export class ProceduralMemory extends LongTermMemory<IProceduralMemoryUnit> {
             default:
                 throw new Error(`Unknown action type: ${action.type}`);
         }
+    }
+
+    isMemoryUnitOfType(unit: any): unit is IProceduralMemoryUnit {
+        return unit && 
+               typeof unit === 'object' && 
+               unit.memoryType === MemoryType.PROCEDURAL &&
+               typeof unit.procedure === 'string' &&
+               Array.isArray(unit.expectedOutcomes) &&
+               Array.isArray(unit.applicableContext);
     }
 }
