@@ -7,7 +7,7 @@ async function main() {
     const conversationPath = path.join(__dirname, '../data/conversationHistory.json');
     
     logger.info('Loading conversation history');
-    await emulator.loadConversation(conversationPath);
+    await emulator.loadConversationHistory(conversationPath);
     
     logger.info('Starting replay');
     await emulator.replayConversation();
