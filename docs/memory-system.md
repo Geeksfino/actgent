@@ -1,534 +1,478 @@
 # Memory System Documentation
 
 ## Overview
-The Actgent memory system is designed to mimic human memory processes, providing a sophisticated mechanism for storing, retrieving, and managing information. It has been recently refactored to use RxJS for improved event handling and memory transitions.
+The Actgent memory system implements a sophisticated cognitive architecture using a signal-based design. It combines multiple memory types with an event-driven transition system to create a flexible and extensible memory framework.
 
 ## Core Components
 
-### AbstractMemory
-The base class for all memory implementations, providing:
-- Standardized CRUD operations
-- Caching mechanism with LRU eviction
-- Integrated logging system
-- Memory access statistics
-
-### Memory Types
+### 1. Memory Types
 ```typescript
 enum MemoryType {
-    WORKING = 'working',
-    EPISODIC = 'episodic',
-    PROCEDURAL = 'procedural',
-    SEMANTIC = 'semantic',
-    CONTEXTUAL = 'contextual',
-    SYSTEM = 'system',
-    GENERIC = 'generic'
+    WORKING = 'working',      // Active processing memory
+    EPISODIC = 'episodic',    // Experience-based memory
+    PROCEDURAL = 'procedural', // Task and skill memory
+    SEMANTIC = 'semantic',     // Knowledge and facts
+    EPHEMERAL = 'ephemeral'    // Very short-term memory
 }
 ```
 
-### Memory Transitions
-Memory transitions are now handled through RxJS streams:
-```typescript
-class MemoryTransitionManager {
-    // Event streams
-    private memoryAccess$ = new Subject<string>();
-    private contextChange$ = new Subject<SessionMemoryContext>();
-    private emotionalChange$ = new Subject<EmotionalState>();
-    private capacityWarning$ = new Subject<void>();
+### 2. Signal System
+The memory system uses a signal-based design where system events trigger memory operations:
 
-    // Event handlers
-    public onMemoryAccess(memoryId: string): void
-    public onContextChange(context: SessionMemoryContext): void
-    public onEmotionalChange(emotion: EmotionalState): void
-    public onCapacityWarning(): void
+```typescript
+enum MonitorSignalType {
+    // Time-based signals
+    TIME_INTERVAL = 'time_interval',
+    CRON_SCHEDULE = 'cron_schedule',
+    
+    // Turn-based signals
+    TURN_COUNT = 'turn_count',
+    USER_TURN_END = 'user_turn_end',
+    ASSISTANT_TURN_END = 'assistant_turn_end',
+    
+    // State-based signals
+    CAPACITY_THRESHOLD = 'capacity_threshold',
+    CONTEXT_CHANGE = 'context_change',
+    EMOTION_PEAK = 'emotion_peak',
+    GOAL_COMPLETION = 'goal_completion'
 }
 ```
 
-### Context Management
-The SessionMemoryContextManager now maintains:
-- Current emotional state
-- Interaction history
-- Domain context
-- User preferences
-- Topic history
+### 3. Monitor System
+Monitors observe memory state and react to signals:
 
-### Logging System
-Integrated logging throughout the memory system:
 ```typescript
-// Example logging in memory operations
-this.logger.debug('Memory operation', {
-    operation: 'store',
-    id: memory.id,
-    type: memory.memoryType,
-    metadata: Object.fromEntries(memory.metadata)
-});
+interface IMemoryMonitor {
+    readonly id: string;
+    readonly config: MonitorConfig;
+    readonly metrics: MonitorMetrics;
+    
+    monitor(): Observable<MemoryEvent>;
+    start(): void;
+    stop(): void;
+    reset(): void;
+}
 ```
+
+### 4. Event System
+Events represent memory state changes and operations:
+
+```typescript
+interface MemoryEvent {
+    type: MemoryEventType;
+    memory: IMemoryUnit | null;
+    context?: WorkingMemoryContext;
+    emotion?: EmotionalState;
+    timestamp: Date;
+    metadata?: Map<string, any>;
+}
+```
+
+## Memory Architecture
+
+### 1. Working Memory
+- Handles active processing
+- Limited capacity
+- Monitored for capacity and context changes
+- Direct integration with conversation flow
+
+### 2. Episodic Memory
+- Stores experiences and conversations
+- Consolidation triggered by signals
+- Context-aware retrieval
+- Emotional state tracking
+
+### 3. Semantic Memory
+- Knowledge representation
+- Entity and relation extraction
+- Concept graph maintenance
+- Knowledge consolidation
+
+### 4. Procedural Memory
+- Task and skill storage
+- Pattern recognition
+- Learning from repetition
+- Skill refinement
+
+### 5. Ephemeral Memory
+- Very short-term storage
+- Automatic cleanup
+- Capacity monitoring
+- Quick access cache
 
 ## Memory Operations
 
-### Storage
-```typescript
-async store(content: any, metadata?: Map<string, any>): Promise<IMemoryUnit>
-```
-- Creates a new memory unit with unique ID
-- Adds timestamps and access statistics
-- Logs operation details
-- Updates cache
+### 1. Memory Transitions
+Memory transitions are now signal-driven:
+1. System signals trigger monitors
+2. Monitors observe memory state
+3. Monitors emit events
+4. Events trigger transitions
+5. Transitions update memory state
 
-### Retrieval
-```typescript
-async retrieve(filter: MemoryFilter): Promise<IMemoryUnit[]>
-```
-- Checks cache first for id-based queries
-- Updates access statistics
-- Logs cache hits/misses
-- Supports complex filtering
+### 2. Memory Consolidation
+Consolidation happens through:
+1. Turn-based signals (conversation patterns)
+2. Time-based signals (periodic review)
+3. State-based signals (capacity, context)
+4. Emotional signals (significant experiences)
 
-### Cache Management
-```typescript
-class MemoryCache {
-    private cache: Map<string, IMemoryUnit>;
-    private maxSize: number;
-    
-    // LRU eviction
-    set(id: string, memory: IMemoryUnit): void
-    get(id: string): IMemoryUnit | undefined
-    delete(id: string): void
-    clear(): void
-}
-```
+### 3. Context Management
+Context is managed through:
+1. Working context monitoring
+2. Emotional state tracking
+3. Goal tracking
+4. Turn counting
 
-## Performance Monitoring
-The system now includes comprehensive monitoring:
-- Memory size and capacity tracking
-- Cache effectiveness metrics
-- Operation timing
-- Error tracking
-- Event processing statistics
-
-## Best Practices
-
-### Memory Storage
-1. Always provide appropriate metadata
-2. Use proper memory types
-3. Consider memory lifecycle
-
-### Memory Retrieval
-1. Use specific filters when possible
-2. Monitor cache effectiveness
-3. Handle potential errors
-
-### Event Handling
-1. Subscribe to relevant event streams
-2. Process events asynchronously
-3. Maintain proper error boundaries
-
-## Error Handling
-```typescript
-try {
-    await memory.store(content, metadata);
-} catch (error) {
-    logger.error('Memory storage failed', {
-        error,
-        content: typeof content,
-        metadata: Object.fromEntries(metadata)
-    });
-    throw error;
-}
-```
-
-## Configuration
-```typescript
-interface MemoryConfig {
-    cacheSize: number;
-    consolidationInterval: number;
-    cleanupInterval: number;
-    loggingLevel: LogLevel;
-}
-```
-
-## Migration Guide
-1. Update to RxJS-based event handling
-2. Implement proper logging
-3. Update context management
-4. Review memory transitions
-
-## Memory Transitions
-
-The memory system implements automated transitions between different memory types through the `MemoryTransitionManager`. This component handles the movement of memories from Working Memory to Long-Term Memory based on various triggers and criteria.
-
-### Transition Flow
-
-The following diagram illustrates the memory transition process:
-
-```mermaid
-graph TD
-    A[Working Memory] --> B[MemoryTransitionManager]
-    B -->|Monitor| C[Triggers]
-    C -->|1| D[Access Count]
-    C -->|2| E[Time Threshold]
-    C -->|3| F[Importance Score]
-    C -->|4| G[Context Switches]
-    C -->|5| H[Memory Capacity]
-    
-    D & E & F & G & H -->|Threshold Met| I[Transition Process]
-    
-    I -->|Analyze| J[Memory Classification]
-    J -->|Choose| K[Target Memory Type]
-    
-    K -->|Store| L[Episodic Memory]
-    K -->|Store| M[Semantic Memory]
-    K -->|Store| N[Procedural Memory]
-    
-    L & M & N -->|Complete| O[Update Metadata]
-    O -->|Cleanup| P[Remove from Working Memory]
-```
-
-The MemoryTransitionManager acts as an automated memory manager, making decisions about when and where to move memories based on their usage patterns and characteristics. This process mimics human memory transition that occurs during rest periods.
-
-### Memory Transition Manager
-
-The `MemoryTransitionManager` is responsible for:
-- Monitoring memory usage and access patterns
-- Applying transition rules and triggers
-- Managing the movement of memories between different memory types
-- Preserving memory metadata during transitions
-
-```typescript
-interface TransitionConfig {
-    accessCountThreshold: number;      // Number of accesses before transition
-    timeThresholdMs: number;          // Time in working memory before transition
-    capacityThreshold: number;        // Working memory capacity threshold (0-1)
-    importanceThreshold: number;      // Importance score threshold (0-1)
-    contextSwitchThreshold: number;   // Number of context switches before transition
-}
-```
-
-### Transition Triggers
-
-1. **Access Frequency**
-   - Monitors how often a memory is accessed
-   - Triggers when access count exceeds configured threshold (default: 5)
-   - Useful for identifying frequently used information
-   ```typescript
-   if (memory.accessCount >= config.accessCountThreshold) {
-       await transitionMemory(memory);
-   }
-   ```
-
-2. **Time-Based**
-   - Tracks how long a memory has been in working memory
-   - Triggers after configured duration (default: 24 hours)
-   - Ensures older memories are properly archived
-   ```typescript
-   if (now - memory.timestamp >= config.timeThresholdMs) {
-       await transitionMemory(memory);
-   }
-   ```
-
-3. **Importance/Relevance**
-   - Uses importance scores assigned to memories
-   - Triggers when importance exceeds threshold (default: 0.7)
-   - Prioritizes retention of significant information
-   ```typescript
-   if (memory.importance >= config.importanceThreshold) {
-       await transitionMemory(memory);
-   }
-   ```
-
-4. **Context Changes**
-   - Tracks number of context switches for each memory
-   - Triggers after threshold switches (default: 3)
-   - Helps identify persistent, cross-context information
-   ```typescript
-   if (memory.contextSwitches >= config.contextSwitchThreshold) {
-       await transitionMemory(memory);
-   }
-   ```
-
-5. **Capacity-Based**
-   - Monitors working memory usage
-   - Triggers when capacity exceeds threshold (default: 80%)
-   - Transitions oldest memories first to free up space
-   ```typescript
-   if (workingMemory.capacityUsage >= config.capacityThreshold) {
-       await transitionOldestMemories();
-   }
-   ```
-
-### Memory Type Classification
-
-The system uses metadata and content analysis to determine the appropriate memory type during transition:
-
-```typescript
-private determineTargetMemoryType(memory: IMemoryUnit): MemoryType {
-    const metadata = memory.metadata;
-    
-    // Episodic Memory: Event-based with temporal/spatial context
-    if (metadata.has('timeSequence') || metadata.has('location') || 
-        metadata.has('contextSwitches')) {
-        return MemoryType.EPISODIC;
-    }
-    
-    // Semantic Memory: Factual knowledge and concepts
-    if (metadata.has('concept') || metadata.has('relations') || 
-        metadata.get('importance') >= this.config.importanceThreshold) {
-        return MemoryType.SEMANTIC;
-    }
-
-    // Procedural Memory: Task-related information
-    if (metadata.has('procedure') || metadata.has('steps') || 
-        metadata.has('taskRelated')) {
-        return MemoryType.PROCEDURAL;
-    }
-
-    return MemoryType.SEMANTIC;  // Default type
-}
-```
-
-### Metadata Preservation
-
-During transition, important metadata is preserved and enhanced:
-
-```typescript
-{
-    type: MemoryType.EPISODIC,        // New memory type
-    originalType: MemoryType.WORKING,  // Original type preserved
-    transitionTime: timestamp,         // When transition occurred
-    accessCount: number,               // Access frequency
-    importance: number,                // Memory importance score
-    contextSwitches: number,          // Number of context switches
-    context: string                    // Current context
-}
-```
-
-### Integration with AgentMemorySystem
-
-The MemoryTransitionManager is integrated into the AgentMemorySystem and runs periodic checks:
-
-```typescript
-class AgentMemorySystem {
-    private transitionManager: MemoryTransitionManager;
-    
-    constructor(storage: IMemoryStorage, index: IMemoryIndex) {
-        this.transitionManager = new MemoryTransitionManager(
-            this.workingMemory,
-            this.episodicMemory,
-            this.longTermMemory,
-            {
-                accessCountThreshold: 5,
-                timeThresholdMs: 24 * 60 * 60 * 1000,
-                capacityThreshold: 0.8,
-                importanceThreshold: 0.7,
-                contextSwitchThreshold: 3
-            }
-        );
-        
-        // Periodic transition check
-        setInterval(() => {
-            this.transitionManager.checkAndTransition();
-        }, TRANSITION_INTERVAL);
-    }
-}
-```
-
-### Future Enhancements
-
-Planned improvements to the transition system:
-1. Enhanced memory type classification using LLM analysis
-2. Dynamic adjustment of transition thresholds based on usage patterns
-3. Memory compression for similar or related memories
-4. Improved context change detection using semantic analysis
-5. Memory pruning strategies for less relevant information
-6. Bidirectional transitions between memory types
-
-## Memory Types
+## Implementation
 
 ### 1. Working Memory
-- Short-term storage for active information
-- Automatically cleaned up after a configurable period (default: 30 minutes)
-- Limited capacity with automatic consolidation when full
-- Tracks access patterns and usage statistics
-
-### 2. Long-Term Memory
-- Persistent storage for consolidated information
-- Organized into different types:
-  - EPISODIC: Event-based memories
-  - SEMANTIC: Factual knowledge
-  - PROCEDURAL: Skill-based information
-  - PERCEPTUAL: Sensory information
-  - SOCIAL: Relationship and interaction data
-  - CONTEXTUAL: Environmental and situational data
-
-## Memory Association
-
-### Association Features
-- Bidirectional associations between memories
-- Support for first and second-degree connections
-- Automatic association strength tracking
-- Association cleanup during memory consolidation
-
-### Association Process
 ```typescript
-// Creating a bidirectional association
-memory1.associations.push(memory2.id);
-memory2.associations.push(memory1.id);
+// Working memory implementation
+class WorkingMemory extends AbstractMemory {
+    constructor() {
+        super(MemoryType.WORKING);
+    }
 
-// Finding related memories (up to second degree)
-directAssociations = memory.associations;
-secondDegreeAssociations = directAssociations.flatMap(m => m.associations);
+    async store(content: any): Promise<void> {
+        await this.validateCapacity();
+        const memory = new MemoryUnit({
+            content,
+            type: MemoryType.WORKING,
+            metadata: new Map([
+                ['timestamp', new Date()],
+                ['ttl', this.config.ttl]
+            ])
+        });
+        await this.storage.store(memory);
+    }
+}
 ```
 
-## Memory Transitions
-
-The memory system implements sophisticated transition mechanisms between different memory types, particularly from Working Memory to Episodic Memory. These transitions are triggered by various conditions to ensure efficient memory management and optimal information retention.
-
-### Working to Episodic Memory Transitions
-
-Memories transition from Working Memory to Episodic Memory through four main triggers:
-
-1. **Time-based Triggers**
-   - **Expiration**: When a memory's Time-To-Live (TTL) is reached
-   - **Periodic Consolidation**: Automatic consolidation every 5 minutes (configurable)
-   - **Implementation**: Uses both immediate transition for expired items and batch processing for periodic consolidation
-
-2. **Access-based Triggers**
-   - **Frequency**: When memories are frequently accessed (high access count)
-   - **Relevance**: When memories maintain high relevance scores over time
-   - **Implementation**: Tracked through memory metadata and consolidated during periodic checks
-
-3. **Capacity-based Triggers**
-   - **Memory Limit**: When working memory reaches its capacity
-   - **Resource Management**: When system needs to free up space
-   - **Implementation**: Immediate transition of least relevant items when capacity is reached
-
-4. **Context-based Triggers**
-   - **Context Changes**: When the active context changes significantly
-   - **Task Completion**: When a conversation or task concludes
-   - **Implementation**: Batch transition during context switches or task boundaries
-
-### Implementation Mechanisms
-
-The system uses two distinct mechanisms for these transitions:
-
-1. **Immediate Transitions** (`moveToEpisodicMemory`)
-   ```typescript
-   // Used for:
-   - Expiration-based transitions
-   - Capacity management
-   - Immediate context switches
-   ```
-
-2. **Batch Transitions** (`consolidateToEpisodic`)
-   ```typescript
-   // Used for:
-   - Periodic consolidation
-   - Context-based batch transitions
-   - Access pattern-based transitions
-   ```
-
-### Memory Metadata During Transitions
-
-When a memory transitions from Working to Episodic, the following metadata changes occur:
-
+### 2. Episodic Memory
 ```typescript
-{
-    type: MemoryType.EPISODIC,        // Changed from WORKING
-    originalType: MemoryType.WORKING,  // Original type preserved
-    consolidationTime: timestamp,      // When the transition occurred
-    expiresAt: removed,               // Episodic memories don't expire
-    // ... other metadata preserved
+// Episodic memory implementation
+class EpisodicMemory extends AbstractMemory {
+    constructor() {
+        super(MemoryType.EPISODIC);
+    }
+
+    async store(experience: any): Promise<void> {
+        const memory = new MemoryUnit({
+            content: experience,
+            type: MemoryType.EPISODIC,
+            metadata: new Map([
+                ['timestamp', new Date()],
+                ['context', this.contextManager.getCurrentContext()]
+            ])
+        });
+        await this.storage.store(memory);
+    }
 }
+```
 
-#### Memory Transition Philosophy
-
-In human cognition, working memory (also known as short-term memory) is like your immediate consciousness - things you're actively thinking about or processing. For example, when someone tells you a phone number and you're trying to remember it long enough to write it down.
-
-There are two different ways information typically moves from working memory to long-term (episodic) memory:
-
-1. **Natural Consolidation**: When you deliberately process information (like studying or having meaningful experiences), it gradually transitions from working memory to long-term memory through a process called consolidation. This is like our "batch transition" where we periodically review memories and consolidate important ones.
-
-2. **Immediate Recording**: Sometimes, particularly intense or significant experiences bypass working memory and get recorded directly into long-term memory. For example:
-   - If you witness a car accident, that memory often gets stored directly as an episodic memory
-   - When you experience something highly emotional (like receiving important news)
-   - When you have an "aha!" moment of sudden understanding
-
-In our implementation, expired memories are simply removed from working memory (like natural forgetting). We only transition memories to episodic memory when:
-- The memory has been accessed/processed enough times (indicating importance)
-- The memory is part of a meaningful context or pattern (batch consolidation)
-- The memory has high relevance or emotional significance (immediate recording)
-
-This mirrors how human memory actually works - information that isn't reinforced simply fades from working memory, while important or meaningful information gets consolidated into long-term memory through either gradual processing or immediate recording of significant experiences.
-
-## Context Management
-
-### Features
-- Active context tracking
-- Context-based memory retrieval
-- Automatic context persistence
-- Context-to-episodic memory conversion
-
-### Usage
+### 3. Semantic Memory
 ```typescript
-// Setting context
-contextManager.setContext('location', 'office');
-contextManager.setContext('task', 'coding');
+// Semantic memory implementation
+class SemanticMemory extends AbstractMemory {
+    constructor() {
+        super(MemoryType.SEMANTIC);
+    }
 
-// Converting context to episodic memory
-await contextManager.storeContextAsEpisodicMemory();
+    async store(knowledge: any): Promise<void> {
+        const memory = new MemoryUnit({
+            content: knowledge,
+            type: MemoryType.SEMANTIC,
+            metadata: new Map([
+                ['domain', knowledge.domain],
+                ['concepts', knowledge.concepts]
+            ])
+        });
+        await this.storage.store(memory);
+    }
+}
+```
+
+### 4. Procedural Memory
+```typescript
+// Procedural memory implementation
+class ProceduralMemory extends AbstractMemory {
+    constructor() {
+        super(MemoryType.PROCEDURAL);
+    }
+
+    async store(procedure: any): Promise<void> {
+        const memory = new MemoryUnit({
+            content: procedure,
+            type: MemoryType.PROCEDURAL,
+            metadata: new Map([
+                ['steps', procedure.steps],
+                ['domain', procedure.domain]
+            ])
+        });
+        await this.storage.store(memory);
+    }
+}
+```
+
+### 5. Ephemeral Memory
+```typescript
+// Ephemeral memory implementation
+class EphemeralMemory extends AbstractMemory {
+    constructor() {
+        super(MemoryType.EPHEMERAL);
+    }
+
+    async store(data: any): Promise<void> {
+        const memory = new MemoryUnit({
+            content: data,
+            type: MemoryType.EPHEMERAL,
+            metadata: new Map([
+                ['timestamp', new Date()],
+                ['ttl', this.config.ttl || 300000] // 5 minutes default
+            ])
+        });
+        await this.storage.store(memory);
+    }
+}
+```
+
+## Monitor System Implementation
+
+### 1. Memory Capacity Monitor
+```typescript
+class MemoryCapacityMonitor extends AbstractMemoryMonitor {
+    constructor() {
+        super('capacity', {
+            trigger: MonitorSignalType.CAPACITY_THRESHOLD,
+            signalConfig: {
+                capacityThreshold: {
+                    max: 1000,
+                    threshold: 0.8
+                }
+            },
+            priority: 1,
+            enabled: true
+        });
+    }
+
+    monitor(): Observable<MemoryEvent> {
+        return new Observable(subscriber => {
+            const currentSize = this.memory.size;
+            const threshold = this.config.signalConfig.capacityThreshold;
+            
+            if (currentSize >= threshold.max * threshold.threshold) {
+                subscriber.next({
+                    type: 'system:warn:capacity',
+                    memory: null,
+                    timestamp: new Date()
+                });
+            }
+            subscriber.complete();
+        });
+    }
+}
+```
+
+### 2. Context Change Monitor
+```typescript
+class ContextChangeMonitor extends AbstractMemoryMonitor {
+    constructor() {
+        super('context', {
+            trigger: MonitorSignalType.CONTEXT_CHANGE,
+            signalConfig: {
+                contextChange: {
+                    properties: ['emotional', 'goals']
+                }
+            },
+            priority: 2,
+            enabled: true
+        });
+    }
+
+    monitor(): Observable<MemoryEvent> {
+        return new Observable(subscriber => {
+            const context = this.contextManager.getCurrentContext();
+            if (this.hasSignificantChange(context)) {
+                subscriber.next({
+                    type: 'system:change:context',
+                    context,
+                    timestamp: new Date()
+                });
+            }
+            subscriber.complete();
+        });
+    }
+}
+```
+
+### 3. Turn Monitor
+```typescript
+class TurnMonitor extends AbstractMemoryMonitor {
+    constructor() {
+        super('turns', {
+            trigger: MonitorSignalType.TURN_COUNT,
+            signalConfig: {
+                turnCount: {
+                    count: 3,
+                    roles: ['user']
+                }
+            },
+            priority: 3,
+            enabled: true
+        });
+    }
+
+    monitor(): Observable<MemoryEvent> {
+        return new Observable(subscriber => {
+            const turns = this.contextManager.getTurnCount();
+            if (turns % this.config.signalConfig.turnCount.count === 0) {
+                subscriber.next({
+                    type: 'system:complete:turn',
+                    timestamp: new Date()
+                });
+            }
+            subscriber.complete();
+        });
+    }
+}
+```
+
+## Event Handler Implementation
+
+### 1. Capacity Warning Handler
+```typescript
+class CapacityWarningHandler implements IMemoryEventHandler {
+    async onEvent(event: MemoryEvent): Promise<void> {
+        if (event.type === 'system:warn:capacity') {
+            await this.consolidateMemories();
+        }
+    }
+
+    canHandleEventTypes(): MemoryEventType[] {
+        return ['system:warn:capacity'];
+    }
+
+    private async consolidateMemories(): Promise<void> {
+        // Consolidation logic
+        const oldMemories = await this.memory.retrieveOldest();
+        await this.consolidator.consolidate(oldMemories);
+    }
+}
+```
+
+### 2. Context Change Handler
+```typescript
+class ContextChangeHandler implements IMemoryEventHandler {
+    async onEvent(event: MemoryEvent): Promise<void> {
+        if (event.type === 'system:change:context') {
+            await this.handleContextChange(event.context);
+        }
+    }
+
+    canHandleEventTypes(): MemoryEventType[] {
+        return ['system:change:context'];
+    }
+
+    private async handleContextChange(context: WorkingMemoryContext): Promise<void> {
+        // Context change logic
+        await this.memory.updateContext(context);
+    }
+}
+```
+
+## Integration
+
+### 1. Basic Usage
+```typescript
+const memorySystem = new AgentMemorySystem();
+
+// Start the memory system
+memorySystem.start();
+
+// Process messages
+await memorySystem.processUserTurn(userMessage);
+await memorySystem.processAssistantTurn(response);
+
+// Stop when done
+memorySystem.stop();
+```
+
+### 2. Custom Monitors
+```typescript
+class CustomMonitor extends AbstractMemoryMonitor {
+    constructor(id: string) {
+        super(id, {
+            trigger: MonitorSignalType.TIME_INTERVAL,
+            signalConfig: { timeInterval: { intervalMs: 5000 } },
+            priority: 1,
+            enabled: true
+        });
+    }
+
+    monitor(): Observable<MemoryEvent> {
+        return new Observable(subscriber => {
+            // Monitor logic
+        });
+    }
+}
+```
+
+### 3. Custom Event Handlers
+```typescript
+class CustomHandler implements IMemoryEventHandler {
+    async onEvent(event: MemoryEvent): Promise<void> {
+        // Handle event
+    }
+
+    canHandleEventTypes(): MemoryEventType[] {
+        return ['custom:event:type'];
+    }
+}
 ```
 
 ## Best Practices
 
-1. **Memory Storage**
-   - Use working memory for temporary, active information
-   - Store important information directly in long-term memory
-   - Include relevant metadata for better retrieval
+### 1. Signal Design
+- Use appropriate signal types
+- Consider signal frequency
+- Combine signals when needed
+- Handle signal priorities
 
-2. **Memory Consolidation**
-   - Allow automatic consolidation to manage memory lifecycle
-   - Use priority field to influence consolidation timing
-   - Monitor consolidation patterns for optimization
+### 2. Monitor Design
+- Single responsibility
+- Efficient memory access
+- Clear event production
+- Proper error handling
 
-3. **Memory Association**
-   - Create meaningful associations between related memories
-   - Use second-degree associations for broader context
-   - Clean up obsolete associations periodically
+### 3. Event Handling
+- Specific event types
+- Relevant metadata
+- Async handling
+- Error recovery
 
-4. **Context Management**
-   - Update context frequently to maintain accuracy
-   - Use context for targeted memory retrieval
-   - Convert important contexts to episodic memories
+### 4. Memory Management
+- Monitor capacity
+- Regular consolidation
+- Context awareness
+- Emotional tracking
 
 ## Performance Considerations
 
-1. **Working Memory**
-   - Regular cleanup of expired memories
-   - Automatic consolidation of frequently accessed items
-   - Capacity management through triggers
+### 1. Signal Processing
+- Batch similar signals
+- Use appropriate intervals
+- Filter unnecessary signals
+- Handle priorities
 
-2. **Long-Term Memory**
-   - Efficient indexing for fast retrieval
-   - Batch operations for multiple memory operations
-   - Periodic optimization of storage and indices
+### 2. Memory Access
+- Use ephemeral memory for cache
+- Batch memory operations
+- Efficient indexing
+- Proper cleanup
 
-3. **Memory Association**
-   - Limited association depth (maximum 2 degrees)
-   - Cleanup of orphaned associations
-   - Efficient graph traversal for related memory retrieval
-
-## Future Improvements
-
-1. **Memory System**
-   - Implementation of memory forgetting mechanisms
-   - Enhanced memory relevance scoring
-   - Dynamic adjustment of consolidation thresholds
-
-2. **Association System**
-   - Weighted associations based on relevance
-   - Time-based association decay
-   - Advanced association pattern recognition
-
-3. **Context Management**
-   - Hierarchical context structures
-   - Context prediction mechanisms
-   - Enhanced context-based memory retrieval
+### 3. Event Handling
+- Async processing
+- Event batching
+- Error boundaries
+- Resource cleanup
