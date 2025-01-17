@@ -71,7 +71,7 @@ export interface SignalConfig {
  */
 export interface MonitorConfig {
     /** Primary trigger type */
-    trigger: MonitorSignalType;
+    signal: MonitorSignalType;
     
     /** Signal-specific configuration */
     signalConfig: SignalConfig;

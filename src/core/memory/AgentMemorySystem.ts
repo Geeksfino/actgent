@@ -15,6 +15,10 @@ import { EpisodicMemoryStorageFactory } from './modules/episodic/EpisodicMemoryS
 import { SemanticMemoryStorageFactory } from './modules/semantic/SemanticMemoryStorageFactory';
 import { ProceduralMemoryStorageFactory } from './modules/procedural/ProceduralMemoryStorageFactory';
 
+// Import monitors and handlers
+import { EphemeralMemoryCapacityMonitor } from './modules/ephemeral/EphemeralMemoryCapacityMonitor';
+import { WorkingMemoryEventHandler } from './modules/working/WorkingMemoryEventHandler';
+
 import { z } from 'zod';
 
 /**
@@ -38,16 +42,38 @@ export class AgentMemorySystem {
         this.episodicMemory = EpisodicMemoryStorageFactory.create();
         this.semanticMemory = SemanticMemoryStorageFactory.create();
         this.proceduralMemory = ProceduralMemoryStorageFactory.create();
-        this.ephemeralMemory = new EphemeralMemory(5000);
+        
+        // Keep items for 30 seconds in ephemeral memory
+        this.ephemeralMemory = new EphemeralMemory(30000, 5);  // 30 seconds duration, max 5 items
 
         this.transitionManager = new MemoryTransitionManager();
         this.contextManager = new WorkingContextManager(this.workingMemory);
 
         this.setupEventHandlers();
+        this.transitionManager.startMonitoring();
+        logger.info('Memory system initialized and monitoring started');
     }
 
     private setupEventHandlers(): void {
-        // Memory monitors and handlers will be registered here
+        // Register capacity monitors
+        const ephemeralMonitor = new EphemeralMemoryCapacityMonitor(
+            'ephemeral-capacity',
+            this.ephemeralMemory,
+            {
+                maxItems: this.ephemeralMemory.capacity(),  // Fixed method name
+                warningThreshold: 0.8  // Trigger at 80% capacity
+            }
+        );
+        this.transitionManager.registerMonitor(ephemeralMonitor);
+        logger.info('Registered ephemeral memory capacity monitor');
+
+        // Register working memory event handler
+        const workingHandler = new WorkingMemoryEventHandler(
+            this.workingMemory,
+            0.9  // Consolidate at 90% capacity
+        );
+        this.transitionManager.registerHandler(workingHandler);
+        logger.info('Registered working memory event handler');
     }
 
     /**

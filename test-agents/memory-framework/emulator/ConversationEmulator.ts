@@ -4,6 +4,7 @@ import { Subject, from, concatMap, delay } from 'rxjs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { TableFormatter } from './helper';
+import { logger } from '../../../src/core/Logger';
 
 interface Message {
     role: 'user' | 'assistant';
@@ -39,8 +40,8 @@ export class ConversationEmulator {
         this.messageSubject.pipe(
             concatMap(async message => {
                 this.messageCount++;
-                console.log(`\n=== Processing Message ${this.messageCount} (${message.role}) ===`);
-                console.log(typeof message.content === 'string' ? 
+                logger.info(`\n=== Processing Message ${this.messageCount} (${message.role}) ===`);
+                logger.info(typeof message.content === 'string' ? 
                     message.content : 
                     JSON.stringify(message.content, null, 2));
 
@@ -60,7 +61,7 @@ export class ConversationEmulator {
             })
         ).subscribe({
             error: (error) => {
-                console.error('Error processing message:', error);
+                logger.error('Error processing message:', error);
             }
         });
     }
@@ -72,9 +73,9 @@ export class ConversationEmulator {
         try {
             const data = await fs.readFile(filePath, 'utf8');
             this.conversationHistory = JSON.parse(data);
-            console.log(`Loaded ${this.conversationHistory.length} messages from history`);
+            logger.info(`Loaded ${this.conversationHistory.length} messages from history`);
         } catch (error) {
-            console.error('Error loading conversation history:', error);
+            logger.error('Error loading conversation history:', error);
             throw error;
         }
     }
@@ -83,7 +84,7 @@ export class ConversationEmulator {
      * Start replaying the conversation
      */
     async replayConversation(): Promise<void> {
-        console.log('Starting conversation replay...');
+        logger.info('Starting conversation replay...');
         this.messageCount = 0;
         
         for (const message of this.conversationHistory) {
@@ -91,7 +92,7 @@ export class ConversationEmulator {
             await new Promise(resolve => setTimeout(resolve, this.replayDelay));
         }
 
-        console.log('\nConversation replay completed');
+        logger.info('\nConversation replay completed');
         await this.printMemorySnapshot();
     }
 

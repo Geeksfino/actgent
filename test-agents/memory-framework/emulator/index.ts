@@ -1,8 +1,11 @@
 import { ConversationEmulator } from './ConversationEmulator';
 import path from 'path';
-import { logger } from '../../../src/core/Logger';
+import { logger, LogLevel } from '../../../src/core/Logger';
 
 async function main() {
+    // Enable debug logging
+    logger.setLevel(LogLevel.DEBUG);
+
     const emulator = new ConversationEmulator();
     const conversationPath = path.join(__dirname, '../data/conversationHistory.json');
     

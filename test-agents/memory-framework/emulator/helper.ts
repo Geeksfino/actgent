@@ -1,5 +1,6 @@
 import { AgentMemorySystem } from '../../../src/core/memory/AgentMemorySystem';
 import { MemoryType } from '../../../src/core/memory/base';
+import { logger } from '../../../src/core/Logger';
 
 interface ColumnWidths {
     timestamp: number;
@@ -147,28 +148,28 @@ export class TableFormatter {
         return rows;
     }
 
-    async printMemorySnapshot(memorySystem: AgentMemorySystem, messageCount: number) {
+    public async printMemorySnapshot(memorySystem: AgentMemorySystem, messageCount: number) {
         const memories = await memorySystem.recall({
             types: [MemoryType.EPHEMERAL]
         });
 
         if (memories.length > 0) {
-            console.log(`\n=== Memory Snapshot After Message ${messageCount} ===`);
-            console.log(`Total Memories: ${memories.length}\n`);
+            logger.info(`\n=== Memory Snapshot After Message ${messageCount} ===`);
+            logger.info(`Total Memories: ${memories.length}\n`);
 
             // Print table header
-            console.log('┌' + '─'.repeat(this.columnWidths.timestamp + 2) + '┬' + 
+            logger.info('┌' + '─'.repeat(this.columnWidths.timestamp + 2) + '┬' + 
                        '─'.repeat(this.columnWidths.role + 2) + '┬' + 
                        '─'.repeat(this.columnWidths.content) + '┐');
 
             // Print column headers with consistent spacing
-            console.log(
+            logger.info(
                 '│ ' + this.padString('Timestamp', this.columnWidths.timestamp) + ' │ ' +
                 this.padString('Role', this.columnWidths.role) + ' │ ' +
                 this.padString('Content', this.columnWidths.content - 2) + ' │'
             );
 
-            console.log('├' + '─'.repeat(this.columnWidths.timestamp + 2) + '┼' + 
+            logger.info('├' + '─'.repeat(this.columnWidths.timestamp + 2) + '┼' + 
                        '─'.repeat(this.columnWidths.role + 2) + '┼' + 
                        '─'.repeat(this.columnWidths.content) + '┤');
 
@@ -187,11 +188,11 @@ export class TableFormatter {
                     content
                 );
 
-                rows.forEach(row => console.log(row));
+                rows.forEach(row => logger.info(row));
             }
 
             // Print table footer with consistent spacing
-            console.log('└' + '─'.repeat(this.columnWidths.timestamp + 2) + '┴' + 
+            logger.info('└' + '─'.repeat(this.columnWidths.timestamp + 2) + '┴' + 
                        '─'.repeat(this.columnWidths.role + 2) + '┴' + 
                        '─'.repeat(this.columnWidths.content) + '┘');
         }

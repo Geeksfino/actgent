@@ -55,12 +55,24 @@ export class MemoryTransitionManager {
      * Emit a memory event
      */
     public emitEvent(event: MemoryEvent): void {
-        this.eventsSubject$.next(event);
+        logger.debug(`Emitting event: ${event.type}`);
+        
         const handlers = this.handlers.get(event.type) || [];
+        if (handlers.length === 0) {
+            logger.warn(`No handlers registered for event type: ${event.type}`);
+            return;
+        }
+
+        logger.info(
+            `Dispatching ${event.type} event to ${handlers.length} handlers`
+        );
+
         for (const handler of handlers) {
-            handler.onEvent(event).catch(error => {
-                logger.error(`Error in event handler:`, error);
-            });
+            try {
+                handler.onEvent(event);
+            } catch (error) {
+                logger.error('Error in event handler:', error);
+            }
         }
     }
 
@@ -99,12 +111,20 @@ export class MemoryTransitionManager {
      * Start all registered monitors
      */
     public startMonitoring(): void {
-        if (this.isMonitoring) return;
+        if (this.isMonitoring) {
+            logger.warn('Monitoring is already active');
+            return;
+        }
+        
+        logger.info(`Starting memory monitoring with ${this.monitors.size} monitors`);
         this.isMonitoring = true;
         
+        // Set up signals for each monitor
         for (const monitor of this.monitors.values()) {
-            monitor.start();
-            this.setupMonitorSignals(monitor);
+            if (monitor.config.enabled) {
+                logger.info(`Setting up signals for monitor: ${monitor.id}`);
+                this.setupMonitorSignals(monitor);
+            }
         }
     }
 
@@ -160,7 +180,7 @@ export class MemoryTransitionManager {
     private processSignal(trigger: MonitorSignalType): void {
         // Find monitors that match this trigger
         const matchingMonitors = Array.from(this.monitors.values())
-            .filter(monitor => monitor.config.enabled && monitor.config.trigger === trigger);
+            .filter(monitor => monitor.config.enabled && monitor.config.signal === trigger);
 
         // Sort by priority
         matchingMonitors.sort((a, b) => b.config.priority - a.config.priority);
@@ -182,9 +202,11 @@ export class MemoryTransitionManager {
      * Set up signal handling for a monitor based on its configuration
      */
     private setupMonitorSignals(monitor: IMemoryMonitor): void {
-        const { trigger, signalConfig } = monitor.config;
+        const { signal, signalConfig } = monitor.config;
         
-        switch (trigger) {
+        logger.debug(`Setting up ${signal} signal for monitor ${monitor.id}`);
+
+        switch (signal) {
             case MonitorSignalType.TIME_INTERVAL:
                 if (signalConfig.timeInterval) {
                     const { intervalMs, initialDelayMs = 0 } = signalConfig.timeInterval;
@@ -199,7 +221,23 @@ export class MemoryTransitionManager {
                 break;
                 
             case MonitorSignalType.CAPACITY_THRESHOLD:
-                // Capacity threshold is checked on relevant memory operations
+                if (signalConfig.capacityThreshold) {
+                    logger.info(
+                        `Setting up capacity threshold check interval for monitor ${monitor.id} (threshold: ${signalConfig.capacityThreshold.threshold * 100}%)`
+                    );
+                    
+                    // Set up interval to check capacity threshold
+                    const subscription = interval(1000).subscribe(() => {
+                        if (this.isMonitoring) {
+                            logger.debug(`Running scheduled capacity check for monitor ${monitor.id}`);
+                            this.checkCapacityThresholds();
+                        }
+                    });
+                    this.timeIntervalSubscriptions.set(monitor.id, {
+                        subscription,
+                        lastCheck: new Date()
+                    });
+                }
                 break;
                 
             case MonitorSignalType.CONTEXT_CHANGE:
@@ -233,7 +271,7 @@ export class MemoryTransitionManager {
      */
     private checkTurnCounts(): void {
         const turnCountMonitors = Array.from(this.monitors.values())
-            .filter(m => m.config.enabled && m.config.trigger === MonitorSignalType.TURN_COUNT);
+            .filter(m => m.config.enabled && m.config.signal === MonitorSignalType.TURN_COUNT);
             
         for (const monitor of turnCountMonitors) {
             const turnConfig = monitor.config.signalConfig.turnCount;
@@ -265,6 +303,39 @@ export class MemoryTransitionManager {
                     }
                 });
             }
+        }
+    }
+
+    /**
+     * Check capacity thresholds for monitors using CAPACITY_THRESHOLD trigger
+     */
+    private checkCapacityThresholds(): void {
+        const capacityMonitors = Array.from(this.monitors.values())
+            .filter(monitor => 
+                monitor.config.enabled && 
+                monitor.config.signal === MonitorSignalType.CAPACITY_THRESHOLD &&
+                monitor.config.signalConfig.capacityThreshold
+            );
+
+        logger.debug(`Checking capacity thresholds for ${capacityMonitors.length} monitors`);
+
+        // Sort by priority
+        capacityMonitors.sort((a, b) => b.config.priority - a.config.priority);
+
+        // Check each monitor's capacity
+        for (const monitor of capacityMonitors) {
+            // Always call monitor() to get fresh capacity values
+            monitor.monitor().subscribe({
+                next: (event: MemoryEvent) => {
+                    if (event.type === 'system:warn:capacity') {
+                        logger.info(`Monitor ${monitor.id}: Emitting capacity warning event`);
+                        this.emitEvent(event);
+                    }
+                },
+                error: (error: unknown) => {
+                    logger.error(`Error in capacity monitor ${monitor.id}:`, error);
+                }
+            });
         }
     }
 }
