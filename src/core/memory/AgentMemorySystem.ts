@@ -1,4 +1,4 @@
-import { IMemoryUnit, MemoryFilter } from './base';
+import { IMemoryUnit, MemoryFilter, MemoryType } from './base';
 import { WorkingMemoryContext } from './context';
 import { WorkingContextManager } from './WorkingContextManager';
 import { WorkingMemory } from './modules/working/WorkingMemory';
@@ -239,6 +239,22 @@ export class AgentMemorySystem {
             logger.error('Error processing assistant turn:', error);
             throw error;
         }
+    }
+
+    /**
+     * Recall recent messages in OpenAI chat completion format
+     * @param limit Optional number of messages to return
+     * @returns Array of messages in OpenAI format {role, content}
+     */
+    public async recallRecentMessages(limit?: number): Promise<Array<{ role: 'system' | 'user' | 'assistant', content: string }>> {
+        // Get messages in FIFO order
+        const memories = await this.ephemeralMemory.query({ limit });
+        
+        // Convert to OpenAI format
+        return memories.map(memory => ({
+            role: memory.metadata.get('role') as 'system' | 'user' | 'assistant' || 'system',
+            content: String(memory.content)
+        }));
     }
 
     /**
