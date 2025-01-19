@@ -11,6 +11,11 @@ class EphemeralMemory implements IMemory<EphemeralMemoryUnit> {
     private maxItems: number;
     private events: Subject<EphemeralMemoryUnit>;
 
+    /**
+     * Creates an instance of EphemeralMemory
+     * @param duration Duration in milliseconds before items expire. Set to -1 for non-expiring items.
+     * @param maxItems Maximum number of items to store before oldest items are removed
+     */
     constructor(duration: number = 2000, maxItems: number = 5) { // Default duration is 2 seconds, max 5 items
         this.duration = duration;
         this.maxItems = maxItems;
@@ -28,14 +33,15 @@ class EphemeralMemory implements IMemory<EphemeralMemoryUnit> {
         if (typeof content === 'string') {
             validatedContent = content;
         } else {
-            if (!schema) {
-                throw new Error('Schema is required for object content');
+            if (schema) {
+                const validationResult = schema.safeParse(content);
+                if (!validationResult.success) {
+                    throw new Error(`Invalid memory content: ${validationResult.error}`);
+                }
+                validatedContent = validationResult.data;
+            } else {
+                validatedContent = content;
             }
-            const validationResult = schema.safeParse(content);
-            if (!validationResult.success) {
-                throw new Error(`Invalid memory content: ${validationResult.error}`);
-            }
-            validatedContent = validationResult.data;
         }
 
         return {
@@ -73,9 +79,10 @@ class EphemeralMemory implements IMemory<EphemeralMemoryUnit> {
             memoryType: MemoryType.EPHEMERAL
         };
 
-        const expiry = Date.now() + this.duration;
+        // Use -1 for non-expiring items
+        const expiry = this.duration === -1 ? -1 : Date.now() + this.duration;
         this.items[memoryUnit.id] = { item: memoryUnit, expiry };
-        logger.debug(`Stored item ${memoryUnit.id} with expiry ${expiry}`);
+        logger.debug(`Stored item ${memoryUnit.id} with ${expiry === -1 ? 'no expiry' : `expiry ${expiry}`}`);
         
         this.events.next(memoryUnit);
 
@@ -93,7 +100,8 @@ class EphemeralMemory implements IMemory<EphemeralMemoryUnit> {
         logger.debug(`Checking for expired items (current time: ${now})`);
         
         for (const [id, entry] of Object.entries(this.items)) {
-            if (entry.expiry <= now) {
+            // Skip non-expiring items (expiry === -1)
+            if (entry.expiry !== -1 && entry.expiry <= now) {
                 delete this.items[id];
                 purgedCount++;
                 logger.debug(`Purged expired item ${id} (expiry: ${entry.expiry})`);
@@ -122,13 +130,9 @@ class EphemeralMemory implements IMemory<EphemeralMemoryUnit> {
 
     async query(filter: MemoryFilter): Promise<EphemeralMemoryUnit[]> {
         this.purgeExpired();
-        return Object.values(this.items)
-            .map(entry => entry.item)
-            .filter(item => {
-                if (filter.types && !filter.types.includes(item.memoryType)) return false;
-                if (filter.query && !item.content.toString().includes(filter.query)) return false;
-                return true;
-            });
+        // Just return items in their natural order (FIFO)
+        const items = Object.values(this.items).map(entry => entry.item);
+        return filter.limit ? items.slice(0, filter.limit) : items;
     }
 
     async delete(id: string): Promise<void> {
