@@ -17,6 +17,8 @@ import { logger, LogLevel } from './Logger';
 import { getEventEmitter } from "./observability/AgentEventEmitter";
 import { ResponseType } from "./ResponseTypes";
 
+import { AgentMemorySystem } from "./memory/AgentMemorySystem";
+
 interface StorageConfig {
   shortTerm?: MemoryStorage<any>;
   longTerm?: MemoryStorage<any>;
@@ -47,6 +49,7 @@ export class AgentCore {
   instructionToolMap: { [key: string]: string } = {};
 
   private memory: Memory;
+  private memories: AgentMemorySystem;
   private inbox: PriorityInbox;
   private promptManager: PromptManager;
   private sessionContextManager: { [sessionId: string]: SessionContext } = {};
@@ -87,6 +90,8 @@ export class AgentCore {
       longTermStorage,
       workingMemoryStorage
     );
+
+    this.memories = new AgentMemorySystem();
 
     if (this.llmConfig) {
       this.llmClient = new OpenAI({
@@ -262,7 +267,7 @@ export class AgentCore {
     sessionContext.addMessage(message);
 
     await this.memory.processMessage(message, sessionContext);
-
+    await this.remember(message);
 
     const response = await this.promptLLM(message);
 
@@ -299,9 +304,30 @@ export class AgentCore {
       const conversationMessage = session.createMessage(extractedData, "assistant");
       //sessionContext.addMessage(conversationMessage);
       await this.memory.processMessage(conversationMessage, sessionContext);
+      await this.remember(conversationMessage);
     } else if (responseType === ResponseType.TOOL_CALL) {
       // not sure what to do here yet
     }
+  }
+
+  private async remember(message: Message) {
+    // Convert object metadata to Map
+    let sender;
+    if (message.metadata?.sender === 'user') {
+      sender = 'user';
+    } else if (message.metadata?.sender === 'assistant') {
+      sender = 'assistant';
+    }
+    const metadataMap = new Map(
+      message.metadata ? 
+        Object.entries({
+          role: sender,
+          timestamp: message.metadata.timestamp,
+          priority: message.metadata.priority,
+          ...message.metadata.context
+        }) : []
+    );
+    await this.memories.remember(message.payload.input, undefined, metadataMap);
   }
 
   public async getOrCreateSessionContext(message: Message): Promise<Session> {
@@ -318,8 +344,6 @@ export class AgentCore {
   private async promptLLM(message: Message): Promise<string> {
     //this.log(`System prompt: ${this.promptManager.getSystemPrompt()}`);
     const sessionContext = this.sessionContextManager[message.sessionId];
-    // context of user prompt
-    const context = await this.memory.generateContext(sessionContext);
 
     if (logger.getLevel() === LogLevel.TRACE) {
       logger.trace(message.sessionId, "<------ Resolved prompt ------->");
@@ -351,8 +375,9 @@ export class AgentCore {
         .map((tool) => tool.getFunctionDescription());
 
       const messageRecords = await this.memory.getMessageRecords();
+      const messageRecords2 = await this.memories.recallRecentMessages();
       const history: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-        ...messageRecords.map(({ role, content }) => ({ role, content })),
+        ...messageRecords2.map(({ role, content }) => ({ role, content })),
       ];
   
       // Pretty print the history
