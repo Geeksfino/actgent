@@ -1,5 +1,4 @@
 import pino from 'pino';
-import path from 'path';
 import pinoPretty from "pino-pretty";
 import { LoggingConfig } from './configs';
 import { createRuntime } from '../runtime';
@@ -10,9 +9,17 @@ export enum LogLevel {
     TRACE = 'trace',
     DEBUG = 'debug',
     INFO = 'info',
-    WARNING = 'warn',
+    WARN = 'warn',
     ERROR = 'error',
     FATAL = 'fatal'
+}
+
+interface LogLevelPattern {
+    module?: string;
+    component?: string;
+    tags?: string[];
+    level: LogLevel;
+    priority: number;
 }
 
 // Custom pretty print options
@@ -62,6 +69,7 @@ const tauriTransport = {
 
 export class Logger {
     private static instance: Logger;
+    private static patterns: LogLevelPattern[] = [];
     private logger: pino.Logger;
     private currentOptions: pinoPretty.PrettyOptions;
     private currentLevel: LogLevel = LogLevel.INFO;
@@ -69,7 +77,144 @@ export class Logger {
 
     private constructor() {
         this.currentOptions = prettyPrintOptions;
+        this.parseDebugPatterns();
         this.logger = this.createLogger(this.currentLevel);
+    }
+
+    private parseDebugPatterns() {
+        const debug = process.env.DEBUG;
+        if (!debug) return;
+
+        const patterns: LogLevelPattern[] = [];
+        
+        debug.split(',').forEach(pattern => {
+            pattern = pattern.trim();
+            if (!pattern) return;
+
+            // Parse pattern: mod:name=level or mod:name/comp=level or tag:name=level
+            const [selector, levelStr] = pattern.split('=');
+            if (!selector || !levelStr) return;
+
+            const level = Logger.parseLogLevel(levelStr.trim());
+            if (!level) return;
+
+            if (selector === '*') {
+                patterns.push({ level, priority: 0 });
+                return;
+            }
+
+            const [type, ...rest] = selector.split(':');
+            if (!type || rest.length === 0) return;
+
+            const name = rest.join(':');
+            
+            switch (type.trim()) {
+                case 'mod':
+                    const [module, component] = name.split('/');
+                    patterns.push({
+                        module: module.trim(),
+                        component: component?.trim(),
+                        level,
+                        priority: component ? 3 : 2
+                    });
+                    break;
+                case 'comp':
+                    patterns.push({
+                        component: name.trim(),
+                        level,
+                        priority: 1
+                    });
+                    break;
+                case 'tag':
+                    patterns.push({
+                        tags: [name.trim()],
+                        level,
+                        priority: 1
+                    });
+                    break;
+            }
+        });
+
+        Logger.patterns = patterns;
+    }
+
+    private getEffectiveLevel(bindings: {
+        module?: string;
+        component?: string;
+        tags?: string[];
+        [key: string]: any;
+    }): LogLevel {
+        // No patterns, use current level
+        if (Logger.patterns.length === 0) {
+            return this.currentLevel;
+        }
+
+        // Sort patterns by priority (highest first)
+        const sortedPatterns = [...Logger.patterns].sort((a, b) => b.priority - a.priority);
+
+        for (const pattern of sortedPatterns) {
+            // Module/Component exact match
+            if (pattern.module && pattern.component) {
+                if (bindings.module === pattern.module && bindings.component === pattern.component) {
+                    return pattern.level;
+                }
+                continue;
+            }
+
+            // Module match
+            if (pattern.module && bindings.module === pattern.module) {
+                return pattern.level;
+            }
+
+            // Component match
+            if (pattern.component && bindings.component === pattern.component) {
+                return pattern.level;
+            }
+
+            // Tag match
+            if (pattern.tags && bindings.tags) {
+                if (pattern.tags.some(tag => bindings.tags?.includes(tag))) {
+                    return pattern.level;
+                }
+            }
+
+            // Wildcard match (no module/component/tags in pattern)
+            if (!pattern.module && !pattern.component && !pattern.tags) {
+                return pattern.level;
+            }
+        }
+
+        return this.currentLevel;
+    }
+
+    /**
+     * Create a logger with additional context that will be included in all log messages
+     * @param bindings Contextual information like module name, component, tags
+     * @returns A new Logger instance with the specified context
+     * @example
+     * const memoryLogger = logger.withContext({ module: 'memory' });
+     * const authLogger = logger.withContext({ module: 'auth', tags: ['security'] });
+     */
+    public withContext(bindings: {
+        module?: string;
+        component?: string;
+        tags?: string[];
+        [key: string]: any;
+    }): Logger {
+        const contextLogger = new Logger();
+        contextLogger.currentOptions = this.currentOptions;
+        
+        // Determine effective log level
+        const effectiveLevel = this.getEffectiveLevel(bindings);
+        contextLogger.currentLevel = effectiveLevel;
+        
+        // Create pino logger with context and level
+        contextLogger.logger = this.logger.child({
+            ...bindings,
+            level: effectiveLevel
+        });
+        
+        return contextLogger;
     }
 
     private createLogger(level: LogLevel): pino.Logger {
@@ -212,6 +357,23 @@ export class Logger {
             : { msg: message };
     }
 
+    private parseLogLevel(level: string): LogLevel | null {
+        return Logger.parseLogLevel(level);
+    }
+
+    public static parseLogLevel(level: string): LogLevel {
+        level = level.toLowerCase().trim();
+        switch (level) {
+            case 'trace': return LogLevel.TRACE;
+            case 'debug': return LogLevel.DEBUG;
+            case 'info': return LogLevel.INFO;
+            case 'warn': return LogLevel.WARN;
+            case 'error': return LogLevel.ERROR;
+            case 'fatal': return LogLevel.FATAL;
+            default: return LogLevel.INFO;  // Default to INFO for external usage
+        }
+    }
+
     public debug(message: string, ...args: any[]) {
         this.logger.debug(this.formatMessage(message, args));
     }
@@ -239,22 +401,22 @@ export class Logger {
     public fatal(message: string, ...args: any[]) {
         this.logger.fatal(this.formatErrorMessage(message, args));
     }
-
-    public static parseLogLevel(level: string): LogLevel {
-        const upperLevel = level.toUpperCase();
-        switch (upperLevel) {
-            case 'TRACE': return LogLevel.TRACE;
-            case 'DEBUG': return LogLevel.DEBUG;
-            case 'INFO': return LogLevel.INFO;
-            case 'WARNING': return LogLevel.WARNING;
-            case 'ERROR': return LogLevel.ERROR;
-            case 'FATAL': return LogLevel.FATAL;
-            default: return LogLevel.INFO;
-        }
-    }
 }
 
 // Export a singleton instance
+// Example usage:
+// Basic logging (backward compatible):
+//   logger.info("Message");
+//
+// Contextual logging:
+//   const memoryLogger = logger.withContext({ module: 'memory', component: 'storage' });
+//   memoryLogger.debug("Operation completed");
+//
+// With environment variable:
+//   DEBUG='mod:memory=debug,mod:memory/storage=trace,tag:security=debug' bun run program.ts
+//   const secureLogger = logger.withContext({ module: 'auth', tags: ['security'] });
+//   secureLogger.debug("Security check passed");  // Will output if DEBUG includes tag:security=debug
+
 export const logger = Logger.getInstance();
 
 // Re-export the trace decorator
