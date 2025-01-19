@@ -475,7 +475,14 @@ export class AgentCore {
 
       // Handle function execution
       try {
+        this.promptLogger.debug('Raw LLM response:', {
+          responseLength: responseContent.length,
+          firstChars: responseContent.substring(0, 50),
+          lastChars: responseContent.substring(responseContent.length - 50)
+        });
+        
         const parsed = JSON.parse(responseContent);
+        this.promptLogger.debug('Successfully parsed LLM response as JSON');
 
         // POTENTIALLY DEAD CODE:
         // This code path attempts to handle OpenAI's native function calling format (tool_calls),
