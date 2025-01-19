@@ -8,6 +8,10 @@ import { logger } from '../core/Logger';
 
 export class MultiLevelPromptTemplate<T extends ReadonlyArray<ClassificationTypeConfig>> implements IAgentPromptTemplate {
   protected classificationTypes: T;
+  private logger = logger.withContext({ 
+    module: 'agent', 
+    component: 'promptTemplate'
+  });
 
   constructor(classificationTypes: T, _strategy?: InferStrategy) {
     this.classificationTypes = classificationTypes;
@@ -69,6 +73,8 @@ Your capabilities: {capabilities}
     `.trim();
 
     const msg = sessionContext.getLatestMessage();
+    logger.debug(`getSystemPrompt with Current message: ${msg.payload.input}`);
+
     if (msg.metadata?.sender === "user") {
       return base_prompt + "\n" + this.topLevelPrompt();
     }
@@ -106,7 +112,7 @@ Your capabilities: {capabilities}
           return base_prompt;
         }
       } catch (error) {
-        logger.warning(`Failed to parse message payload: ${error}`);
+        logger.warning(`[getSystemPrompt - routed] Failed to parse message payload: ${error}`);
         return base_prompt;
       }
     }
@@ -125,7 +131,7 @@ Your capabilities: {capabilities}
           return base_prompt;
         }
       } catch (error) {
-        logger.warning(`Failed to parse message payload: ${error}`);
+        logger.warning(`[getSystemPrompt - tool_call] Failed to parse message payload: ${error}`);
         return base_prompt;
       }
     }
@@ -136,6 +142,8 @@ Your capabilities: {capabilities}
 
   async getAssistantPrompt(sessionContext: SessionContext, memory: Memory): Promise<string> {
     const msg = sessionContext.getLatestMessage();
+    logger.debug(`getAssistantPrompt with Current message: ${msg.payload.input}`);
+
     if (msg.metadata?.sender === "agent") {
       try {
         const m = JSON.parse(msg.payload.input);
@@ -188,7 +196,7 @@ Your capabilities: {capabilities}
           return "";
         }
       } catch (error) {
-        logger.warning(`Failed to parse message payload: ${error}`);
+        logger.warning(`[getAssistantPrompt] Failed to parse message payload: ${error}`);
         return "";
       }
     }
@@ -213,13 +221,10 @@ Your capabilities: {capabilities}
       if (res.top_level_intent === "CONVERSATION") {
         return res.response;
       } 
-      // For non-CONVERSATION responses, throw to trigger error handling
-      throw new Error('Response is not a CONVERSATION type');
     } catch (error) {
       logger.warn(`extractDataFromLLMResponse failed to parse LLM response: ${error}`);
-      // Return error message instead of raw response to break the loop
-      return "I apologize, but I encountered an error processing the response. Let me try again with proper formatting.";
     }
+    return response;
   }
 
   async debugPrompt(

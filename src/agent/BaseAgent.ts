@@ -36,6 +36,11 @@ export abstract class BaseAgent<
     return new ClassToInstantiate(classificationTypes);
   }
 
+  private logger = logger.withContext({ 
+    module: 'agent', 
+    component: 'BaseAgent'
+  });
+  
   constructor(
     core_config: AgentCoreConfig,
     svc_config: AgentServiceConfig,
@@ -211,7 +216,7 @@ export abstract class BaseAgent<
   }
 
   private defaultExceptionHandler(raw: any, session: Session): void {
-    logger.debug("Exception received:", raw);
+    logger.warn("Exception received:", raw);
     const sessionContext = session.getContext();
     const instruction = sessionContext?.getCurrentInstruction();
     
