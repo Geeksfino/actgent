@@ -52,7 +52,7 @@ export class EphemeralMemoryCapacityMonitor extends AbstractMemoryMonitor {
             }
         };
         super(id, transitionConfig);
-        this.logger.debug(
+        this.logger.trace(
             'Created EphemeralMemoryCapacityMonitor with config: %o',
             { threshold: monitorConfig.warningThreshold, maxItems: monitorConfig.maxItems }
         );
@@ -64,7 +64,7 @@ export class EphemeralMemoryCapacityMonitor extends AbstractMemoryMonitor {
     public monitor(): Observable<MemoryEvent> {
         return new Observable<MemoryEvent>(subscriber => {
             try {
-                this.logger.debug('EphemeralMemoryCapacityMonitor.monitor() called');
+                this.logger.trace('EphemeralMemoryCapacityMonitor.monitor() called');
 
                 // Get current capacity
                 const currentSize = this.ephemeralMemory.size();
@@ -72,7 +72,7 @@ export class EphemeralMemoryCapacityMonitor extends AbstractMemoryMonitor {
                 const threshold = this.config.signalConfig.capacityThreshold?.threshold ?? 0;
                 const currentRatio = currentSize / maxSize;
                 
-                this.logger.debug(
+                this.logger.trace(
                     `[Monitor:${this.id}] Current state - Size: ${currentSize}/${maxSize}, Ratio: ${(currentRatio * 100).toFixed(2)}%, Threshold: ${(threshold * 100).toFixed(2)}%`
                 );
 
@@ -80,14 +80,14 @@ export class EphemeralMemoryCapacityMonitor extends AbstractMemoryMonitor {
                 if (this.config.signalConfig.capacityThreshold) {
                     this.config.signalConfig.capacityThreshold.current = currentSize;
                     this.config.signalConfig.capacityThreshold.max = maxSize;  // Also update max size
-                    this.logger.debug(
+                    this.logger.trace(
                         `[Monitor:${this.id}] Updated capacity in config to ${currentSize}/${maxSize}`
                     );
                 }
 
                 // Check if we need to emit warning
                 if (currentRatio >= threshold) {
-                    this.logger.debug(
+                    this.logger.trace(
                         `[Monitor:${this.id}] ⚠️ Capacity threshold exceeded! Current: ${(currentRatio * 100).toFixed(2)}%, Threshold: ${(threshold * 100).toFixed(2)}%`
                     );
 
@@ -107,14 +107,14 @@ export class EphemeralMemoryCapacityMonitor extends AbstractMemoryMonitor {
                         ])
                     };
 
-                    this.logger.debug(
+                    this.logger.trace(
                         `[Monitor:${this.id}] Emitting capacity warning event with metadata:`,
                         Object.fromEntries(event.metadata!)
                     );
 
                     subscriber.next(event);
                 } else {
-                    this.logger.debug(
+                    this.logger.trace(
                         `[Monitor:${this.id}] Capacity within limits (${(currentRatio * 100).toFixed(2)}% < ${(threshold * 100).toFixed(2)}%)`
                     );
                 }

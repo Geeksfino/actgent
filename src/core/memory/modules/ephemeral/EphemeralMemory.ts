@@ -101,19 +101,19 @@ class EphemeralMemory implements IMemory<EphemeralMemoryUnit> {
         const now = Date.now();
         let purgedCount = 0;
         
-        this.logger.debug(`Checking for expired items (current time: ${now})`);
+        this.logger.trace(`Checking for expired items (current time: ${now})`);
         
         for (const [id, entry] of Object.entries(this.items)) {
             // Skip non-expiring items (expiry === -1)
             if (entry.expiry !== -1 && entry.expiry <= now) {
                 delete this.items[id];
                 purgedCount++;
-                this.logger.debug(`Purged expired item ${id} (expiry: ${entry.expiry})`);
+                this.logger.trace(`Purged expired item ${id} (expiry: ${entry.expiry})`);
             }
         }
         
         if (purgedCount > 0) {
-            this.logger.debug(`Purged ${purgedCount} expired items from ephemeral memory`);
+            this.logger.trace(`Purged ${purgedCount} expired items from ephemeral memory`);
         }
     }
 

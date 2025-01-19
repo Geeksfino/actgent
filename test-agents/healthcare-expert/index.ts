@@ -25,7 +25,7 @@ const rl = readline.createInterface({
 });
 HealthcareExpert.run(loggerConfig);
 HealthcareExpert.registerStreamCallback((delta: string) => {
-    logger.info(delta);
+    process.stdout.write(delta);
 });
 
 

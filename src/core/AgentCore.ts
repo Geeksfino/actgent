@@ -59,7 +59,13 @@ export class AgentCore {
 
   private logger = logger.withContext({ 
     module: 'core', 
-    component: 'core'
+    component: 'core',
+    tags: ['core']
+  });
+  private responselogger = logger.withContext({ 
+    module: 'core', 
+    component: 'core',
+    tags: ['response']
   });
   private promptLogger = logger.withContext({ 
     module: 'core', 
@@ -283,7 +289,7 @@ export class AgentCore {
 
     // Handle the response based on message type
     const cleanedResponse = this.cleanLLMResponse(response);
-    this.logger.debug(`Cleaned response: ${cleanedResponse}`);
+    this.responselogger.debug(`Cleaned response: ${cleanedResponse}`);
     const session = sessionContext.getSession();
     //const responseMessage = session.createMessage(extractedResponse, "assistant");
     //sessionContext.addMessage(responseMessage);
@@ -295,7 +301,7 @@ export class AgentCore {
      * and sent back to the inbox for next turn of processing.
     */
     const responseType =this.classifier.handleLLMResponse(cleanedResponse, session);
-    this.logger.debug(`Response classified as: ${responseType}`);
+    this.responselogger.debug(`Response classified as: ${responseType}`);
 
     /*
      * Only responses meant to be sent back to the user are added to memory for context.
@@ -310,7 +316,7 @@ export class AgentCore {
       // prompt template to do the extraction. A prompt template decides how the LLM
       // response is structured and so it should also know how to extract the data from it.
       const extractedData = this.promptTemplate.extractDataFromLLMResponse(cleanedResponse);
-      this.logger.debug(`AgentCore: extractedDataFromLLMResponse: ${extractedData}`);
+      this.responselogger.debug(`AgentCore: extractedDataFromLLMResponse: ${extractedData}`);
       const conversationMessage = session.createMessage(extractedData, "assistant");
       //sessionContext.addMessage(conversationMessage);
       await this.memory.processMessage(conversationMessage, sessionContext);
