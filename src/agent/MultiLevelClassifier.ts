@@ -28,22 +28,35 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
   protected categorizeLLMResponse(
     response: string
   ): ParsedLLMResponse<T> | null {
+    const classifierLogger = logger.withContext({
+      module: 'classifier',
+      component: 'multilevel',
+      tags: ['prompt', 'classification']
+    });
+
     try {
-      logger.debug("Categorizing LLM raw response===>");
+      classifierLogger.debug("Attempting to categorize LLM response", {
+        responseLength: response.length,
+        firstChars: response.substring(0, 50)
+      });
+
       const parsed = JSON.parse(response);
-      logger.debug("Categorizing LLM response:", parsed);
+      classifierLogger.debug("Successfully parsed response into JSON");
 
       // Case 1: Multi-level intent format
       if (parsed.top_level_intent) {
         const topLevelIntent = parsed.top_level_intent.toUpperCase();
+        classifierLogger.debug("Found top_level_intent", { intent: topLevelIntent });
 
         // Handle CONVERSATION intent
         if (topLevelIntent === 'CONVERSATION') {
           if (!parsed.response) {
-            throw new Error("Invalid CONVERSATION response: response field is missing");
+            const error = "Invalid CONVERSATION response: response field is missing";
+            classifierLogger.warn(error);
+            throw new Error(error);
           }
 
-          logger.debug("Categorized LLM response as CONVERSATION");
+          classifierLogger.debug("Categorized as CONVERSATION response");
           return {
             type: ResponseType.CONVERSATION,
             structuredData: {
@@ -57,10 +70,14 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
         // Handle ACTION intent
         if (topLevelIntent === 'ACTION') {
           if (!parsed.second_level_intent) {
-            throw new Error("Invalid ACTION response: second_level_intent is missing");
+            const error = "Invalid ACTION response: second_level_intent is missing";
+            classifierLogger.warn(error);
+            throw new Error(error);
           }
 
-          logger.debug("Categorized LLM response as ACTION");
+          classifierLogger.debug("Categorized as ACTION response", {
+            action: parsed.second_level_intent
+          });
           return {
             type: ResponseType.ROUTING,
             structuredData: {
@@ -75,13 +92,16 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
 
       // Case 2: OpenAI function calling format
       if (parsed.tool_calls) {
-        // OpenAI returns tool_calls array, we handle the first one for now
         const toolCall = parsed.tool_calls[0];
         if (!toolCall || !toolCall.function) {
-          throw new Error("Invalid tool_calls format: missing function data");
+          const error = "Invalid tool_calls format: missing function data";
+          classifierLogger.warn(error);
+          throw new Error(error);
         }
 
-        logger.debug("Categorized LLM response as TOOL_CALL");
+        classifierLogger.debug("Categorized as TOOL_CALL response", {
+          toolName: toolCall.function.name
+        });
         return {
           type: ResponseType.TOOL_CALL,
           structuredData: {
@@ -95,13 +115,16 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
 
       // Case 3: Direct schema-conforming response
       if (parsed.messageType) {
+        classifierLogger.debug("Found direct schema response", {
+          messageType: parsed.messageType
+        });
         // If it's not a conventional tool call (handled in case 2),
         // treat it as instruction-to-tool mapping for event handling
         const matchingSchema = this.schemaTypes.find(
           (type: ClassificationTypeConfig) => type.name === parsed.messageType
         );
         // No need to throw error if no matching schema - just return EVENT type
-        logger.debug("Categorized LLM response as structured output");
+        classifierLogger.debug("Categorized LLM response as structured output");
         return {
           type: ResponseType.EVENT,
           structuredData: parsed as InferClassificationUnion<T>,
@@ -110,7 +133,7 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
       }
 
       // If we reach here, the response format is unrecognized
-      logger.error("Unrecognized LLM response format: ", response);
+      classifierLogger.error("Unrecognized LLM response format: ", response);
       return {
         type: ResponseType.EXCEPTION,
         instruction: this.tryExtractMessageType(response),
@@ -121,7 +144,7 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
       };
 
     } catch (error) {
-      logger.error("Error parsing LLM response:", error);
+      classifierLogger.error("Error parsing LLM response:", error);
       return {
         type: ResponseType.EXCEPTION,
         structuredData: {
