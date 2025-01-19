@@ -30,15 +30,35 @@ ACTION: Specific intents that require the agent to perform an action using a too
 Legitimate second-level intents include: 
 - ${instructionNames}
 
-Output format:
+CRITICAL RESPONSE FORMAT REQUIREMENTS:
+1. ALWAYS respond with a valid JSON object
+2. NEVER include any text or formatting outside the JSON structure
+3. Your entire response must be parseable as JSON
+4. Inside JSON string fields, you may use markdown formatting for better readability
+5. Follow this exact structure:
 {
-  "top_level_intent": "[Top-level intent: CONVERSATION or ACTION]",
-  "second_level_intent": "[Second-level intent (if applicable)]",
-  "response": "[A natural language response if top_level_intent is CONVERSATION]"
+  "top_level_intent": "CONVERSATION" | "ACTION",
+  "second_level_intent": "<intent_name>",  // Required if top_level_intent is ACTION
+  "response": "<response_text>"            // Required if top_level_intent is CONVERSATION, may include markdown
 }
 
-If the top_level_intent is CONVERSATION, generate a relevant and engaging natural language response in the "response" field. If the top_level_intent is ACTION, leave the "response" field empty or set it to null.
-    `.trim();
+Example valid responses:
+// For conversation with markdown:
+{
+  "top_level_intent": "CONVERSATION",
+  "second_level_intent": null,
+  "response": "Here are some meditation benefits:\\n\\n* Reduces stress and anxiety\\n* Improves mental clarity\\n* Enhances emotional well-being"
+}
+
+// For action:
+{
+  "top_level_intent": "ACTION",
+  "second_level_intent": "offer_health_tips",
+  "response": null
+}
+
+Remember: Your response must be valid JSON that can be parsed. Any formatting (markdown, lists, etc.) must be properly escaped within JSON string fields.
+`.trim();
   } 
 
   async getSystemPrompt(sessionContext: SessionContext, memory: Memory): Promise<string> {
@@ -193,10 +213,13 @@ Your capabilities: {capabilities}
       if (res.top_level_intent === "CONVERSATION") {
         return res.response;
       } 
+      // For non-CONVERSATION responses, throw to trigger error handling
+      throw new Error('Response is not a CONVERSATION type');
     } catch (error) {
       logger.warn(`extractDataFromLLMResponse failed to parse LLM response: ${error}`);
+      // Return error message instead of raw response to break the loop
+      return "I apologize, but I encountered an error processing the response. Let me try again with proper formatting.";
     }
-    return response;
   }
 
   async debugPrompt(
