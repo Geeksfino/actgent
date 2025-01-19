@@ -16,6 +16,11 @@ export abstract class AbstractMemoryMonitor implements IMemoryMonitor {
         eventCount: 0,
         status: 'inactive'
     };
+    protected logger = logger.withContext({ 
+        module: 'memory', 
+        component: 'monitor',
+        tags: ['monitoring']
+    });
 
     constructor(
         public readonly id: string,
@@ -36,7 +41,7 @@ export abstract class AbstractMemoryMonitor implements IMemoryMonitor {
         if (this.isActive) return;
         this.isActive = true;
         this._metrics.status = 'active';
-        logger.debug(`Monitor ${this.id} started`);
+        this.logger.debug(`Monitor ${this.id} started`);
     }
 
     /**
@@ -46,7 +51,7 @@ export abstract class AbstractMemoryMonitor implements IMemoryMonitor {
         if (!this.isActive) return;
         this.isActive = false;
         this._metrics.status = 'inactive';
-        logger.debug(`Monitor ${this.id} stopped`);
+        this.logger.debug(`Monitor ${this.id} stopped`);
     }
 
     /**
@@ -58,7 +63,7 @@ export abstract class AbstractMemoryMonitor implements IMemoryMonitor {
             eventCount: 0,
             status: this.isActive ? 'active' : 'inactive'
         };
-        logger.debug(`Monitor ${this.id} reset`);
+        this.logger.debug(`Monitor ${this.id} reset`);
     }
 
     /**
@@ -77,6 +82,6 @@ export abstract class AbstractMemoryMonitor implements IMemoryMonitor {
         this._metrics.eventCount++;
         
         this.eventsSubject$.next(event);
-        logger.debug(`Monitor ${this.id} emitted event:`, event);
+        this.logger.debug(`Monitor ${this.id} emitted event:`, event);
     }
 }

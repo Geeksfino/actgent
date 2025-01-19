@@ -57,6 +57,16 @@ export class AgentCore {
 
   private shutdownSubject: Subject<void> = new Subject<void>();
 
+  private logger = logger.withContext({ 
+    module: 'core', 
+    component: 'core'
+  });
+  private promptLogger = logger.withContext({ 
+    module: 'core', 
+    component: 'core',
+    tags: ['prompt']
+  });
+
   constructor(
     config: AgentCoreConfig,
     llmConfig: LLMConfig,
@@ -124,7 +134,7 @@ export class AgentCore {
       getEventEmitter().setCurrentAgent(this.id);
     }
 
-    logger.debug('Initializing AgentCore');
+    this.logger.debug('Initializing AgentCore');
   }
 
   public getCapabilities(): string {
@@ -210,12 +220,12 @@ export class AgentCore {
   }
 
   public registerStreamCallback(callback: StreamCallback): void {
-    logger.debug('Registering stream callback');
+    this.logger.debug('Registering stream callback');
     this.streamCallbacks.add(callback);
   }
 
   public removeStreamCallback(callback: StreamCallback): void {
-    logger.debug('Removing stream callback');
+    this.logger.debug('Removing stream callback');
     this.streamCallbacks.delete(callback);
   }
 
@@ -231,7 +241,7 @@ export class AgentCore {
         try {
           callback(line + "\n"); // Call the callback with each complete line
         } catch (error) {
-          logger.error(`Error in stream callback: ${error}`);
+          this.logger.error(`Error in stream callback: ${error}`);
         }
       }
     }
@@ -244,7 +254,7 @@ export class AgentCore {
           try {
             callback(this.streamBuffer); // Flush the remaining content in the buffer
           } catch (error) {
-            logger.error(`Error in stream callback during force flush: ${error}`);
+            this.logger.error(`Error in stream callback during force flush: ${error}`);
           }
         }
       }
@@ -261,9 +271,9 @@ export class AgentCore {
     emitter.setCurrentSession(message.sessionId);
 
     // Log the input message
-    logger.debug(`Fetched from inbox: ${message.payload.input}`);
+    this.logger.debug(`Fetched from inbox: ${message.payload.input}`);
 
-    logger.debug(`Sender: ${message.metadata?.sender}`);
+    this.logger.debug(`Sender: ${message.metadata?.sender}`);
     sessionContext.addMessage(message);
 
     await this.memory.processMessage(message, sessionContext);
@@ -273,7 +283,7 @@ export class AgentCore {
 
     // Handle the response based on message type
     const cleanedResponse = this.cleanLLMResponse(response);
-    logger.debug(`Cleaned response: ${cleanedResponse}`);
+    this.logger.debug(`Cleaned response: ${cleanedResponse}`);
     const session = sessionContext.getSession();
     //const responseMessage = session.createMessage(extractedResponse, "assistant");
     //sessionContext.addMessage(responseMessage);
@@ -285,7 +295,7 @@ export class AgentCore {
      * and sent back to the inbox for next turn of processing.
     */
     const responseType =this.classifier.handleLLMResponse(cleanedResponse, session);
-    logger.debug(`Response classified as: ${responseType}`);
+    this.logger.debug(`Response classified as: ${responseType}`);
 
     /*
      * Only responses meant to be sent back to the user are added to memory for context.
@@ -300,7 +310,7 @@ export class AgentCore {
       // prompt template to do the extraction. A prompt template decides how the LLM
       // response is structured and so it should also know how to extract the data from it.
       const extractedData = this.promptTemplate.extractDataFromLLMResponse(cleanedResponse);
-      logger.debug(`AgentCore: extractedDataFromLLMResponse: ${extractedData}`);
+      this.logger.debug(`AgentCore: extractedDataFromLLMResponse: ${extractedData}`);
       const conversationMessage = session.createMessage(extractedData, "assistant");
       //sessionContext.addMessage(conversationMessage);
       await this.memory.processMessage(conversationMessage, sessionContext);
@@ -345,25 +355,10 @@ export class AgentCore {
     //this.log(`System prompt: ${this.promptManager.getSystemPrompt()}`);
     const sessionContext = this.sessionContextManager[message.sessionId];
 
-    if (logger.getLevel() === LogLevel.TRACE) {
-      logger.trace(message.sessionId, "<------ Resolved prompt ------->");
-      // logger.trace(
-      //   message.sessionId,
-      //   AgentCore.formatMultiLine(
-      //     this.promptManager.debugPrompt(
-      //       sessionContext,
-      //       this.memory,
-      //       message.payload.input,
-      //       context
-      //     )
-      //   )
-      // );
-      const systemDebugPrompt = await this.promptTemplate.debugPrompt(this.promptManager, "system", sessionContext, this.memory);
-      const assistantDebugPrompt = await this.promptTemplate.debugPrompt(this.promptManager, "assistant", sessionContext, this.memory);
-      logger.trace(systemDebugPrompt);
-      logger.trace(assistantDebugPrompt);
-      logger.trace(message.sessionId, "<------ Resolved prompt ------->");
-    }
+    const systemDebugPrompt = await this.promptTemplate.debugPrompt(this.promptManager, "system", sessionContext, this.memory);
+    const assistantDebugPrompt = await this.promptTemplate.debugPrompt(this.promptManager, "assistant", sessionContext, this.memory);
+    this.promptLogger.debug(systemDebugPrompt);
+    this.promptLogger.debug(assistantDebugPrompt);
 
     try {
       let responseContent = "";
@@ -382,7 +377,7 @@ export class AgentCore {
   
       // Pretty print the history
       const formattedHistory = AgentCore.formatHistory(history);
-      logger.warning(`History:\n${formattedHistory}`);
+      this.promptLogger.debug(`History:\n${formattedHistory}`);
 
       const systemPrompt = await this.promptManager.getSystemPrompt(sessionContext, this.memory);
       const assistantPrompt = await this.promptManager.getAssistantPrompt(sessionContext, this.memory);
@@ -435,7 +430,7 @@ export class AgentCore {
 
         const lastChunk = chunks[chunks.length - 1];
         const finishReason = lastChunk.choices[0]?.finish_reason;
-        logger.info(`[promptLLM] Stream finished with reason: ${finishReason}`);
+        this.logger.debug(`[promptLLM] Stream finished with reason: ${finishReason}`);
         
         // Only send completion signal after all data is processed
         if (this.llmConfig?.streamMode && 
@@ -446,7 +441,7 @@ export class AgentCore {
             try {
               callback("", { type: 'completion', reason: finishReason });
             } catch (error) {
-              logger.error(`Error in stream callback during completion signal: ${error}`);
+              this.logger.error(`Error in stream callback during completion signal: ${error}`);
             }
           }
         }
@@ -462,7 +457,7 @@ export class AgentCore {
           await this.llmClient.chat.completions.create(nonStreamConfig);
         const message = response.choices[0].message;
         const finishReason = response.choices[0].finish_reason;
-        logger.info(`[promptLLM] Non-stream finished with reason: ${finishReason}`);
+        this.logger.debug(`[promptLLM] Non-stream finished with reason: ${finishReason}`);
         const isToolCalls = finishReason === "tool_calls";
 
         if (isToolCalls && message.tool_calls) {
@@ -506,7 +501,7 @@ export class AgentCore {
 
       return responseContent;
     } catch (error) {
-      logger.error(`Error interacting with LLM: ${error}`);
+      this.logger.error(`Error interacting with LLM: ${error}`);
       throw error;
     }
   }
@@ -524,7 +519,7 @@ export class AgentCore {
     // Create a Message object with session ID and description
     const message = s.createMessage(s.description);
     this.inbox.enqueue(message); // Enqueue the message
-    logger.info(`createSession called with description: ${description}`);
+    this.logger.debug(`createSession called with description: ${description}`);
 
     return s;
   }
@@ -583,7 +578,7 @@ export class AgentCore {
   }
 
   public log(sessionId: string, message: string): void {
-    logger.info(`[Session: ${sessionId}] [${this.name}] ${message}`);
+    this.logger.debug(`[Session: ${sessionId}] [${this.name}] ${message}`);
   }
 
   public setLoggingConfig(loggingConfig: LoggingConfig): void {
@@ -614,7 +609,7 @@ export class AgentCore {
             const parsedJson = JSON.parse(jsonContent);
             return JSON.stringify(parsedJson, null, 2); // Indent JSON by 2 spaces
         } catch (e) {
-            console.warn("Invalid JSON format detected. Returning unmodified.");
+            logger.warn("Invalid JSON format detected. Returning unmodified.");
             return match; // Return original match if JSON parsing fails
         }
     });
@@ -623,7 +618,7 @@ export class AgentCore {
   }
 
   public async shutdown(): Promise<void> {
-    logger.info('Initiating core shutdown...');
+    this.logger.debug('Initiating core shutdown...');
 
     // Stop processing new messages
     this.inbox.stop();
@@ -642,19 +637,19 @@ export class AgentCore {
     // Close LLM client if necessary
     // Note: As of now, OpenAI's Node.js client doesn't require explicit closure
 
-    logger.info('Core shutdown complete.');
+    this.logger.debug('Core shutdown complete.');
   }
 
   handleError(error: Error) {
-    logger.error('AgentCore Error:', error);
+    this.logger.error('AgentCore Error:', error);
   }
 
   async run() {
-    logger.info('Agent starting execution');
+    this.logger.debug('Agent starting execution');
     try {
       // ... execution logic
     } catch (error) {
-      logger.error('Error during agent execution:', error);
+      this.logger.error('Error during agent execution:', error);
       throw error;
     }
   }

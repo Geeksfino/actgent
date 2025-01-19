@@ -24,6 +24,12 @@ export class MemoryTransitionManager {
     // Track time-based monitors
     private timeIntervalSubscriptions = new Map<string, { subscription: any, lastCheck: Date }>();
 
+    private logger = logger.withContext({ 
+        module: 'memory', 
+        component: 'transition',
+        tags: ['events']
+    });
+
     /**
      * Register an event handler
      */
@@ -55,15 +61,15 @@ export class MemoryTransitionManager {
      * Emit a memory event
      */
     public emitEvent(event: MemoryEvent): void {
-        logger.debug(`Emitting event: ${event.type}`);
+        this.logger.debug(`Emitting event: ${event.type}`);
         
         const handlers = this.handlers.get(event.type) || [];
         if (handlers.length === 0) {
-            logger.warn(`No handlers registered for event type: ${event.type}`);
+            this.logger.warn(`No handlers registered for event type: ${event.type}`);
             return;
         }
 
-        logger.info(
+        this.logger.info(
             `Dispatching ${event.type} event to ${handlers.length} handlers`
         );
 
@@ -71,7 +77,7 @@ export class MemoryTransitionManager {
             try {
                 handler.onEvent(event);
             } catch (error) {
-                logger.error('Error in event handler:', error);
+                this.logger.error('Error in event handler:', error);
             }
         }
     }
@@ -81,7 +87,7 @@ export class MemoryTransitionManager {
      */
     public registerMonitor(monitor: IMemoryMonitor): void {
         if (this.monitors.has(monitor.id)) {
-            logger.warn(`Monitor with ID ${monitor.id} already exists. Stopping existing monitor.`);
+            this.logger.warn(`Monitor with ID ${monitor.id} already exists. Stopping existing monitor.`);
             this.stopMonitorSignals(monitor.id);
             this.monitors.get(monitor.id)?.stop();
         }
@@ -112,17 +118,17 @@ export class MemoryTransitionManager {
      */
     public startMonitoring(): void {
         if (this.isMonitoring) {
-            logger.warn('Monitoring is already active');
+            this.logger.warn('Monitoring is already active');
             return;
         }
         
-        logger.info(`Starting memory monitoring with ${this.monitors.size} monitors`);
+        this.logger.debug(`Starting memory monitoring with ${this.monitors.size} monitors`);
         this.isMonitoring = true;
         
         // Set up signals for each monitor
         for (const monitor of this.monitors.values()) {
             if (monitor.config.enabled) {
-                logger.info(`Setting up signals for monitor: ${monitor.id}`);
+                this.logger.debug(`Setting up signals for monitor: ${monitor.id}`);
                 this.setupMonitorSignals(monitor);
             }
         }
@@ -192,7 +198,7 @@ export class MemoryTransitionManager {
                     this.emitEvent(event);
                 },
                 error: (error: unknown) => {
-                    logger.error(`Error in monitor ${monitor.id} during signal processing:`, error);
+                    this.logger.error(`Error in monitor ${monitor.id} during signal processing:`, error);
                 }
             });
         }
@@ -204,7 +210,7 @@ export class MemoryTransitionManager {
     private setupMonitorSignals(monitor: IMemoryMonitor): void {
         const { signal, signalConfig } = monitor.config;
         
-        logger.debug(`Setting up ${signal} signal for monitor ${monitor.id}`);
+        this.logger.debug(`Setting up ${signal} signal for monitor ${monitor.id}`);
 
         switch (signal) {
             case MonitorSignalType.TIME_INTERVAL:
@@ -222,14 +228,14 @@ export class MemoryTransitionManager {
                 
             case MonitorSignalType.CAPACITY_THRESHOLD:
                 if (signalConfig.capacityThreshold) {
-                    logger.info(
+                    this.logger.debug(
                         `Setting up capacity threshold check interval for monitor ${monitor.id} (threshold: ${signalConfig.capacityThreshold.threshold * 100}%)`
                     );
                     
                     // Set up interval to check capacity threshold
                     const subscription = interval(1000).subscribe(() => {
                         if (this.isMonitoring) {
-                            logger.debug(`Running scheduled capacity check for monitor ${monitor.id}`);
+                            this.logger.debug(`Running scheduled capacity check for monitor ${monitor.id}`);
                             this.checkCapacityThresholds();
                         }
                     });
@@ -299,7 +305,7 @@ export class MemoryTransitionManager {
                         this.emitEvent(event);
                     },
                     error: (error: unknown) => {
-                        logger.error(`Error in turn count monitor ${monitor.id}:`, error);
+                        this.logger.error(`Error in turn count monitor ${monitor.id}:`, error);
                     }
                 });
             }
@@ -317,7 +323,7 @@ export class MemoryTransitionManager {
                 monitor.config.signalConfig.capacityThreshold
             );
 
-        logger.debug(`Checking capacity thresholds for ${capacityMonitors.length} monitors`);
+        this.logger.debug(`Checking capacity thresholds for ${capacityMonitors.length} monitors`);
 
         // Sort by priority
         capacityMonitors.sort((a, b) => b.config.priority - a.config.priority);
@@ -328,12 +334,12 @@ export class MemoryTransitionManager {
             monitor.monitor().subscribe({
                 next: (event: MemoryEvent) => {
                     if (event.type === 'system:warn:capacity') {
-                        logger.info(`Monitor ${monitor.id}: Emitting capacity warning event`);
+                        this.logger.debug(`Monitor ${monitor.id}: Emitting capacity warning event`);
                         this.emitEvent(event);
                     }
                 },
                 error: (error: unknown) => {
-                    logger.error(`Error in capacity monitor ${monitor.id}:`, error);
+                    this.logger.error(`Error in capacity monitor ${monitor.id}:`, error);
                 }
             });
         }

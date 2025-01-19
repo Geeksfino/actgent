@@ -12,6 +12,10 @@ export class WorkingMemory implements IMemory<IMemoryUnit> {
     private maxSize: number;
     private events: Subject<IMemoryUnit>;
     protected size: number = 0;
+    private logger = logger.withContext({ 
+        module: 'memory', 
+        component: 'working'
+    });
 
     constructor(storage: IMemoryStorage, index: IMemoryIndex, maxSize: number = 100) {
         this.storage = storage;
@@ -78,7 +82,7 @@ export class WorkingMemory implements IMemory<IMemoryUnit> {
         if (unit && unit.memoryType === MemoryType.WORKING) {
             return unit;
         }
-        logger.debug('Memory not found or not working memory: %s', id);
+        this.logger.debug('Memory not found or not working memory: %s', id);
         return null;
     }
 

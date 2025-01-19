@@ -35,6 +35,7 @@ export class AgentMemorySystem {
 
     private transitionManager: MemoryTransitionManager;
     private contextManager: WorkingContextManager;
+    private logger = logger.withContext({ module: 'memory' });
 
     constructor() {
         // Create memories with their module-specific storage
@@ -44,14 +45,14 @@ export class AgentMemorySystem {
         this.proceduralMemory = ProceduralMemoryStorageFactory.create();
         
         // Keep items for 30 seconds in ephemeral memory
-        this.ephemeralMemory = new EphemeralMemory(30000, 5);  // 30 seconds duration, max 5 items
+        this.ephemeralMemory = new EphemeralMemory(-1, 500);  // Non-expiring items, max 5 items
 
         this.transitionManager = new MemoryTransitionManager();
         this.contextManager = new WorkingContextManager(this.workingMemory);
 
         this.setupEventHandlers();
         this.transitionManager.startMonitoring();
-        logger.info('Memory system initialized and monitoring started');
+        this.logger.debug('Memory system initialized and monitoring started');
     }
 
     private setupEventHandlers(): void {
@@ -65,7 +66,7 @@ export class AgentMemorySystem {
             }
         );
         this.transitionManager.registerMonitor(ephemeralMonitor);
-        logger.info('Registered ephemeral memory capacity monitor');
+        this.logger.debug('Registered ephemeral memory capacity monitor');
 
         // Register working memory event handler
         const workingHandler = new WorkingMemoryEventHandler(
@@ -73,7 +74,7 @@ export class AgentMemorySystem {
             0.9  // Consolidate at 90% capacity
         );
         this.transitionManager.registerHandler(workingHandler);
-        logger.info('Registered working memory event handler');
+        this.logger.debug('Registered working memory event handler');
     }
 
     /**
@@ -215,7 +216,7 @@ export class AgentMemorySystem {
                 timestamp: new Date()
             });
         } catch (error) {
-            logger.error('Error processing user turn:', error);
+            this.logger.error('Error processing user turn:', error);
             throw error;
         }
     }
@@ -236,7 +237,7 @@ export class AgentMemorySystem {
                 timestamp: new Date()
             });
         } catch (error) {
-            logger.error('Error processing assistant turn:', error);
+            this.logger.error('Error processing assistant turn:', error);
             throw error;
         }
     }

@@ -9,6 +9,11 @@ import { logger } from '../../Logger';
 export class InMemoryStorage implements IMemoryStorage {
     private memories: Map<string, IMemoryUnit> = new Map();
     private maxCapacity: number;
+    private logger = logger.withContext({ 
+        module: 'memory', 
+        component: 'storage',
+        tags: ['persistence']
+    });
 
     constructor(maxCapacity: number = 1000) {
         this.maxCapacity = maxCapacity;
@@ -45,7 +50,7 @@ export class InMemoryStorage implements IMemoryStorage {
             clonedMemory.metadata.set('type', MemoryType.WORKING);
         }
         
-        logger.debug('Storing memory: %o', clonedMemory);
+        this.logger.debug('Storing memory: %o', clonedMemory);
         this.memories.set(clonedMemory.id, clonedMemory);
     }
 

@@ -6,6 +6,11 @@ import { logger } from '../../../../Logger';
 export class WordEmbeddings {
     private embeddings: Map<string, number[]>;
     private dimension: number;
+    private logger = logger.withContext({ 
+        module: 'memory', 
+        component: 'semantic',
+        tags: ['nlp', 'embeddings']
+    });
 
     constructor(dimension: number = 300) {
         this.embeddings = new Map();
@@ -42,7 +47,7 @@ export class WordEmbeddings {
         const vec2 = await this.getEmbedding(word2);
 
         if (!vec1 || !vec2) {
-            logger.warn(`No embedding found for ${!vec1 ? word1 : word2}`);
+            this.logger.warn(`No embedding found for ${!vec1 ? word1 : word2}`);
             return 0;
         }
 

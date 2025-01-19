@@ -33,6 +33,11 @@ export class NLPService {
     private openai: OpenAI;
     private model: string;
     private systemPrompt: string;
+    private logger = logger.withContext({ 
+        module: 'memory', 
+        component: 'semantic',
+        tags: ['nlp']
+    });
 
     constructor(apiKey: string, model: string = 'gpt-4') {
         this.openai = new OpenAI({ apiKey });
@@ -64,7 +69,7 @@ Format your response as JSON with:
     }
 
     async extractConcepts(text: string): Promise<ExtractedConcepts> {
-        logger.info('NLPService.extractConcepts called with text:', text);
+        this.logger.debug('NLPService.extractConcepts called with text:', text);
         try {
             const response = await this.openai.chat.completions.create({
                 model: this.model,
@@ -84,7 +89,7 @@ Format your response as JSON with:
             const result = JSON.parse(content) as NLPResponse;
             return this.convertToExtractedConcepts(result);
         } catch (error) {
-            logger.error('Error extracting concepts:', error);
+            this.logger.error('Error extracting concepts:', error);
             return { concepts: [], relations: [] };
         }
     }
@@ -119,7 +124,7 @@ Return only the numerical score, nothing else.`;
             const score = parseFloat(content);
             return isNaN(score) ? 0 : Math.max(0, Math.min(1, score));
         } catch (error) {
-            logger.error('Error calculating similarity:', error);
+            this.logger.error('Error calculating similarity:', error);
             return 0;
         }
     }
@@ -164,7 +169,7 @@ Return as JSON:
                 confidence: result.confidence
             };
         } catch (error) {
-            logger.error('Error classifying relation:', error);
+            this.logger.error('Error classifying relation:', error);
             return { type: RelationType.RELATED_TO, confidence: 0.5 };
         }
     }

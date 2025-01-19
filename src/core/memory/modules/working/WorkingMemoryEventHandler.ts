@@ -7,6 +7,12 @@ import { logger } from '../../../Logger';
  * Handles capacity warnings and triggers memory consolidation when needed.
  */
 export class WorkingMemoryEventHandler implements IMemoryEventHandler {
+    private logger = logger.withContext({ 
+        module: 'memory', 
+        component: 'working',
+        tags: ['events', 'handler']
+    });
+
     constructor(
         private readonly workingMemory: WorkingMemory,
         private readonly consolidationThreshold: number = 0.9 // 90% capacity triggers consolidation
@@ -21,7 +27,7 @@ export class WorkingMemoryEventHandler implements IMemoryEventHandler {
      * @param event The memory event to handle
      */
     async onEvent(event: MemoryEvent): Promise<void> {
-        logger.info(
+        this.logger.debug(
             '[Handler:WorkingMemory] Received event: %s',
             event.type
         );
@@ -29,7 +35,7 @@ export class WorkingMemoryEventHandler implements IMemoryEventHandler {
         if (event.type === 'system:warn:capacity') {
             await this.handleCapacityWarning(event);
         } else {
-            logger.debug(
+            this.logger.debug(
                 '[Handler:WorkingMemory] Ignoring unhandled event type: %s',
                 event.type
             );
@@ -49,16 +55,16 @@ export class WorkingMemoryEventHandler implements IMemoryEventHandler {
      */
     private async handleCapacityWarning(event: MemoryEvent): Promise<void> {
         try {
-            logger.debug('[Handler:WorkingMemory] Processing capacity warning event');
+            this.logger.debug('[Handler:WorkingMemory] Processing capacity warning event');
 
             // Get capacity info from event metadata
             const capacityInfo = event.metadata?.get('capacity');
             if (!capacityInfo) {
-                logger.warn('[Handler:WorkingMemory] Capacity warning event missing capacity information');
+                this.logger.warn('[Handler:WorkingMemory] Capacity warning event missing capacity information');
                 return;
             }
 
-            logger.info(
+            this.logger.debug(
                 '[Handler:WorkingMemory] Capacity warning from monitor %s - Current: %d/%d (%d%%)',
                 capacityInfo.monitor,
                 capacityInfo.current,
@@ -69,7 +75,7 @@ export class WorkingMemoryEventHandler implements IMemoryEventHandler {
             // Check if we need to consolidate
             const currentRatio = capacityInfo.ratio as number;
             if (currentRatio >= this.consolidationThreshold) {
-                logger.warn(
+                this.logger.warn(
                     '[Handler:WorkingMemory] 🔄 Starting memory consolidation (%.2f%% >= %.2f%%)',
                     currentRatio * 100,
                     this.consolidationThreshold * 100
@@ -77,7 +83,7 @@ export class WorkingMemoryEventHandler implements IMemoryEventHandler {
 
                 // Get all items sorted by priority and access time
                 const items = await this.workingMemory.getAll();
-                logger.info('[Handler:WorkingMemory] Found %d items to process', items.length);
+                this.logger.debug('[Handler:WorkingMemory] Found %d items to process', items.length);
                 
                 // Group items by priority
                 const priorityGroups = new Map<number, typeof items>();
@@ -88,7 +94,7 @@ export class WorkingMemoryEventHandler implements IMemoryEventHandler {
                     priorityGroups.set(priority, group);
                 }
 
-                logger.debug(
+                this.logger.debug(
                     '[Handler:WorkingMemory] Grouped items by priority: %o',
                     Object.fromEntries(
                         Array.from(priorityGroups.entries()).map(([k, v]) => [k, v.length])
@@ -107,7 +113,7 @@ export class WorkingMemoryEventHandler implements IMemoryEventHandler {
                         const itemsToRemove = Math.ceil(group.length * 0.5);  // Remove 50%
                         const removeList = group.slice(0, itemsToRemove);
                         
-                        logger.info(
+                        this.logger.debug(
                             '[Handler:WorkingMemory] Removing %d items from priority group %.2f',
                             itemsToRemove,
                             priority
@@ -115,7 +121,7 @@ export class WorkingMemoryEventHandler implements IMemoryEventHandler {
 
                         for (const item of removeList) {
                             await this.workingMemory.delete(item.id);
-                            logger.debug(
+                            this.logger.debug(
                                 '[Handler:WorkingMemory] Removed item %s (priority: %.2f, last accessed: %s)',
                                 item.id,
                                 priority,
@@ -126,20 +132,20 @@ export class WorkingMemoryEventHandler implements IMemoryEventHandler {
                 }
 
                 const newSize = await this.workingMemory.getCurrentSize();
-                logger.info(
+                this.logger.debug(
                     '[Handler:WorkingMemory] ✅ Consolidation complete. New size: %d/%d',
                     newSize,
                     this.workingMemory.getCapacity()
                 );
             } else {
-                logger.debug(
+                this.logger.debug(
                     '[Handler:WorkingMemory] Consolidation not needed (%.2f%% < %.2f%%)',
                     currentRatio * 100,
                     this.consolidationThreshold * 100
                 );
             }
         } catch (error) {
-            logger.error('[Handler:WorkingMemory] Error handling capacity warning:', error);
+            this.logger.error('[Handler:WorkingMemory] Error handling capacity warning:', error);
             throw error;
         }
     }

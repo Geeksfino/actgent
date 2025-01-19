@@ -70,10 +70,12 @@ const tauriTransport = {
 export class Logger {
     private static instance: Logger;
     private static patterns: LogLevelPattern[] = [];
+    private static contextLoggers: Set<Logger> = new Set();
     private logger: pino.Logger;
     private currentOptions: pinoPretty.PrettyOptions;
     private currentLevel: LogLevel = LogLevel.INFO;
     private runtime = createRuntime();
+    private bindings?: Record<string, any>;
 
     private constructor() {
         this.currentOptions = prettyPrintOptions;
@@ -91,12 +93,21 @@ export class Logger {
             pattern = pattern.trim();
             if (!pattern) return;
 
-            // Parse pattern: mod:name=level or mod:name/comp=level or tag:name=level
-            const [selector, levelStr] = pattern.split('=');
-            if (!selector || !levelStr) return;
+            // Parse pattern: mod:name[=level] or mod:name/comp[=level] or tag:name[=level]
+            // Level is optional, defaults to DEBUG
+            let selector: string;
+            let level = LogLevel.DEBUG;  // Default to DEBUG if not specified
 
-            const level = Logger.parseLogLevel(levelStr.trim());
-            if (!level) return;
+            if (pattern.includes('=')) {
+                const [sel, levelStr] = pattern.split('=');
+                selector = sel;
+                const parsedLevel = Logger.parseLogLevel(levelStr.trim());
+                if (parsedLevel) {
+                    level = parsedLevel;
+                }
+            } else {
+                selector = pattern;
+            }
 
             if (selector === '*') {
                 patterns.push({ level, priority: 0 });
@@ -203,6 +214,7 @@ export class Logger {
     }): Logger {
         const contextLogger = new Logger();
         contextLogger.currentOptions = this.currentOptions;
+        contextLogger.bindings = bindings;
         
         // Determine effective log level
         const effectiveLevel = this.getEffectiveLevel(bindings);
@@ -213,6 +225,9 @@ export class Logger {
             ...bindings,
             level: effectiveLevel
         });
+
+        // Track this context logger
+        Logger.contextLoggers.add(contextLogger);
         
         return contextLogger;
     }
@@ -225,7 +240,16 @@ export class Logger {
             target: 'pino-pretty',
             options: {
                 ...this.currentOptions,
-                messageFormat: '{msg}'
+                messageFormat: '{msg}',
+                customLevels: {
+                    [LogLevel.TRACE]: 10,
+                    [LogLevel.DEBUG]: 20,
+                    [LogLevel.INFO]: 30,
+                    [LogLevel.WARN]: 40,
+                    [LogLevel.ERROR]: 50,
+                    [LogLevel.FATAL]: 60
+                },
+                customLevelsPath: 'effectiveLevel', // Look at this field for level filtering
             }
         });
 
@@ -234,8 +258,9 @@ export class Logger {
             transports.push(tauriTransport);
         }
 
+        // Always use trace as root level to allow all logs through
         return pino({
-            level,
+            level: LogLevel.TRACE,
             transport: {
                 targets: transports
             }
@@ -296,6 +321,17 @@ export class Logger {
         }
         
         this.logger = this.createLogger(this.currentLevel);
+
+        // Update all context loggers to use the new root logger
+        Logger.contextLoggers.forEach(contextLogger => {
+            contextLogger.currentOptions = this.currentOptions;
+            if (contextLogger.bindings) {
+                contextLogger.logger = this.logger.child({
+                    ...contextLogger.bindings,
+                    level: contextLogger.currentLevel
+                });
+            }
+        });
     }
 
     public setLevel(level: LogLevel) {
@@ -374,32 +410,50 @@ export class Logger {
         }
     }
 
+    private log(level: LogLevel, message: string, ...args: any[]) {
+        const effectiveLevel = this.getEffectiveLevel(this.bindings || {});
+        const logLevels = {
+            [LogLevel.TRACE]: 10,
+            [LogLevel.DEBUG]: 20,
+            [LogLevel.INFO]: 30,
+            [LogLevel.WARN]: 40,
+            [LogLevel.ERROR]: 50,
+            [LogLevel.FATAL]: 60
+        };
+
+        // Only log if effective level allows it
+        if (logLevels[effectiveLevel] <= logLevels[level]) {
+            const logData = this.formatMessage(message, args);
+            this.logger[level]({ ...logData, effectiveLevel });
+        }
+    }
+
     public debug(message: string, ...args: any[]) {
-        this.logger.debug(this.formatMessage(message, args));
+        this.log(LogLevel.DEBUG, message, ...args);
     }
 
     public info(message: string, ...args: any[]) {
-        this.logger.info(this.formatMessage(message, args));
+        this.log(LogLevel.INFO, message, ...args);
     }
 
     public warning(message: string, ...args: any[]) {
-        this.logger.warn(this.formatMessage(message, args));
+        this.log(LogLevel.WARN, message, ...args);
     }
 
     public warn(message: string, ...args: any[]) {
-        this.warning(message, ...args);
+        this.log(LogLevel.WARN, message, ...args);
     }
 
     public error(message: string, ...args: any[]) {
-        this.logger.error(this.formatErrorMessage(message, args));
+        this.log(LogLevel.ERROR, message, ...args);
     }
 
     public trace(message: string, ...args: any[]) {
-        this.logger.trace(this.formatMessage(message, args));
+        this.log(LogLevel.TRACE, message, ...args);
     }
 
     public fatal(message: string, ...args: any[]) {
-        this.logger.fatal(this.formatErrorMessage(message, args));
+        this.log(LogLevel.FATAL, message, ...args);
     }
 }
 
@@ -409,7 +463,7 @@ export class Logger {
 //   logger.info("Message");
 //
 // Contextual logging:
-//   const memoryLogger = logger.withContext({ module: 'memory', component: 'storage' });
+//   const memoryLogger = logger.withContext({ module: 'memory' });
 //   memoryLogger.debug("Operation completed");
 //
 // With environment variable:
