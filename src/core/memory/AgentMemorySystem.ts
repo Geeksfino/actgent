@@ -84,8 +84,10 @@ export class AgentMemorySystem {
      * based on events from MemoryTransitionManager.
      */
     public async remember<C>(content: C | string, schema?: z.ZodSchema<C>, metadata?: Map<string, any>): Promise<void> {
+        if (metadata?.get('role') === 'user' || metadata?.get('role') === 'assistant') {
         const memoryUnit = this.ephemeralMemory.createMemoryUnit(content, schema, metadata);
         await this.ephemeralMemory.store(memoryUnit);
+        }
     }
 
     /**
@@ -253,7 +255,7 @@ export class AgentMemorySystem {
         
         // Convert to OpenAI format
         return memories.map(memory => ({
-            role: memory.metadata.get('role') as 'system' | 'user' | 'assistant' || 'system',
+            role: memory.metadata.get('role') as 'system' | 'user' | 'assistant' || 'assistant',
             content: String(memory.content)
         }));
     }
