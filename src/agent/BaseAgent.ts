@@ -40,7 +40,7 @@ export abstract class BaseAgent<
     module: 'agent', 
     component: 'BaseAgent'
   });
-  
+
   constructor(
     core_config: AgentCoreConfig,
     svc_config: AgentServiceConfig,
@@ -68,7 +68,6 @@ export abstract class BaseAgent<
       svc_config.llmConfig!,
       this.promptTemplate,
       this.classifier,
-      undefined,
       loggingConfig
     );
   }

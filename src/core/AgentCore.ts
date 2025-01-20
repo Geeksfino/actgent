@@ -1,6 +1,4 @@
 import { AgentCoreConfig, LLMConfig, Instruction, LoggingConfig } from "./configs";
-import { DefaultAgentMemory, Memory, MemoryStorage } from "./Memory";
-import { InMemoryStorage } from "./InMemoryStorage";
 import { PromptManager } from "./PromptManager";
 import { PriorityInbox } from "./PriorityInbox";
 import { Message } from "./Message";
@@ -18,12 +16,6 @@ import { getEventEmitter } from "./observability/AgentEventEmitter";
 import { ResponseType } from "./ResponseTypes";
 
 import { AgentMemorySystem } from "./memory/AgentMemorySystem";
-
-interface StorageConfig {
-  shortTerm?: MemoryStorage<any>;
-  longTerm?: MemoryStorage<any>;
-  working?: MemoryStorage<any>;
-}
 
 // Special control sequence for stream completion
 const STREAM_CONTROL = {
@@ -48,7 +40,6 @@ export class AgentCore {
   toolRegistry: Map<string, Tool<any, any, any>> = new Map();
   instructionToolMap: { [key: string]: string } = {};
 
-  private memory: Memory;
   private memories: AgentMemorySystem;
   private inbox: PriorityInbox;
   private promptManager: PromptManager;
@@ -78,7 +69,6 @@ export class AgentCore {
     llmConfig: LLMConfig,
     promptTemplate: IAgentPromptTemplate,
     classifier: IClassifier<any>,
-    storageConfig?: StorageConfig,
     loggingConfig?: LoggingConfig
   ) {
     this.id = config.name; // temporary 
@@ -92,20 +82,6 @@ export class AgentCore {
     this.classifier = classifier;
     this.promptTemplate = promptTemplate;
 
-    // Initialize memory with storage backends
-    const shortTermStorage =
-      storageConfig?.shortTerm || new InMemoryStorage<any>();
-    const longTermStorage =
-      storageConfig?.longTerm || new InMemoryStorage<any>();
-    const workingMemoryStorage =
-      storageConfig?.working || new InMemoryStorage<any>();
-
-    this.memory = new DefaultAgentMemory(
-      1000000, // maxMemorySize (adjust as needed)
-      shortTermStorage,
-      longTermStorage,
-      workingMemoryStorage
-    );
 
     this.memories = new AgentMemorySystem();
 
@@ -282,7 +258,6 @@ export class AgentCore {
     this.logger.debug(`Sender: ${message.metadata?.sender}`);
     sessionContext.addMessage(message);
 
-    await this.memory.processMessage(message, sessionContext);
     await this.remember(message);
 
     const response = await this.promptLLM(message);
@@ -319,7 +294,7 @@ export class AgentCore {
       this.responselogger.debug(`AgentCore: extractedDataFromLLMResponse: ${extractedData}`);
       const conversationMessage = session.createMessage(extractedData, "assistant");
       //sessionContext.addMessage(conversationMessage);
-      await this.memory.processMessage(conversationMessage, sessionContext);
+
       await this.remember(conversationMessage);
     } else if (responseType === ResponseType.TOOL_CALL) {
       // not sure what to do here yet
@@ -375,10 +350,9 @@ export class AgentCore {
         )
         .map((tool) => tool.getFunctionDescription());
 
-      const messageRecords = await this.memory.getMessageRecords();
-      const messageRecords2 = await this.memories.recallRecentMessages();
+      const messageRecords = await this.memories.recallRecentMessages();
       const history: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-        ...messageRecords2.map(({ role, content }) => ({ role, content })),
+        ...messageRecords.map(({ role, content }) => ({ role, content })),
       ];
   
       // Pretty print the history
@@ -569,26 +543,6 @@ export class AgentCore {
     });
   }
 
-  public async optimizeMemory(): Promise<void> {
-    await this.memory.optimizeMemory();
-  }
-
-  // Method to allow changing storage backends at runtime
-  public setStorageBackends(storageConfig: StorageConfig): void {
-    const shortTermStorage =
-      storageConfig.shortTerm || new InMemoryStorage<any>();
-    const longTermStorage =
-      storageConfig.longTerm || new InMemoryStorage<any>();
-    const workingMemoryStorage =
-      storageConfig.working || new InMemoryStorage<any>();
-
-    this.memory = new DefaultAgentMemory(
-      1000000, // maxMemorySize (use the same value as in constructor)
-      shortTermStorage,
-      longTermStorage,
-      workingMemoryStorage
-    );
-  }
 
   public log(sessionId: string, message: string): void {
     this.logger.debug(`[Session: ${sessionId}] [${this.name}] ${message}`);
@@ -639,9 +593,6 @@ export class AgentCore {
     // Cancel any ongoing LLM requests (if possible)
     // Note: OpenAI doesn't provide a way to cancel ongoing requests,
     // so we'll just have to wait for them to complete
-
-    // Clean up memory
-    await this.memory.optimizeMemory();
 
     // Emit shutdown signal
     this.shutdownSubject.next();

@@ -1,5 +1,4 @@
 import { InferContext } from './InferContext';
-import { Memory } from './Memory';
 import { SessionContext } from './SessionContext';
 
 export class InferContextBuilder {
