@@ -85,8 +85,8 @@ export class AgentMemorySystem {
      */
     public async remember<C>(content: C | string, schema?: z.ZodSchema<C>, metadata?: Map<string, any>): Promise<void> {
         if (metadata?.get('role') === 'user' || metadata?.get('role') === 'assistant') {
-        const memoryUnit = this.ephemeralMemory.createMemoryUnit(content, schema, metadata);
-        await this.ephemeralMemory.store(memoryUnit);
+            const memoryUnit = this.ephemeralMemory.createMemoryUnit(content, schema, metadata);
+            await this.ephemeralMemory.store(memoryUnit);
         }
     }
 
