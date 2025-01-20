@@ -201,7 +201,7 @@ export class AgentCore {
     message: string,
     context: any
   ): Object {
-    return this.promptManager.debugPrompt(sessionContext, this.memory, message, context);
+    return this.promptManager.debugPrompt(sessionContext, message, context);
   }
 
   private cleanLLMResponse(response: string): string {
@@ -361,8 +361,8 @@ export class AgentCore {
     //this.log(`System prompt: ${this.promptManager.getSystemPrompt()}`);
     const sessionContext = this.sessionContextManager[message.sessionId];
 
-    const systemDebugPrompt = await this.promptTemplate.debugPrompt(this.promptManager, "system", sessionContext, this.memory);
-    const assistantDebugPrompt = await this.promptTemplate.debugPrompt(this.promptManager, "assistant", sessionContext, this.memory);
+    const systemDebugPrompt = await this.promptTemplate.debugPrompt(this.promptManager, "system", sessionContext);
+    const assistantDebugPrompt = await this.promptTemplate.debugPrompt(this.promptManager, "assistant", sessionContext);
     this.promptLogger.debug(systemDebugPrompt);
     this.promptLogger.debug(assistantDebugPrompt);
 
@@ -385,8 +385,8 @@ export class AgentCore {
       const formattedHistory = AgentCore.formatHistory(history);
       this.promptLogger.debug(`History:\n${formattedHistory}`);
 
-      const systemPrompt = await this.promptManager.getSystemPrompt(sessionContext, this.memory);
-      const assistantPrompt = await this.promptManager.getAssistantPrompt(sessionContext, this.memory);
+      const systemPrompt = await this.promptTemplate.getSystemPrompt(sessionContext);
+      const assistantPrompt = await this.promptTemplate.getAssistantPrompt(sessionContext);
 
       const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
         { role: "system", content: systemPrompt },

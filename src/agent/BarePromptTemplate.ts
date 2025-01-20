@@ -1,6 +1,5 @@
 import { IAgentPromptTemplate } from "../core/IPromptTemplate";
 import { ClassificationTypeConfig } from "../core/IClassifier";
-import { Memory } from "../core/Memory";
 import { PromptManager } from "../core/PromptManager";
 import { SessionContext } from "../core/SessionContext";
 import { InferStrategy } from "../core/InferContext";
@@ -12,7 +11,7 @@ export class BarePromptTemplate<T extends ReadonlyArray<ClassificationTypeConfig
     this.classificationTypes = classificationTypes;
   }
 
-  async getSystemPrompt(sessionContext: SessionContext, memory: Memory): Promise<string> {
+  async getSystemPrompt(sessionContext: SessionContext): Promise<string> {
     return `
 You are designated as: {role}
 Your goal: {goal}
@@ -20,7 +19,7 @@ Your capabilities: {capabilities}
     `.trim();
   }
 
-  async getAssistantPrompt(sessionContext: SessionContext, memory: Memory): Promise<string> {
+  async getAssistantPrompt(sessionContext: SessionContext): Promise<string> {
     return "";
   }
 
@@ -43,12 +42,11 @@ Your capabilities: {capabilities}
   async debugPrompt(
     promptManager: PromptManager,
     type: "system" | "assistant",
-    sessionContext: SessionContext,
-    memory: Memory
+    sessionContext: SessionContext
   ): Promise<string> {
     const prompt = type === "system" 
-      ? await promptManager.getSystemPrompt(sessionContext, memory) 
-      : await promptManager.getAssistantPrompt(sessionContext, memory);
+      ? await promptManager.getSystemPrompt(sessionContext) 
+      : await promptManager.getAssistantPrompt(sessionContext);
     return prompt;
   }
 }

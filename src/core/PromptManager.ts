@@ -1,6 +1,4 @@
-import { InferContext } from './InferContext';
 import { IAgentPromptTemplate } from './IPromptTemplate';
-import { Memory } from './Memory';
 import { SessionContext } from './SessionContext'; 
 import { Instruction } from './configs';
 export class PromptManager {
@@ -29,13 +27,13 @@ export class PromptManager {
     this.instructions = instructions;
   }
 
-  public async getSystemPrompt(sessionContext: SessionContext, memory: Memory): Promise<string> {
-    const systemPrompt = await this.promptTemplate.getSystemPrompt(sessionContext, memory);
+  public async getSystemPrompt(sessionContext: SessionContext): Promise<string> {
+    const systemPrompt = await this.promptTemplate.getSystemPrompt(sessionContext);
     return this.renderPrompt(sessionContext, systemPrompt, { goal: this.goal, capabilities: this.capabilities, role: this.role });
   }
 
-  public async getAssistantPrompt(sessionContext: SessionContext, memory: Memory): Promise<string> {
-    const assistantPrompt = await this.promptTemplate.getAssistantPrompt(sessionContext, memory);
+  public async getAssistantPrompt(sessionContext: SessionContext): Promise<string> {
+    const assistantPrompt = await this.promptTemplate.getAssistantPrompt(sessionContext);
     return this.renderPrompt(sessionContext, assistantPrompt, {});
   }
 
@@ -73,9 +71,9 @@ export class PromptManager {
     return prompt || "";
   }
 
-  public debugPrompt(sessionContext: SessionContext, memory: Memory, message: string, variables: { [key: string]: string }): Object {
-    const systemPrompt = this.getSystemPrompt(sessionContext, memory);
-    const assistantPrompt = this.getAssistantPrompt(sessionContext, memory);
+  public debugPrompt(sessionContext: SessionContext, message: string, variables: { [key: string]: string }): Object {
+    const systemPrompt = this.getSystemPrompt(sessionContext);
+    const assistantPrompt = this.getAssistantPrompt(sessionContext);
 
     let resolvedPrompt = {
       system: systemPrompt,

@@ -1,6 +1,5 @@
 import { IAgentPromptTemplate } from "../core/IPromptTemplate";
 import { ClassificationTypeConfig } from "../core/IClassifier";
-import { Memory } from "../core/Memory";
 import { PromptManager } from "../core/PromptManager";
 import { SessionContext } from "../core/SessionContext";
 import { InferStrategy } from "../core/InferContext";
@@ -35,7 +34,7 @@ ${JSON.stringify({ messageType: type.name, ...type.schema }, null, 2)}
     return { types, schemas };
   }
 
-  async getSystemPrompt(sessionContext: SessionContext, memory: Memory): Promise<string> {
+  async getSystemPrompt(sessionContext: SessionContext): Promise<string> {
     const base_prompt = `
 You are designated as: {role}
 Your goal: {goal}
@@ -76,7 +75,7 @@ Core Responsibilities:
     return base_prompt;
   }
 
-  async getAssistantPrompt(sessionContext: SessionContext, memory: Memory): Promise<string> {
+  async getAssistantPrompt(sessionContext: SessionContext): Promise<string> {
     const { types, schemas } = this.getFormattedSchemas();
 
     return `Respond by choosing from ${types} to generate output with corresponding format in ${schemas}`;
@@ -109,12 +108,11 @@ ${schemas}`;
   async debugPrompt(
     promptManager: PromptManager,
     type: "system" | "assistant",
-    sessionContext: SessionContext,
-    memory: Memory
+    sessionContext: SessionContext
   ): Promise<string> {
     const prompt = type === "system" 
-      ? await promptManager.getSystemPrompt(sessionContext, memory) 
-      : await promptManager.getAssistantPrompt(sessionContext, memory);
+      ? await promptManager.getSystemPrompt(sessionContext) 
+      : await promptManager.getAssistantPrompt(sessionContext);
     return prompt;
   }
 }

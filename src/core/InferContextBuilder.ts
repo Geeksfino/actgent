@@ -4,11 +4,9 @@ import { SessionContext } from './SessionContext';
 
 export class InferContextBuilder {
   private context: Partial<InferContext> = {};
-  private memory: Memory;
   private sessionContext: SessionContext;
 
-  constructor(memory: Memory, sessionContext: SessionContext) {
-    this.memory = memory;
+  constructor(sessionContext: SessionContext) {
     this.sessionContext = sessionContext;
   }
 
@@ -19,7 +17,7 @@ export class InferContextBuilder {
   }
 
   async withSystemContext(): Promise<InferContextBuilder> {
-    this.context.systemContext = await this.memory.getSystemContext();
+    // not implemented yet
     return this;
   }
 

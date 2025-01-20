@@ -1,12 +1,10 @@
 import { IAgentPromptTemplate } from "../core/IPromptTemplate";
 import { ClassificationTypeConfig } from "../core/IClassifier";
-import { ReActMode, ReActModeStrategy, ReActModeSelector } from "./ReActModeStrategy";
 import { KeywordBasedStrategy } from "./ReActModeStrategy";
-import { logger, trace } from "../core/Logger";
+import { logger } from "../core/Logger";
 import { InferContext, InferMode, InferStrategy } from "../core/InferContext";
 import { InferContextBuilder } from "../core/InferContextBuilder";
-import { Memory } from "../core/Memory";
-import { InferClassificationUnion, PromptManager, SessionContext } from "../core";
+import { PromptManager, SessionContext } from "../core";
 
 interface SchemaFormatting {
   types: string;    // Types description
@@ -34,10 +32,10 @@ export class ReActPromptTemplate<
   }
 
   //@trace()
-  async evaluateMode(memory: Memory, sessionContext: SessionContext): Promise<InferMode> {
+  async evaluateMode(sessionContext: SessionContext): Promise<InferMode> {
     let mode: InferMode;
     
-    const infer_context = new InferContextBuilder(memory, sessionContext)
+    const infer_context = new InferContextBuilder(sessionContext)
       .withRecentMessages()
       .build();
     //logger.debug(`Infer context: ${JSON.stringify(infer_context, null, 2)}`);
@@ -56,8 +54,8 @@ export class ReActPromptTemplate<
     this.context = context;
   }
 
-  async getAssistantPrompt(sessionContext: SessionContext, memory: Memory): Promise<string> {
-    const mode = await this.evaluateMode(memory, sessionContext);
+  async getAssistantPrompt(sessionContext: SessionContext): Promise<string> {
+    const mode = await this.evaluateMode(sessionContext);
     const { types, schemas } = this.getFormattedSchemas();
 
     const instruction = mode.value === 'direct' ? 
@@ -204,8 +202,8 @@ ${this.useExample()}
     `.trim();
   }
 
-  async getSystemPrompt(sessionContext: SessionContext, memory: Memory): Promise<string> {
-    const mode = await this.evaluateMode(memory, sessionContext);
+  async getSystemPrompt(sessionContext: SessionContext): Promise<string> {
+    const mode = await this.evaluateMode(sessionContext);
     
     const base_prompt = `
 You are designated as: {role}
@@ -388,10 +386,10 @@ The final prompt you output should adhere to the following structure below. Do n
     return this.classificationTypes;
   }
 
-  public async debugPrompt(promptManager: PromptManager, type: "system" | "assistant", sessionContext: SessionContext, memory: Memory): Promise<string> {
+  public async debugPrompt(promptManager: PromptManager, type: "system" | "assistant", sessionContext: SessionContext): Promise<string> {
     const prompt = type === "system" 
-      ? await promptManager.getSystemPrompt(sessionContext, memory) 
-      : await promptManager.getAssistantPrompt(sessionContext, memory);
+      ? await promptManager.getSystemPrompt(sessionContext) 
+      : await promptManager.getAssistantPrompt(sessionContext);
     return this.parsePrompt(prompt);
   }
 

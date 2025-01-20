@@ -1,11 +1,10 @@
 import { ClassificationTypeConfig } from "./IClassifier";
-import { Memory } from "./Memory";
 import { PromptManager } from "./PromptManager";
 import { SessionContext } from "./SessionContext";
 
 export interface IAgentPromptTemplate {
-  getSystemPrompt(sessionContext: SessionContext, memory: Memory): Promise<string>;
-  getAssistantPrompt(sessionContext: SessionContext, memory: Memory): Promise<string>;
+  getSystemPrompt(sessionContext: SessionContext): Promise<string>;
+  getAssistantPrompt(sessionContext: SessionContext): Promise<string>;
   getMessageClassificationPrompt(message: string): string;
   getMetaPrompt(): string;
   getClassificationTypes(): ReadonlyArray<ClassificationTypeConfig>;
@@ -13,7 +12,6 @@ export interface IAgentPromptTemplate {
   debugPrompt(
     promptManager: PromptManager,
     type: "system" | "assistant",
-    sessionContext: SessionContext,
-    memory: Memory
+    sessionContext: SessionContext
   ): Promise<string>;
 }
