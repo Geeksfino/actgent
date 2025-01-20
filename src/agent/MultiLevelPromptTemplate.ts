@@ -34,12 +34,12 @@ ACTION: Specific intents that require the agent to perform an action using a too
 Legitimate second-level intents include: 
 - ${instructionNames}
 
-CRITICAL RESPONSE FORMAT REQUIREMENTS:
-1. ALWAYS respond with a valid JSON object
-2. NEVER include any text or formatting outside the JSON structure
-3. Your entire response must be parseable as JSON
-4. Inside JSON string fields, you may use markdown formatting for better readability
-5. Follow this exact structure:
+CRITICAL RESPONSE FORMAT REQUIREMENTS:  
+1. ALWAYS respond with a valid JSON object.  
+2. NEVER include any text or formatting outside the JSON object.  
+3. Your entire response must be parseable as JSON.  
+
+Required JSON structure:  
 {
   "top_level_intent": "CONVERSATION" | "ACTION",
   "second_level_intent": "<intent_name>",  // Required if top_level_intent is ACTION
@@ -54,14 +54,14 @@ Example valid responses:
   "response": "Here are some meditation benefits:\\n\\n* Reduces stress and anxiety\\n* Improves mental clarity\\n* Enhances emotional well-being"
 }
 
-// For action:
+// For ACTION:
 {
   "top_level_intent": "ACTION",
   "second_level_intent": "offer_health_tips",
   "response": null
 }
 
-Remember: Your response must be valid JSON that can be parsed. Any formatting (markdown, lists, etc.) must be properly escaped within JSON string fields.
+Remember: Any response not conforming to this exact JSON structure will be treated as invalid.  
 `.trim();
   } 
 
