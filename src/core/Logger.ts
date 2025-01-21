@@ -457,6 +457,29 @@ export class Logger {
     }
 }
 
+export interface LogContext {
+    module: string;
+    component?: string;
+    tags?: string[];
+}
+
+export class LoggerFactory {
+    private static loggers = new Map<string, Logger>();
+
+    static getLogger(context: LogContext): Logger {
+        const key = this.getLoggerKey(context);
+        if (!this.loggers.has(key)) {
+            const logger = Logger.getInstance().withContext(context);
+            this.loggers.set(key, logger);
+        }
+        return this.loggers.get(key)!;
+    }
+
+    private static getLoggerKey(context: LogContext): string {
+        return `${context.module}:${context.component || '*'}`;
+    }
+}
+
 // Export a singleton instance
 // Example usage:
 // Basic logging (backward compatible):
