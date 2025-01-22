@@ -2,55 +2,31 @@ import { LoggerFactory } from './Logger';
 
 export const coreLoggers = {
     // Message processing
-    messageLoop: LoggerFactory.getLogger({
+    main: LoggerFactory.getLogger({
         module: 'core',
-        component: 'message-loop',
-        tags: ['prompt', 'llm-response']
+        component: 'main'
     }),
 
     // Classification and prompting
     classifier: LoggerFactory.getLogger({
         module: 'core',
-        component: 'classifier',
-        tags: ['parse', 'validate']
+        component: 'classifier'
     }),
 
-    promptTemplate: LoggerFactory.getLogger({
+    prompt: LoggerFactory.getLogger({
         module: 'core',
-        component: 'prompt-template',
-        tags: ['generation', 'render']
-    }),
-
-    promptManager: LoggerFactory.getLogger({
-        module: 'core',
-        component: 'prompt-manager',
-        tags: ['system-prompt', 'assistant-prompt']
+        component: 'prompt-template'
     }),
 
     // Session management
     session: LoggerFactory.getLogger({
         module: 'core',
-        component: 'session',
-        tags: ['context', 'state']
+        component: 'session'
     }),
 
     // Tool management
     tool: LoggerFactory.getLogger({
         module: 'core',
-        component: 'tool',
-        tags: ['registration', 'execution']
+        component: 'tool'
     }),
-
-    // Core system
-    inbox: LoggerFactory.getLogger({
-        module: 'core',
-        component: 'inbox',
-        tags: ['priority', 'queue']
-    }),
-
-    context: LoggerFactory.getLogger({
-        module: 'core',
-        component: 'context',
-        tags: ['execution', 'inference']
-    })
 };

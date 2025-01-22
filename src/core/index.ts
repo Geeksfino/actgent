@@ -29,7 +29,7 @@ export { ToolOptions } from './Tool';
 
 // Type utilities
 export { InferClassificationType, InferClassificationUnion } from './TypeInference';
-export { Logger, trace, logger, LogLevel } from './Logger';
+export { Logger, trace, logger, LogLevel, LogContext, LoggerFactory, withTags } from './Logger';
 
 // Inference types
 export type { InferMode, InferContext, InferStrategy } from './InferContext';

@@ -11,7 +11,8 @@ import { Session } from "./Session";
 import { SessionContext } from "./SessionContext";
 import { Subject } from "rxjs";
 import { IClassifier } from "./IClassifier";
-import { logger, LogLevel } from './Logger';
+import { withTags, Logger } from './Logger';
+import { coreLoggers } from './logging';
 import { getEventEmitter } from "./observability/AgentEventEmitter";
 import { ResponseType } from "./ResponseTypes";
 
@@ -48,21 +49,8 @@ export class AgentCore {
 
   private shutdownSubject: Subject<void> = new Subject<void>();
 
-  private logger = logger.withContext({ 
-    module: 'core', 
-    component: 'core',
-    tags: ['core']
-  });
-  private responselogger = logger.withContext({ 
-    module: 'core', 
-    component: 'core',
-    tags: ['response']
-  });
-  private promptLogger = logger.withContext({ 
-    module: 'core', 
-    component: 'core',
-    tags: ['prompt']
-  });
+  private logger = coreLoggers.main;
+  private promptLogger = coreLoggers.prompt;
 
   constructor(
     config: AgentCoreConfig,
@@ -108,7 +96,7 @@ export class AgentCore {
 
     // Update logging initialization
     if (loggingConfig) {
-      logger.setDestination(loggingConfig);
+      Logger.getInstance().setDestination(loggingConfig);
     }
 
     // Set agent ID in event emitter if already assigned
@@ -264,7 +252,7 @@ export class AgentCore {
 
     // Handle the response based on message type
     const cleanedResponse = this.cleanLLMResponse(response);
-    this.responselogger.debug(`Cleaned response: ${cleanedResponse}`);
+    this.logger.debug(`Cleaned response: ${cleanedResponse}`, withTags(["response"]));
     const session = sessionContext.getSession();
     //const responseMessage = session.createMessage(extractedResponse, "assistant");
     //sessionContext.addMessage(responseMessage);
@@ -276,7 +264,7 @@ export class AgentCore {
      * and sent back to the inbox for next turn of processing.
     */
     const responseType =this.classifier.handleLLMResponse(cleanedResponse, session);
-    this.responselogger.debug(`Response classified as: ${responseType}`);
+    this.logger.debug(`Response classified as: ${responseType}`, withTags(["response"]));
 
     /*
      * Only responses meant to be sent back to the user are added to memory for context.
@@ -291,7 +279,7 @@ export class AgentCore {
       // prompt template to do the extraction. A prompt template decides how the LLM
       // response is structured and so it should also know how to extract the data from it.
       const extractedData = this.promptTemplate.extractDataFromLLMResponse(cleanedResponse);
-      this.responselogger.debug(`AgentCore: extractedDataFromLLMResponse: ${extractedData}`);
+      this.logger.debug(`AgentCore: extractedDataFromLLMResponse: ${extractedData}`, withTags(["response"]));
       const conversationMessage = session.createMessage(extractedData, "assistant");
       //sessionContext.addMessage(conversationMessage);
 
@@ -410,7 +398,7 @@ export class AgentCore {
 
         const lastChunk = chunks[chunks.length - 1];
         const finishReason = lastChunk.choices[0]?.finish_reason;
-        this.logger.debug(`[promptLLM] Stream finished with reason: ${finishReason}`);
+        this.logger.debug(`[promptLLM] Stream finished with reason: ${finishReason}`, withTags(["response"]));
         
         // Only send completion signal after all data is processed
         if (this.llmConfig?.streamMode && 
@@ -437,7 +425,7 @@ export class AgentCore {
           await this.llmClient.chat.completions.create(nonStreamConfig);
         const message = response.choices[0].message;
         const finishReason = response.choices[0].finish_reason;
-        this.logger.debug(`[promptLLM] Non-stream finished with reason: ${finishReason}`);
+        this.logger.debug(`[promptLLM] Non-stream finished with reason: ${finishReason}`, withTags(["response"]));
         const isToolCalls = finishReason === "tool_calls";
 
         if (isToolCalls && message.tool_calls) {
@@ -455,14 +443,15 @@ export class AgentCore {
 
       // Handle function execution
       try {
-        this.promptLogger.debug('Raw LLM response:', {
+        this.logger.debug('Raw LLM response:', 
+          withTags(['response']),{
           responseLength: responseContent.length,
           firstChars: responseContent.substring(0, 50),
           lastChars: responseContent.substring(responseContent.length - 50)
         });
         
         const parsed = JSON.parse(responseContent);
-        this.promptLogger.debug('Successfully parsed LLM response as JSON');
+        this.logger.debug('Successfully parsed LLM response as JSON', withTags(['response']));  
 
         // POTENTIALLY DEAD CODE:
         // This code path attempts to handle OpenAI's native function calling format (tool_calls),
@@ -549,39 +538,7 @@ export class AgentCore {
   }
 
   public setLoggingConfig(loggingConfig: LoggingConfig): void {
-    logger.setDestination(loggingConfig);
-  }
-
-  private static formatMultiLine(resolvedPrompt: Object): string {
-    let formattedPrompt = '';
-    for (const [key, value] of Object.entries(resolvedPrompt)) {
-      const parsedValue = AgentCore.parsePrompt(value);
-      console.log(`parsedValue: ${parsedValue}`);
-      formattedPrompt += `${key}: ${parsedValue}\n\n`;
-    }
-    return formattedPrompt;
-  }
-
-  private static parsePrompt(input: string): string {
-    // Replace escaped newline and tab characters with actual newline and tabs
-    let output = input.replace(/\\n|\n/g, '\n').replace(/\\"/g, '"');
-
-    // Regular expression to detect and extract JSON blocks inside ```json ... ```
-    const jsonRegex = /```json\n([\s\S]*?)\n```/g;
-
-    // Callback function to process each JSON block
-    output = output.replace(jsonRegex, (match, jsonContent) => {
-        try {
-            // Parse and stringify JSON content for clean formatting
-            const parsedJson = JSON.parse(jsonContent);
-            return JSON.stringify(parsedJson, null, 2); // Indent JSON by 2 spaces
-        } catch (e) {
-            logger.warn("Invalid JSON format detected. Returning unmodified.");
-            return match; // Return original match if JSON parsing fails
-        }
-    });
-
-    return output;
+    Logger.getInstance().setDestination(loggingConfig);
   }
 
   public async shutdown(): Promise<void> {

@@ -1,17 +1,14 @@
 import { IMemoryEventHandler, MemoryEvent, MemoryEventType } from '../../events';
 import { WorkingMemory } from './WorkingMemory';
-import { logger } from '../../../Logger';
+import { withTags } from '../../../Logger';
+import { loggers, Tags } from '../../logging';
 
 /**
  * Event handler for working memory events.
  * Handles capacity warnings and triggers memory consolidation when needed.
  */
 export class WorkingMemoryEventHandler implements IMemoryEventHandler {
-    private logger = logger.withContext({ 
-        module: 'memory', 
-        component: 'working',
-        tags: ['events', 'handler']
-    });
+    private logger = loggers.eventhandler;
 
     constructor(
         private readonly workingMemory: WorkingMemory,
@@ -20,6 +17,12 @@ export class WorkingMemoryEventHandler implements IMemoryEventHandler {
         if (consolidationThreshold <= 0 || consolidationThreshold > 1) {
             throw new Error('Consolidation threshold must be between 0 and 1');
         }
+        this.logger.debug(
+            '[Handler:WorkingMemory] Created WorkingMemoryEventHandler',
+            withTags([Tags.Working], { 
+                consolidationThreshold: this.consolidationThreshold 
+            })
+        );
     }
 
     /**
@@ -29,6 +32,9 @@ export class WorkingMemoryEventHandler implements IMemoryEventHandler {
     async onEvent(event: MemoryEvent): Promise<void> {
         this.logger.debug(
             '[Handler:WorkingMemory] Received event: %s',
+            withTags([Tags.Working], { 
+                eventType: event.type 
+            }),
             event.type
         );
 
@@ -37,6 +43,9 @@ export class WorkingMemoryEventHandler implements IMemoryEventHandler {
         } else {
             this.logger.debug(
                 '[Handler:WorkingMemory] Ignoring unhandled event type: %s',
+                withTags([Tags.Working], { 
+                    eventType: event.type 
+                }),
                 event.type
             );
         }
@@ -55,17 +64,30 @@ export class WorkingMemoryEventHandler implements IMemoryEventHandler {
      */
     private async handleCapacityWarning(event: MemoryEvent): Promise<void> {
         try {
-            this.logger.debug('[Handler:WorkingMemory] Processing capacity warning event');
+            this.logger.debug(
+                '[Handler:WorkingMemory] Processing capacity warning event',
+                withTags([Tags.Working], { 
+                    eventType: event.type 
+                })
+            );
 
             // Get capacity info from event metadata
             const capacityInfo = event.metadata?.get('capacity');
             if (!capacityInfo) {
-                this.logger.warn('[Handler:WorkingMemory] Capacity warning event missing capacity information');
+                this.logger.warn(
+                    '[Handler:WorkingMemory] Capacity warning event missing capacity information',
+                    withTags([Tags.Working], { 
+                        eventType: event.type 
+                    })
+                );
                 return;
             }
 
             this.logger.debug(
                 '[Handler:WorkingMemory] Capacity warning from monitor %s - Current: %d/%d (%d%%)',
+                withTags([Tags.Working], { 
+                    monitor: capacityInfo.monitor 
+                }),
                 capacityInfo.monitor,
                 capacityInfo.current,
                 capacityInfo.max,
@@ -77,13 +99,22 @@ export class WorkingMemoryEventHandler implements IMemoryEventHandler {
             if (currentRatio >= this.consolidationThreshold) {
                 this.logger.warn(
                     '[Handler:WorkingMemory] 🔄 Starting memory consolidation (%.2f%% >= %.2f%%)',
+                    withTags([Tags.Working], { 
+                        consolidationThreshold: this.consolidationThreshold 
+                    }),
                     currentRatio * 100,
                     this.consolidationThreshold * 100
                 );
 
                 // Get all items sorted by priority and access time
                 const items = await this.workingMemory.getAll();
-                this.logger.debug('[Handler:WorkingMemory] Found %d items to process', items.length);
+                this.logger.debug(
+                    '[Handler:WorkingMemory] Found %d items to process',
+                    withTags([Tags.Working], { 
+                        numItems: items.length 
+                    }),
+                    items.length
+                );
                 
                 // Group items by priority
                 const priorityGroups = new Map<number, typeof items>();
@@ -96,6 +127,11 @@ export class WorkingMemoryEventHandler implements IMemoryEventHandler {
 
                 this.logger.debug(
                     '[Handler:WorkingMemory] Grouped items by priority: %o',
+                    withTags([Tags.Working], { 
+                        priorityGroups: Object.fromEntries(
+                            Array.from(priorityGroups.entries()).map(([k, v]) => [k, v.length])
+                        ) 
+                    }),
                     Object.fromEntries(
                         Array.from(priorityGroups.entries()).map(([k, v]) => [k, v.length])
                     )
@@ -115,6 +151,10 @@ export class WorkingMemoryEventHandler implements IMemoryEventHandler {
                         
                         this.logger.debug(
                             '[Handler:WorkingMemory] Removing %d items from priority group %.2f',
+                            withTags([Tags.Working], { 
+                                numItemsToRemove: itemsToRemove,
+                                priorityGroup: priority 
+                            }),
                             itemsToRemove,
                             priority
                         );
@@ -123,6 +163,11 @@ export class WorkingMemoryEventHandler implements IMemoryEventHandler {
                             await this.workingMemory.delete(item.id);
                             this.logger.debug(
                                 '[Handler:WorkingMemory] Removed item %s (priority: %.2f, last accessed: %s)',
+                                withTags([Tags.Working], { 
+                                    itemId: item.id,
+                                    priority: priority,
+                                    lastAccessed: item.lastAccessed?.toISOString() 
+                                }),
                                 item.id,
                                 priority,
                                 item.lastAccessed?.toISOString()
@@ -134,18 +179,32 @@ export class WorkingMemoryEventHandler implements IMemoryEventHandler {
                 const newSize = await this.workingMemory.getCurrentSize();
                 this.logger.debug(
                     '[Handler:WorkingMemory] ✅ Consolidation complete. New size: %d/%d',
+                    withTags([Tags.Working], { 
+                        newSize: newSize,
+                        capacity: this.workingMemory.getCapacity() 
+                    }),
                     newSize,
                     this.workingMemory.getCapacity()
                 );
             } else {
                 this.logger.debug(
                     '[Handler:WorkingMemory] Consolidation not needed (%.2f%% < %.2f%%)',
+                    withTags([Tags.Working], { 
+                        currentRatio: currentRatio,
+                        consolidationThreshold: this.consolidationThreshold 
+                    }),
                     currentRatio * 100,
                     this.consolidationThreshold * 100
                 );
             }
         } catch (error) {
-            this.logger.error('[Handler:WorkingMemory] Error handling capacity warning:', error);
+            this.logger.error(
+                '[Handler:WorkingMemory] Error handling capacity warning:',
+                withTags([Tags.Working], { 
+                    error: error 
+                }),
+                error
+            );
             throw error;
         }
     }

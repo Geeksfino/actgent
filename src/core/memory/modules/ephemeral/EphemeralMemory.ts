@@ -3,17 +3,15 @@ import { EphemeralMemoryUnit } from './types';
 import { z } from 'zod';
 import crypto from 'crypto';
 import { Subject } from 'rxjs';
-import { logger } from '../../../Logger';  // Fix logger import
+import { loggers, Tags } from '../../logging';
+import { withTags } from '../../../Logger';
 
 class EphemeralMemory implements IMemory<EphemeralMemoryUnit> {
     private duration: number;
     private items: { [id: string]: { item: EphemeralMemoryUnit; expiry: number } };
     private maxItems: number;
     private events: Subject<EphemeralMemoryUnit>;
-    private logger = logger.withContext({ 
-        module: 'memory', 
-        component: 'ephemeral'
-    });
+    private logger = loggers.general;
 
     /**
      * Creates an instance of EphemeralMemory
@@ -60,60 +58,96 @@ class EphemeralMemory implements IMemory<EphemeralMemoryUnit> {
     async store(item: Omit<EphemeralMemoryUnit, 'memoryType'>): Promise<void> {
         const currentSize = Object.keys(this.items).length;
         
-        this.logger.debug(`Storing new item in ephemeral memory (current size: ${currentSize}/${this.maxItems})`);
+        this.logger.debug(
+            `Storing new item in ephemeral memory (current size: ${currentSize}/${this.maxItems})`,
+            withTags([Tags.Ephemeral], { size: currentSize, maxSize: this.maxItems })
+        );
         
         // Instead of throwing, try to make space first
         if (currentSize >= this.maxItems) {
-            // Remove oldest items to make space
-            const entries = Object.entries(this.items);
-            entries.sort(([, a], [, b]) => a.expiry - b.expiry);
+            // Sort by expiry, oldest first
+            const entries = Object.entries(this.items).sort((a, b) => a[1].expiry - b[1].expiry);
             
             // Remove 20% of items or at least 1
             const itemsToRemove = Math.max(1, Math.ceil(this.maxItems * 0.2));
-            this.logger.debug(`Memory full, removing ${itemsToRemove} oldest items to make space`);
+            this.logger.debug(
+                `Memory full, removing ${itemsToRemove} oldest items to make space`,
+                withTags([Tags.Ephemeral], { itemsToRemove })
+            );
             
             for (let i = 0; i < itemsToRemove && i < entries.length; i++) {
                 delete this.items[entries[i][0]];
-                this.logger.debug(`Removed old item ${entries[i][0]} (expiry: ${entries[i][1].expiry})`);
+                this.logger.debug(
+                    `Removed old item ${entries[i][0]}`,
+                    withTags([Tags.Ephemeral], { 
+                        id: entries[i][0], 
+                        expiry: entries[i][1].expiry 
+                    })
+                );
             }
         }
 
         const memoryUnit: EphemeralMemoryUnit = {
             ...item,
+            id: crypto.randomUUID(),
             memoryType: MemoryType.EPHEMERAL
         };
 
         // Use -1 for non-expiring items
         const expiry = this.duration === -1 ? -1 : Date.now() + this.duration;
         this.items[memoryUnit.id] = { item: memoryUnit, expiry };
-        this.logger.debug(`Stored item ${memoryUnit.id} with ${expiry === -1 ? 'no expiry' : `expiry ${expiry}`}`);
+        this.logger.debug(
+            `Stored item ${memoryUnit.id} with ${expiry === -1 ? 'no expiry' : `expiry ${expiry}`}`,
+            withTags([Tags.Ephemeral], { 
+                id: memoryUnit.id, 
+                expiry 
+            })
+        );
         
         this.events.next(memoryUnit);
 
-        // Cleanup expired items
+        // Clean up expired items
         this.purgeExpired();
         
         const newSize = Object.keys(this.items).length;
-        this.logger.debug(`Current memory size after store: ${newSize}/${this.maxItems}`);
+        this.logger.debug(
+            `Current memory size after store: ${newSize}/${this.maxItems}`,
+            withTags([Tags.Ephemeral], { 
+                size: newSize, 
+                maxSize: this.maxItems 
+            })
+        );
     }
 
     private purgeExpired(): void {
         const now = Date.now();
         let purgedCount = 0;
         
-        this.logger.trace(`Checking for expired items (current time: ${now})`);
+        this.logger.trace(
+            `Checking for expired items (current time: ${now})`,
+            withTags([Tags.Ephemeral], { currentTime: now })
+        );
         
         for (const [id, entry] of Object.entries(this.items)) {
             // Skip non-expiring items (expiry === -1)
             if (entry.expiry !== -1 && entry.expiry <= now) {
                 delete this.items[id];
                 purgedCount++;
-                this.logger.trace(`Purged expired item ${id} (expiry: ${entry.expiry})`);
+                this.logger.trace(
+                    `Purged expired item ${id}`,
+                    withTags([Tags.Ephemeral], { 
+                        id, 
+                        expiry: entry.expiry 
+                    })
+                );
             }
         }
         
         if (purgedCount > 0) {
-            this.logger.trace(`Purged ${purgedCount} expired items from ephemeral memory`);
+            this.logger.trace(
+                `Purged ${purgedCount} expired items from ephemeral memory`,
+                withTags([Tags.Ephemeral], { count: purgedCount })
+            );
         }
     }
 

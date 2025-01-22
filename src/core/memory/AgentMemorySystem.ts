@@ -7,7 +7,7 @@ import { SemanticMemory } from './modules/semantic/SemanticMemory';
 import { ProceduralMemory } from './modules/procedural/ProceduralMemory';
 import { EphemeralMemory } from './modules/ephemeral/EphemeralMemory';
 import { MemoryTransitionManager } from './MemoryTransitionManager';
-import { logger } from '../Logger';
+import { loggers } from './logging';
 
 // Import storage factories
 import { WorkingMemoryStorageFactory } from './modules/working/WorkingMemoryStorageFactory';
@@ -35,7 +35,7 @@ export class AgentMemorySystem {
 
     private transitionManager: MemoryTransitionManager;
     private contextManager: WorkingContextManager;
-    private logger = logger.withContext({ module: 'memory' });
+    private logger = loggers.general;
 
     constructor() {
         // Create memories with their module-specific storage

@@ -1,7 +1,8 @@
 import { ClassificationTypeConfig } from "../core/IClassifier";
 import { AbstractClassifier } from "../core/AbstractClassifier";
 import { InferClassificationUnion } from "../core/TypeInference";
-import { logger } from "../core/Logger";
+import { withTags } from "../core/Logger";
+import { agentLoggers } from "./logging";
 import { MultiLevelPromptTemplate } from "./MultiLevelPromptTemplate";
 import { ResponseType, ParsedLLMResponse } from "../core/ResponseTypes";
 
@@ -28,31 +29,31 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
   protected categorizeLLMResponse(
     response: string
   ): ParsedLLMResponse<T> | null {
-    const classifierLogger = logger.withContext({
-      module: 'classifier',
-      component: 'multilevel',
-      tags: ['prompt', 'classification']
-    });
+    const classifierLogger = agentLoggers.classifier
 
     try {
-      classifierLogger.debug("Attempting to categorize LLM response", {
+      classifierLogger.debug("Attempting to categorize LLM response",
+        withTags(['multi-level']), {
         responseLength: response.length,
         firstChars: response.substring(0, 50)
       });
 
       const parsed = JSON.parse(response);
-      classifierLogger.debug("Successfully parsed response into JSON");
+      classifierLogger.debug("Successfully parsed response into JSON",
+        withTags(['multi-level'])
+      );
 
       // Case 1: Multi-level intent format
       if (parsed.top_level_intent) {
         const topLevelIntent = parsed.top_level_intent.toUpperCase();
-        classifierLogger.debug("Found top_level_intent", { intent: topLevelIntent });
+        classifierLogger.debug("Found top_level_intent", 
+          withTags(['multi-level']), { intent: topLevelIntent });
 
         // Handle CONVERSATION intent
         if (topLevelIntent === 'CONVERSATION') {
           if (!parsed.response) {
             const error = "Invalid CONVERSATION response: response field is missing";
-            classifierLogger.warn(error);
+            classifierLogger.warn(error, withTags(['multi-level']));
             throw new Error(error);
           }
 
@@ -71,7 +72,7 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
         if (topLevelIntent === 'ACTION') {
           if (!parsed.second_level_intent) {
             const error = "Invalid ACTION response: second_level_intent is missing";
-            classifierLogger.warn(error);
+            classifierLogger.warn(error, withTags(['multi-level']));
             throw new Error(error);
           }
 
@@ -95,7 +96,7 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
         const toolCall = parsed.tool_calls[0];
         if (!toolCall || !toolCall.function) {
           const error = "Invalid tool_calls format: missing function data";
-          classifierLogger.warn(error);
+          classifierLogger.warn(error, withTags(['multi-level']));
           throw new Error(error);
         }
 

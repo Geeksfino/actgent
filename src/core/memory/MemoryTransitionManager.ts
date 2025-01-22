@@ -3,7 +3,8 @@ import { filter } from 'rxjs/operators';
 import { MemoryType, IMemoryUnit } from './base';
 import { MemoryEvent, MemoryEventType, IMemoryEventHandler } from './events';
 import { IMemoryMonitor, MonitorSignalType } from './monitors';
-import { logger } from '../Logger';
+import { withTags } from '../Logger';
+import { loggers, Tags } from './logging';
 
 /**
  * Memory Transition Manager
@@ -24,11 +25,7 @@ export class MemoryTransitionManager {
     // Track time-based monitors
     private timeIntervalSubscriptions = new Map<string, { subscription: any, lastCheck: Date }>();
 
-    private logger = logger.withContext({ 
-        module: 'memory', 
-        component: 'transition',
-        tags: ['events']
-    });
+    private logger = loggers.general;
 
     /**
      * Register an event handler

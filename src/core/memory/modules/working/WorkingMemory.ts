@@ -1,6 +1,7 @@
 import { IMemory, IMemoryUnit, MemoryFilter, MemoryType } from '../../base';
 import { IMemoryStorage, IMemoryIndex } from '../../storage';
-import { logger } from '../../../Logger';
+import { loggers, Tags } from '../../logging';
+import { withTags } from '../../../Logger';
 import crypto from 'crypto';
 import { WorkingMemoryFactory } from './WorkingMemoryFactory';
 import { Subject } from 'rxjs';
@@ -12,10 +13,7 @@ export class WorkingMemory implements IMemory<IMemoryUnit> {
     private maxSize: number;
     private events: Subject<IMemoryUnit>;
     protected size: number = 0;
-    private logger = logger.withContext({ 
-        module: 'memory', 
-        component: 'working'
-    });
+    private logger = loggers.general;
 
     constructor(storage: IMemoryStorage, index: IMemoryIndex, maxSize: number = 100) {
         this.storage = storage;
@@ -82,7 +80,9 @@ export class WorkingMemory implements IMemory<IMemoryUnit> {
         if (unit && unit.memoryType === MemoryType.WORKING) {
             return unit;
         }
-        this.logger.debug('Memory not found or not working memory: %s', id);
+        this.logger.debug('Memory not found or not working memory', 
+            withTags([Tags.Working], { id })
+        );
         return null;
     }
 
