@@ -1,18 +1,23 @@
-import { IMemoryStorage, IMemoryIndex } from '../../storage';
-import { MemoryType, MemoryFilter } from '../../base';
+import { IMemoryStorage, IMemoryIndex, IGraphStorage, IGraphIndex } from '../../storage';
+import { MemoryType, MemoryFilter, IMemoryUnit } from '../../base';
 import { DeclarativeMemory } from '../../DeclarativeMemory';
 import { IEpisodicMemoryUnit } from './types';
 import { EmotionalContext, EmotionalState } from '../../context';
+import { GraphOperations } from '../../graph/operations';
+import { IGraphNode, IGraphEdge, ITemporalMetadata } from '../../graph/types';
 import { z } from 'zod';
 import crypto from 'crypto';
 
 /**
  * Episodic Memory - stores personal experiences and specific events
- * tied to particular times and places
+ * tied to particular times and places using a graph-based structure
  */
 export class EpisodicMemory extends DeclarativeMemory {
-    constructor(storage: IMemoryStorage, index: IMemoryIndex) {
+    private graphOps: GraphOperations;
+
+    constructor(storage: IGraphStorage, index: IGraphIndex) {
         super(storage, index, MemoryType.EPISODIC);
+        this.graphOps = new GraphOperations(storage);
     }
 
     /**
@@ -49,20 +54,38 @@ export class EpisodicMemory extends DeclarativeMemory {
             }
             const validationResult = schema.safeParse(content);
             if (!validationResult.success) {
-                throw new Error(`Invalid episodic memory content: ${validationResult.error}`);
+                throw new Error(`Invalid content: ${validationResult.error}`);
             }
             validatedContent = validationResult.data;
         }
 
-        return {
+        const memoryUnit: IEpisodicMemoryUnit = {
             id: crypto.randomUUID(),
             content: validatedContent,
             metadata: metadata || new Map(),
             timestamp: now,
-            memoryType: MemoryType.EPISODIC,
-            accessCount: 0,
-            lastAccessed: now
+            memoryType: MemoryType.EPISODIC
         };
+
+        // Create graph node
+        const graphNode: IGraphNode = {
+            id: memoryUnit.id,
+            type: 'episode',
+            content: memoryUnit.content,
+            metadata: memoryUnit.metadata,
+            timestamp: memoryUnit.timestamp,
+            memoryType: memoryUnit.memoryType,
+            temporal: {
+                eventTime: new Date(memoryUnit.content.timeSequence),
+                ingestionTime: now,
+                validFrom: now
+            }
+        };
+
+        // Store in graph
+        (this.storage as IGraphStorage).addNode(graphNode);
+
+        return memoryUnit;
     }
 
     /**
@@ -90,6 +113,105 @@ export class EpisodicMemory extends DeclarativeMemory {
     public async retrieveByFilter(filter: MemoryFilter): Promise<IEpisodicMemoryUnit[]> {
         const memories = await this.storage.retrieveByFilter(filter);
         return memories as IEpisodicMemoryUnit[];
+    }
+
+    /**
+     * Find temporally related episodes
+     */
+    public async findTemporalContext(episodeId: string, contextSize: number = 4): Promise<IEpisodicMemoryUnit[]> {
+        const episodes = await this.graphOps.getTemporalContext(episodeId, contextSize);
+        return episodes
+            .filter(node => node.type === 'episode')
+            .map(node => ({
+                id: node.id,
+                content: node.content,
+                metadata: node.metadata,
+                timestamp: node.timestamp,
+                memoryType: MemoryType.EPISODIC
+            }));
+    }
+
+    /**
+     * Find episodes with similar emotional context
+     */
+    public async findEmotionallySimilar(emotions: EmotionalContext): Promise<IEpisodicMemoryUnit[]> {
+        const filter = {
+            type: 'episode',
+            metadata: new Map<string, any>([['emotions', emotions]])
+        };
+        
+        const episodes = await (this.storage as IGraphStorage).findNodes(filter);
+        return episodes.map(node => ({
+            id: node.id,
+            content: node.content,
+            metadata: node.metadata,
+            timestamp: node.timestamp,
+            memoryType: MemoryType.EPISODIC
+        }));
+    }
+
+    /**
+     * Find episodes involving specific actors
+     */
+    public async findByActors(actors: string[]): Promise<IEpisodicMemoryUnit[]> {
+        const filter = {
+            type: 'episode',
+            metadata: new Map<string, any>([['actors', actors]])
+        };
+        
+        const episodes = await (this.storage as IGraphStorage).findNodes(filter);
+        return episodes.map(node => ({
+            id: node.id,
+            content: node.content,
+            metadata: node.metadata,
+            timestamp: node.timestamp,
+            memoryType: MemoryType.EPISODIC
+        }));
+    }
+
+    /**
+     * Get related episodes based on shared context
+     */
+    public async getRelatedEpisodes(episodeId: string): Promise<IEpisodicMemoryUnit[]> {
+        const episode = await this.retrieve(episodeId);
+        if (!episode) return [];
+
+        // Find episodes with shared actors or location
+        const filter = {
+            type: 'episode',
+            metadata: new Map<string, any>([
+                ['actors', episode.content.actors],
+                ['location', episode.content.location]
+            ])
+        };
+
+        const episodes = await (this.storage as IGraphStorage).findNodes(filter);
+        return episodes.map(node => ({
+            id: node.id,
+            content: node.content,
+            metadata: node.metadata,
+            timestamp: node.timestamp,
+            memoryType: MemoryType.EPISODIC
+        }));
+    }
+
+    /**
+     * Create a relationship between episodes
+     */
+    protected async linkEpisodes(sourceId: string, targetId: string, relationType: string): Promise<void> {
+        const edge: IGraphEdge = {
+            id: crypto.randomUUID(),
+            type: relationType,
+            sourceId,
+            targetId,
+            metadata: new Map(),
+            temporal: {
+                eventTime: new Date(),
+                ingestionTime: new Date()
+            }
+        };
+
+        await (this.storage as IGraphStorage).addEdge(edge);
     }
 
     /**
@@ -141,19 +263,21 @@ export class EpisodicMemory extends DeclarativeMemory {
         return (emotionalIntensity + importance) / 2;
     }
 
-    isMemoryUnitOfType(unit: any): unit is IEpisodicMemoryUnit {
-        return unit && 
-               typeof unit === 'object' && 
-               unit.memoryType === MemoryType.EPISODIC &&
-               unit.content &&
-               typeof unit.content.timeSequence === 'number' &&
-               typeof unit.content.location === 'string' &&
-               Array.isArray(unit.content.actors) &&
-               Array.isArray(unit.content.actions) &&
-               typeof unit.content.coherenceScore === 'number' &&
-               typeof unit.content.emotionalIntensity === 'number' &&
-               typeof unit.content.contextualRelevance === 'number' &&
-               typeof unit.content.temporalDistance === 'number' &&
-               unit.content.timestamp instanceof Date;
+    /**
+     * Check if a memory unit is of episodic type
+     */
+    public isMemoryUnitOfType(unit: IMemoryUnit): unit is IEpisodicMemoryUnit {
+        return unit.memoryType === MemoryType.EPISODIC &&
+               'content' in unit &&
+               this.isEpisodicContent(unit.content);
+    }
+
+    private isEpisodicContent(content: any): boolean {
+        return content && 
+               typeof content === 'object' &&
+               'timeSequence' in content &&
+               'location' in content &&
+               'actors' in content &&
+               'actions' in content;
     }
 }

@@ -1,5 +1,6 @@
 import { IMemoryUnit } from './base';
 import { MemoryFilter } from './base';
+import { IGraphNode, IGraphEdge, GraphFilter, GraphResult } from './graph/types';
 
 /**
  * Interface for memory retrieval operations
@@ -40,4 +41,33 @@ export interface IMemoryIndex {
     remove(id: string): Promise<void>;
 }
 
+/**
+ * Interface for graph storage operations
+ */
+export interface IGraphStorage extends IMemoryStorage {
+    // Node operations
+    addNode(node: IGraphNode): Promise<string>;
+    updateNode(id: string, node: Partial<IGraphNode>): Promise<void>;
+    findNodes(filter: GraphFilter): Promise<IGraphNode[]>;
+    
+    // Edge operations
+    addEdge(edge: IGraphEdge): Promise<string>;
+    updateEdge(id: string, edge: Partial<IGraphEdge>): Promise<void>;
+    findEdges(filter: GraphFilter): Promise<IGraphEdge[]>;
+    
+    // Graph traversal
+    getNeighbors(nodeId: string): Promise<IGraphNode[]>;
+    findPath(sourceId: string, targetId: string): Promise<IGraphEdge[]>;
+    getSubgraph(filter: GraphFilter): Promise<GraphResult>;
+}
 
+/**
+ * Interface for graph indexing operations
+ */
+export interface IGraphIndex extends IMemoryIndex {
+    // Graph-specific indexing
+    indexNode(node: IGraphNode): Promise<void>;
+    indexEdge(edge: IGraphEdge): Promise<void>;
+    searchByEmbedding(embedding: number[]): Promise<string[]>;
+    searchByDistance(centerId: string, maxDistance: number): Promise<string[]>;
+}
