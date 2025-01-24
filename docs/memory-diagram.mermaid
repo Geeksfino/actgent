@@ -1,60 +1,78 @@
 graph LR
-    subgraph Ephemeral Memory
-        EM["Ephemeral Memory"]
-        NewEphemeralMemoryItem["NewEphemeralMemoryItem"] --> EM
-        EM --> EphemeralItemExpired["EphemeralItemExpired"]
+    %% Main Memory System
+    AMS[Agent Memory System] --> |manages| MTM[Memory Transition Manager]
+    AMS --> |manages| WCM[Working Context Manager]
+    
+    %% Memory Types
+    subgraph Memory Types
+        EM[Ephemeral Memory]
+        WM[Working Memory]
+        EPM[Episodic Memory]
+        SM[Semantic Memory]
+        PM[Procedural Memory]
     end
     
-    subgraph Working Memory
-        WM["Working Memory"]
-        PromoteToWM["PromoteToWorkingMemory"] --> WM
-        WM --> WorkingMemoryUpdated["WorkingMemoryUpdated"]
-        WM --> WorkingMemoryItemRemoved["WorkingMemoryItemRemoved"]
-        WM --> WorkingMemoryFull["WorkingMemoryFull"]
+    AMS --> EM
+    AMS --> WM
+    AMS --> EPM
+    AMS --> SM
+    AMS --> PM
+
+    %% Memory Events & Monitors
+    subgraph Event System
+        ES[Event Subject]
+        MTM --> |publishes to| ES
+        ES --> |triggers| EH[Event Handlers]
+        ES --> |notifies| MM[Memory Monitors]
+        
+        %% Monitor Types
+        MM --> EMM[Ephemeral Memory Monitor]
+        MM --> WMM[Working Memory Monitor]
+        MM --> TMM[Time-based Monitor]
+    end
+
+    %% Memory Storage & Indexing
+    subgraph Storage System
+        MS[Memory Storage]
+        MI[Memory Index]
+        MC[Memory Consolidator]
+        
+        MS --> |uses| MI
+        MC --> |manages| MS
+        MC --> |updates| MI
+    end
+
+    %% Memory Transitions
+    EM --> |promotes to| WM
+    WM --> |consolidates to| EPM
+    WM --> |extracts to| SM
+    WM --> |learns| PM
+
+    %% Context Management
+    WCM --> |manages| WC[Working Context]
+    WC --> |influences| WM
+    WC --> |affects| MC
+
+    %% Consolidation Triggers
+    subgraph Consolidation Triggers
+        CT[Consolidation Triggers]
+        CT --> ACC[Access Count]
+        CT --> TB[Time Based]
+        CT --> PC[Priority Change]
+        CT --> CS[Context Switch]
+        CT --> CAP[Memory Capacity]
     end
     
-    subgraph Semantic Memory
-        SM["Semantic Memory"]
-        ExtractEntities["ExtractEntitiesForSemanticMemory"] --> SM
-        SM --> UpdateSM["UpdateSemanticMemory"]
-        SM --> SMQueryRequested["SemanticMemoryQueryRequested"]
-        SM --> SMQueryReturned["SemanticMemoryQueryReturned"]
+    CT --> |triggers| MC
+
+    %% Memory Operations
+    subgraph Memory Operations
+        MO[Memory Operations]
+        MO --> Store[Store]
+        MO --> Query[Query]
+        MO --> Update[Update]
+        MO --> Delete[Delete]
+        MO --> Associate[Associate]
     end
     
-    subgraph Episodic Memory
-        EP["Episodic Memory"]
-        CreateEP["CreateEpisodicMemoryEntry"] --> EP
-        EP --> EPQueryRequested["EpisodicMemoryQueryRequested"]
-        EP --> EPQueryReturned["EpisodicMemoryQueryReturned"]
-    end
-
-    subgraph Procedural Memory
-        PM["Procedural Memory"]
-        UpdatePM["UpdateProceduralMemory"] --> PM
-        PM --> ProcInvoked["ProcedureInvocationRequested"]
-        PM --> ProcInvCompleted["ProcedureInvocationCompleted"]
-    end
-
-    NewEphemeralMemoryItem --> PromoteToWM
-    WM --> ExtractEntities
-    WM --> CreateEP
-    WM --> UpdatePM
-
-    WM --> TopicChange["TopicChangeDetected"]
-    WM --> ConvEnded["ConversationEnded"]
-    WM --> TimeBasedTrigger["TimeBasedTrigger"]
-
-    TopicChange --> ExtractEntities
-    ConvEnded --> ExtractEntities
-    TimeBasedTrigger --> ExtractEntities
-    TopicChange --> CreateEP
-    ConvEnded --> CreateEP
-    TimeBasedTrigger --> CreateEP
-    TopicChange --> UpdatePM
-    ConvEnded --> UpdatePM
-    TimeBasedTrigger --> UpdatePM
-    
-    MemoryRecall["MemoryRecallRequested"] --> SM
-    MemoryRecall --> EP
-    MemoryRecall --> WM
-    MemoryRecall --> PM
+    AMS --> |provides| MO

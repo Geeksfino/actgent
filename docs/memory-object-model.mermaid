@@ -1,0 +1,179 @@
+classDiagram
+    %% Base Memory Interfaces and Classes
+    class IMemoryUnit {
+        <<interface>>
+        +id: string
+        +content: any
+        +metadata: Map~string,any~
+        +timestamp: Date
+        +memoryType: MemoryType
+        +accessCount?: number
+        +lastAccessed?: Date
+        +priority?: number
+        +consolidationMetrics?: ConsolidationMetrics
+        +associations?: Set~string~
+    }
+
+    class IMemory~T~ {
+        <<interface>>
+        +store(content: T)
+        +retrieve(id: string): T
+        +query(filter: MemoryFilter): T[]
+        +delete(id: string)
+        +clear()
+        +onEvent(callback: (unit: T))
+        +isMemoryUnitOfType(unit: any): boolean
+    }
+
+    class LongTermMemory~T~ {
+        <<abstract>>
+        #storage: IMemoryStorage
+        #index: IMemoryIndex
+        #memoryType: MemoryType
+        #cache: MemoryCache~T~
+        #memoryEvents$: Subject~T~
+        +store(content: T)
+        +retrieve(id: string): T
+        +query(filter: MemoryFilter): T[]
+    }
+
+    class DeclarativeMemory {
+        <<abstract>>
+        +constructor(storage, index, memoryType)
+    }
+
+    %% Memory Types
+    class MemoryType {
+        <<enumeration>>
+        WORKING
+        LONG_TERM
+        DECLARATIVE
+        SEMANTIC
+        EPISODIC
+        PROCEDURAL
+        CONTEXTUAL
+        SYSTEM
+        GENERIC
+        EPHEMERAL
+    }
+
+    %% Memory Storage
+    class IMemoryStorage {
+        <<interface>>
+        +store(memory: IMemoryUnit)
+        +retrieve(id: string): IMemoryUnit
+        +retrieveByFilter(filter: MemoryFilter): IMemoryUnit[]
+        +update(memory: IMemoryUnit)
+        +delete(id: string)
+        +getSize(): number
+        +getCapacity(): number
+    }
+
+    class IMemoryIndex {
+        <<interface>>
+        +add(memory: IMemoryUnit)
+        +search(query: string): string[]
+        +update(memory: IMemoryUnit)
+        +delete(id: string)
+    }
+
+    class InMemoryStorage {
+        -memories: Map~string, IMemoryUnit~
+        -maxCapacity: number
+        +store(memory: IMemoryUnit)
+        +retrieve(id: string): IMemoryUnit
+    }
+
+    class InMemoryIndex {
+        -index: Map~string, string[]~
+        +add(memory: IMemoryUnit)
+        +search(query: string): string[]
+    }
+
+    %% Memory Module Implementations
+    class SemanticMemory {
+        -conceptGraph: Map~string, ConceptNode~
+        -relationGraph: Map~string, ConceptRelation~
+        +createMemoryUnit()
+        +addConcept()
+        +addRelation()
+    }
+
+    class EpisodicMemory {
+        +createMemoryUnit()
+        +consolidate()
+        +retrieveByTimeRange()
+    }
+
+    class ProceduralMemory {
+        +createMemoryUnit()
+        +executeProcedure()
+        +updateProficiency()
+    }
+
+    class WorkingMemory {
+        -capacity: number
+        -items: Map~string, IMemoryUnit~
+        +add()
+        +remove()
+        +clear()
+    }
+
+    %% Context Classes
+    class WorkingMemoryContext {
+        <<interface>>
+        +contextType: string
+        +timestamp: Date
+        +userGoals: Set~string~
+        +domainContext: Map~string,any~
+        +emotionalState: EmotionalState
+    }
+
+    class EmotionalContext {
+        <<interface>>
+        +currentEmotion: EmotionalState
+        +emotionalTrends: EmotionalTrendEntry[]
+        +updateEmotion()
+    }
+
+    %% Memory Content Types
+    class ConceptNode {
+        +id: string
+        +name: string
+        +confidence: number
+        +source: string
+        +lastVerified: Date
+        +properties: Map~string,any~
+    }
+
+    class ConceptRelation {
+        +id: string
+        +sourceId: string
+        +targetId: string
+        +type: RelationType
+        +weight: number
+        +confidence: number
+    }
+
+    %% Relationships
+    IMemory <|.. LongTermMemory
+    LongTermMemory <|-- DeclarativeMemory
+    DeclarativeMemory <|-- SemanticMemory
+    DeclarativeMemory <|-- EpisodicMemory
+    LongTermMemory <|-- ProceduralMemory
+    
+    IMemoryStorage <|.. InMemoryStorage
+    IMemoryIndex <|.. InMemoryIndex
+    
+    LongTermMemory --* IMemoryStorage
+    LongTermMemory --* IMemoryIndex
+    
+    SemanticMemory --* ConceptNode
+    SemanticMemory --* ConceptRelation
+    
+    WorkingMemoryContext --* EmotionalContext
+    EmotionalContext --* EmotionalState
+
+    %% Storage Relationships
+    InMemoryStorage --o IMemoryUnit
+    InMemoryIndex --o IMemoryUnit
