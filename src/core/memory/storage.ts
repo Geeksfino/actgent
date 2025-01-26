@@ -49,16 +49,15 @@ export interface IGraphStorage extends IMemoryStorage {
     addNode(node: IGraphNode): Promise<string>;
     updateNode(id: string, node: Partial<IGraphNode>): Promise<void>;
     findNodes(filter: GraphFilter): Promise<IGraphNode[]>;
+    getNeighbors(nodeId: string): Promise<IGraphNode[]>;
     
     // Edge operations
     addEdge(edge: IGraphEdge): Promise<string>;
-    updateEdge(id: string, edge: Partial<IGraphEdge>): Promise<void>;
-    findEdges(filter: GraphFilter): Promise<IGraphEdge[]>;
-    
-    // Graph traversal
-    getNeighbors(nodeId: string): Promise<IGraphNode[]>;
+    getEdges(nodeIds: string[]): Promise<IGraphEdge[]>;
     findPath(sourceId: string, targetId: string): Promise<IGraphEdge[]>;
-    getSubgraph(filter: GraphFilter): Promise<GraphResult>;
+    
+    // Search operations
+    search(embedding: number[]): Promise<IGraphNode[]>;
 }
 
 /**

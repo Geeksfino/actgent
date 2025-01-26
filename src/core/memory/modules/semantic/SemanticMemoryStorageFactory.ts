@@ -1,5 +1,5 @@
 import { IMemoryStorage, IMemoryIndex, IGraphStorage, IGraphIndex } from '../../storage';
-import { InMemoryGraphStorage } from '../../storage/InMemoryGraphStorage';
+import { InMemoryGraphStorage } from '../../graph/storage/InMemoryGraphStorage';
 import { SemanticMemory } from './SemanticMemory';
 
 /**

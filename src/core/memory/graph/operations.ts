@@ -1,37 +1,97 @@
-import { IGraphNode, IGraphEdge, GraphFilter, TraversalOptions, GraphResult } from './types';
+import { IGraphNode, IGraphEdge, GraphFilter, TraversalOptions } from './types';
 import { IGraphStorage } from '../storage';
+import { GraphLLMProcessor } from './llm/processor';
+import { 
+    GraphTask, 
+    PathSchema, 
+    CommunitySchema, 
+    EmbeddingSchema, 
+    SearchResultSchema,
+    TemporalSchema,
+    SearchResult
+} from './llm/types';
 
 /**
- * Core graph operations implementation
+ * Core graph operations implementation using LLM for complex operations
  */
 export class GraphOperations {
-    constructor(private storage: IGraphStorage) {}
+    constructor(
+        private storage: IGraphStorage,
+        private llm: GraphLLMProcessor
+    ) {}
 
     /**
-     * Find nodes connected to the given node
+     * Find nodes connected to the given node using LLM-based path finding
      */
     async getNeighbors(nodeId: string, options?: TraversalOptions): Promise<IGraphNode[]> {
-        return this.storage.getNeighbors(nodeId);
+        const node = await this.storage.retrieve(nodeId);
+        if (!node) return [];
+
+        // Get all potential neighbors
+        const candidates = await this.storage.getNeighbors(nodeId);
+        
+        // Use LLM to rank and filter most relevant neighbors
+        const ranked = await this.llm.process<SearchResult>(
+            GraphTask.RERANK_RESULTS,
+            { 
+                query: node.content,
+                results: candidates
+            },
+            SearchResultSchema
+        );
+
+        return candidates.filter(c => 
+            ranked.find(r => r.id === c.id)
+        );
     }
 
     /**
-     * Find shortest path between two nodes
+     * Find meaningful path between two nodes using LLM
      */
     async findPath(sourceId: string, targetId: string): Promise<IGraphEdge[]> {
-        return this.storage.findPath(sourceId, targetId);
+        const source = await this.storage.retrieve(sourceId) as IGraphNode;
+        const target = await this.storage.retrieve(targetId) as IGraphNode;
+        if (!source || !target) return [];
+
+        // Get relevant subgraph
+        const nodes = await this.storage.findNodes({
+            maxDistance: 3,
+            metadata: new Map([['centerId', sourceId]])
+        });
+        const edges = await this.storage.getEdges(nodes.map(n => n.id));
+
+        // Use LLM to find meaningful path
+        const path = await this.llm.process(
+            GraphTask.FIND_PATH,
+            { start: source, end: target, nodes, edges },
+            PathSchema
+        );
+
+        return edges.filter(e => path.edges.includes(e.id));
     }
 
     /**
-     * Get temporal context (n previous and next nodes in time)
+     * Get temporal context using LLM for understanding
      */
     async getTemporalContext(nodeId: string, contextSize: number = 4): Promise<IGraphNode[]> {
         const node = await this.storage.retrieve(nodeId) as IGraphNode;
         if (!node) return [];
 
+        // Extract temporal understanding from node content
+        const temporal = await this.llm.process(
+            GraphTask.EXTRACT_TEMPORAL,
+            { 
+                text: node.content,
+                referenceTime: node.temporal.eventTime.toISOString()
+            },
+            TemporalSchema
+        );
+
+        // Find nodes within temporal context
         const filter: GraphFilter = {
             temporal: {
-                from: new Date(node.temporal.eventTime.getTime() - (1000 * 60 * 60)), // 1 hour before
-                to: new Date(node.temporal.eventTime.getTime() + (1000 * 60 * 60)),   // 1 hour after
+                from: new Date(temporal.validFrom || temporal.eventTime),
+                to: new Date(temporal.validTo || temporal.eventTime),
                 timelineType: 'event'
             }
         };
@@ -40,42 +100,56 @@ export class GraphOperations {
     }
 
     /**
-     * Find nodes that share common neighbors with the given node
+     * Find related nodes using LLM-based community detection
      */
     async findRelated(nodeId: string, maxDistance: number = 2): Promise<IGraphNode[]> {
-        return this.storage.findNodes({
+        const nodes = await this.storage.findNodes({
             maxDistance,
             metadata: new Map([['centerId', nodeId]])
         });
+
+        const edges = await this.storage.getEdges(nodes.map(n => n.id));
+
+        // Use LLM to detect communities
+        const communities = await this.llm.process(
+            GraphTask.DETECT_COMMUNITIES,
+            { nodes, edges },
+            CommunitySchema
+        );
+
+        // Find community containing our node
+        const community = communities.communities.find(c => 
+            c.nodes.includes(nodeId)
+        );
+
+        if (!community) return [];
+
+        return nodes.filter(n => community.nodes.includes(n.id));
     }
 
     /**
-     * Get all nodes and edges in a subgraph around a center node
+     * Search nodes using LLM-generated embeddings
      */
-    async getSubgraph(centerId: string, options: TraversalOptions): Promise<GraphResult> {
-        const nodes: IGraphNode[] = [];
-        const edges: IGraphEdge[] = [];
-        const visited = new Set<string>();
-        const queue: Array<{ id: string; depth: number }> = [{ id: centerId, depth: 0 }];
+    async searchNodes(query: string): Promise<IGraphNode[]> {
+        // Generate embedding using LLM
+        const embedding = await this.llm.process(
+            GraphTask.GENERATE_EMBEDDING,
+            { text: query },
+            EmbeddingSchema
+        );
 
-        while (queue.length > 0) {
-            const { id, depth } = queue.shift()!;
-            if (visited.has(id) || (options.maxDepth !== undefined && depth > options.maxDepth)) {
-                continue;
-            }
+        // Search using embedding
+        const results = await this.storage.search(embedding);
 
-            visited.add(id);
-            const node = await this.storage.retrieve(id) as IGraphNode;
-            if (node) {
-                nodes.push(node);
-                
-                const neighbors = await this.getNeighbors(id, options);
-                for (const neighbor of neighbors) {
-                    queue.push({ id: neighbor.id, depth: depth + 1 });
-                }
-            }
-        }
+        // Rerank using LLM
+        const ranked = await this.llm.process<SearchResult>(
+            GraphTask.RERANK_RESULTS,
+            { query, results },
+            SearchResultSchema
+        );
 
-        return { nodes, edges };
+        return results.filter(r => 
+            ranked.find(rank => rank.id === r.id)
+        );
     }
 }

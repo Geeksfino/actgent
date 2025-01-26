@@ -18,9 +18,17 @@ export class EmbeddingSearch {
     }
 
     /**
-     * Find similar nodes using cosine similarity
+     * Search for similar nodes using embedding
      */
-    async searchSimilar(embedding: number[], limit: number = 10): Promise<Array<{ id: string; score: number }>> {
+    search(embedding: number[], limit: number = 10): string[] {
+        const results = this.searchWithScores(embedding, limit);
+        return results.map(r => r.id);
+    }
+
+    /**
+     * Search for similar nodes with similarity scores
+     */
+    searchWithScores(embedding: number[], limit: number = 10): Array<{ id: string; score: number }> {
         const results: Array<{ id: string; score: number }> = [];
 
         for (const [id, nodeEmbedding] of this.embeddings) {
@@ -56,6 +64,10 @@ export class EmbeddingSearch {
             dotProduct += a[i] * b[i];
             normA += a[i] * a[i];
             normB += b[i] * b[i];
+        }
+
+        if (normA === 0 || normB === 0) {
+            return 0;
         }
 
         return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));

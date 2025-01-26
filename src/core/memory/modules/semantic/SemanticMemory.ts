@@ -7,23 +7,37 @@ import { DeclarativeMemory } from '../../DeclarativeMemory';
 import { IMemoryStorage, IMemoryIndex, IGraphStorage, IGraphIndex } from '../../storage';
 import { ISemanticMemoryUnit, ConceptNode, ConceptRelation, RelationType, createSemanticMetadata } from './types';
 import { GraphOperations } from '../../graph/operations';
-import { IGraphNode, IGraphEdge } from '../../graph/types';
+import { IGraphNode, IGraphEdge, TraversalOptions } from '../../graph/types';
 import { EmbeddingSearch } from '../../graph/search/embedding';
 import { ResultReranker } from '../../graph/search/reranking';
+import { GraphLLMProcessor } from '../../graph/llm/processor';
+import { GraphTask } from '../../graph/llm/types';
 import crypto from 'crypto';
 import { z } from 'zod';
+
+interface INodeWithScore {
+    id: string;
+    score: number;
+    node: IGraphNode;
+}
 
 /**
  * Semantic memory implementation using graph-based storage
  */
 export class SemanticMemory extends DeclarativeMemory {
-    private graphOps: GraphOperations;
-    private embeddingSearch: EmbeddingSearch;
-    private reranker: ResultReranker;
+    protected graphOps: GraphOperations;
+    protected embeddingSearch: EmbeddingSearch;
+    protected reranker: ResultReranker;
+    protected llm: GraphLLMProcessor;
+    protected storage: IGraphStorage;
+    protected index: IGraphIndex;
 
-    constructor(storage: IGraphStorage, index: IGraphIndex) {
+    constructor(storage: IGraphStorage, index: IGraphIndex, llmClient?: any) {
         super(storage, index, MemoryType.SEMANTIC);
-        this.graphOps = new GraphOperations(storage);
+        this.storage = storage;
+        this.index = index;
+        this.llm = new GraphLLMProcessor(llmClient);
+        this.graphOps = new GraphOperations(storage, this.llm);
         this.embeddingSearch = new EmbeddingSearch();
         this.reranker = new ResultReranker();
     }
@@ -93,93 +107,105 @@ export class SemanticMemory extends DeclarativeMemory {
     }
 
     /**
-     * Add a concept to semantic memory
+     * Check if a memory unit is of semantic type
      */
-    public async addConcept(
-        name: string,
-        type: string,
-        properties: Map<string, any> = new Map()
-    ): Promise<ConceptNode> {
-        const concept: ConceptNode = {
-            id: crypto.randomUUID(),
-            name,
-            type,
-            confidence: 1.0,
-            source: 'direct-input',
-            lastVerified: new Date(),
-            properties
-        };
-
-        // Store as memory unit and graph node
-        const memoryUnit = this.createMemoryUnit(concept);
-        await this.storage.store(memoryUnit);
-
-        // If embedding is provided, index it
-        if (properties.has('embedding')) {
-            this.embeddingSearch.addEmbedding(concept.id, properties.get('embedding'));
-        }
-
-        return concept;
+    isMemoryUnitOfType(unit: IMemoryUnit): unit is ISemanticMemoryUnit {
+        return unit.memoryType === MemoryType.SEMANTIC &&
+               (this.isConceptNode(unit.content) || this.isConceptRelation(unit.content));
     }
 
     /**
-     * Add a relation between concepts
+     * Find semantically similar memories
      */
-    public async addRelation(
-        sourceId: string,
-        targetId: string,
-        type: RelationType,
-        properties: Map<string, any> = new Map()
-    ): Promise<ConceptRelation> {
-        const relation: ConceptRelation = {
-            id: crypto.randomUUID(),
-            sourceId,
-            targetId,
-            type,
-            weight: properties.get('weight') || 1.0,
-            confidence: properties.get('confidence') || 1.0,
-            properties
-        };
+    async findSimilar(query: string): Promise<IMemoryUnit[]> {
+        // Get embedding from LLM processor
+        const embedding = await this.llm.process(
+            GraphTask.GENERATE_EMBEDDING,
+            { text: query },
+            z.array(z.number())
+        );
+        
+        // Search using embedding
+        const nodeIds = this.embeddingSearch.search(embedding);
+        
+        // Retrieve full nodes
+        const nodes = await Promise.all(
+            nodeIds.map(id => this.storage.retrieve(id))
+        );
+        
+        return nodes.filter((node): node is IMemoryUnit => node !== null);
+    }
 
-        // Create graph edge
-        const edge: IGraphEdge = {
-            id: relation.id,
-            type: relation.type,
-            sourceId: relation.sourceId,
-            targetId: relation.targetId,
-            metadata: relation.properties,
+    /**
+     * Find memories connected in the knowledge graph
+     */
+    async findConnected(memoryId: string, options?: TraversalOptions): Promise<IMemoryUnit[]> {
+        return this.graphOps.getNeighbors(memoryId, options);
+    }
+
+    /**
+     * Find memories within a time range
+     */
+    async findInTimeRange(start: Date, end: Date): Promise<IMemoryUnit[]> {
+        return this.storage.findNodes({
+            nodeTypes: ['concept'],
             temporal: {
-                eventTime: new Date(),
-                ingestionTime: new Date()
-            },
-            weight: relation.weight
+                from: start,
+                to: end,
+                timelineType: 'event'
+            }
+        });
+    }
+
+    /**
+     * Get a memory's context including related memories and associations
+     */
+    async getMemoryContext(memoryId: string): Promise<{
+        memory: IMemoryUnit;
+        related: IMemoryUnit[];
+        temporal: IMemoryUnit[];
+    }> {
+        const memory = await this.storage.retrieve(memoryId);
+        if (!memory) throw new Error(`Memory ${memoryId} not found`);
+
+        const [related, temporal] = await Promise.all([
+            this.findConnected(memoryId),
+            this.findInTimeRange(
+                new Date(memory.timestamp.getTime() - 24 * 60 * 60 * 1000),
+                new Date(memory.timestamp.getTime() + 24 * 60 * 60 * 1000)
+            )
+        ]);
+
+        return {
+            memory,
+            related,
+            temporal: temporal.filter((m: IMemoryUnit) => m.id !== memoryId)
         };
-
-        // Store in graph
-        await (this.storage as IGraphStorage).addEdge(edge);
-
-        return relation;
     }
 
     /**
      * Find similar concepts using embeddings
      */
-    public async findSimilarConcepts(conceptId: string): Promise<ConceptNode[]> {
-        const concept = await this.retrieve(conceptId);
-        if (!concept || !concept.metadata.get('embedding')) return [];
+    async findSimilarConcepts(conceptId: string): Promise<ISemanticMemoryUnit[]> {
+        const concept = await this.storage.retrieve(conceptId);
+        if (!concept) throw new Error(`Concept ${conceptId} not found`);
+        if (!this.isMemoryUnitOfType(concept)) {
+            throw new Error(`Memory ${conceptId} is not a semantic memory unit`);
+        }
 
         const embedding = concept.metadata.get('embedding');
-        const similarIds = await this.embeddingSearch.searchSimilar(embedding);
-        
-        const concepts = await Promise.all(
-            similarIds.map(({ id }) => this.retrieve(id))
+        if (!embedding) throw new Error(`No embedding found for concept ${conceptId}`);
+
+        const nodeIds = this.embeddingSearch.search(embedding);
+        const nodes = await Promise.all(
+            nodeIds.map(id => this.storage.retrieve(id))
         );
 
-        return concepts
-            .filter((c): c is ISemanticMemoryUnit => 
-                c !== null && c.memoryType === MemoryType.SEMANTIC)
-            .map(c => c.content as ConceptNode)
-            .filter((c): c is ConceptNode => 'name' in c);
+        return nodes
+            .filter((node): node is ISemanticMemoryUnit => 
+                node !== null && 
+                this.isMemoryUnitOfType(node)
+            );
     }
 
     /**
@@ -198,23 +224,6 @@ export class SemanticMemory extends DeclarativeMemory {
     public async findConceptPath(sourceId: string, targetId: string): Promise<ConceptRelation[]> {
         const edges = await this.graphOps.findPath(sourceId, targetId);
         return edges.map(edge => this.convertToConceptRelation(edge));
-    }
-
-    /**
-     * Get subgraph around a concept
-     */
-    public async getConceptSubgraph(centerId: string, maxDepth: number = 2): Promise<{
-        concepts: ConceptNode[];
-        relations: ConceptRelation[];
-    }> {
-        const { nodes, edges } = await this.graphOps.getSubgraph(centerId, { maxDepth });
-        
-        return {
-            concepts: nodes
-                .filter(node => node.type === 'concept')
-                .map(node => this.convertToConceptNode(node)),
-            relations: edges.map(edge => this.convertToConceptRelation(edge))
-        };
     }
 
     /**
@@ -248,21 +257,11 @@ export class SemanticMemory extends DeclarativeMemory {
         };
     }
 
-    /**
-     * Check if a memory unit is of semantic type
-     */
-    public isMemoryUnitOfType(unit: IMemoryUnit): unit is ISemanticMemoryUnit {
-        return unit.memoryType === MemoryType.SEMANTIC &&
-               'content' in unit &&
-               (this.isConceptNode(unit.content) || this.isConceptRelation(unit.content));
-    }
-
     private isConceptNode(content: any): content is ConceptNode {
         return content && 
                typeof content === 'object' &&
                'name' in content &&
-               'type' in content &&
-               'properties' in content;
+               'confidence' in content;
     }
 
     private isConceptRelation(content: any): content is ConceptRelation {

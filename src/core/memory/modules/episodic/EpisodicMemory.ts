@@ -1,23 +1,31 @@
-import { IMemoryStorage, IMemoryIndex, IGraphStorage, IGraphIndex } from '../../storage';
-import { MemoryType, MemoryFilter, IMemoryUnit } from '../../base';
+import { 
+    MemoryType,
+    MemoryFilter,
+    IMemoryUnit
+} from '../../base';
 import { DeclarativeMemory } from '../../DeclarativeMemory';
+import { IMemoryStorage, IMemoryIndex, IGraphStorage, IGraphIndex } from '../../storage';
 import { IEpisodicMemoryUnit } from './types';
-import { EmotionalContext, EmotionalState } from '../../context';
 import { GraphOperations } from '../../graph/operations';
-import { IGraphNode, IGraphEdge, ITemporalMetadata } from '../../graph/types';
-import { z } from 'zod';
+import { IGraphNode, IGraphEdge } from '../../graph/types';
+import { GraphLLMProcessor } from '../../graph/llm/processor';
 import crypto from 'crypto';
 
 /**
- * Episodic Memory - stores personal experiences and specific events
- * tied to particular times and places using a graph-based structure
+ * Episodic memory implementation using graph-based storage
  */
 export class EpisodicMemory extends DeclarativeMemory {
-    private graphOps: GraphOperations;
+    protected graphOps: GraphOperations;
+    protected llm: GraphLLMProcessor;
+    protected storage: IGraphStorage;
+    protected index: IGraphIndex;
 
-    constructor(storage: IGraphStorage, index: IGraphIndex) {
+    constructor(storage: IGraphStorage, index: IGraphIndex, llmClient?: any) {
         super(storage, index, MemoryType.EPISODIC);
-        this.graphOps = new GraphOperations(storage);
+        this.storage = storage;
+        this.index = index;
+        this.llm = new GraphLLMProcessor(llmClient);
+        this.graphOps = new GraphOperations(storage, this.llm);
     }
 
     /**
@@ -25,7 +33,7 @@ export class EpisodicMemory extends DeclarativeMemory {
      */
     public createMemoryUnit<C>(
         content: C | string, 
-        schema?: z.ZodType<C>, 
+        schema?: any, 
         metadata?: Map<string, any>
     ): IEpisodicMemoryUnit {
         let validatedContent: any;
@@ -97,7 +105,7 @@ export class EpisodicMemory extends DeclarativeMemory {
         if (!metadataMap.has('timestamp')) {
             metadataMap.set('timestamp', new Date());
         }
-        return this.createMemoryUnit(content, z.any(), metadataMap);
+        return this.createMemoryUnit(content, undefined, metadataMap);
     }
 
     /**
@@ -134,7 +142,7 @@ export class EpisodicMemory extends DeclarativeMemory {
     /**
      * Find episodes with similar emotional context
      */
-    public async findEmotionallySimilar(emotions: EmotionalContext): Promise<IEpisodicMemoryUnit[]> {
+    public async findEmotionallySimilar(emotions: any): Promise<IEpisodicMemoryUnit[]> {
         const filter = {
             type: 'episode',
             metadata: new Map<string, any>([['emotions', emotions]])
@@ -218,7 +226,7 @@ export class EpisodicMemory extends DeclarativeMemory {
      * Store an episodic memory unit
      */
     public async store(content: Omit<IEpisodicMemoryUnit, 'id' | 'timestamp' | 'memoryType'>): Promise<void> {
-        const memoryUnit = this.createMemoryUnit(content.content, z.any(), content.metadata);
+        const memoryUnit = this.createMemoryUnit(content.content, undefined, content.metadata);
         Object.assign(memoryUnit, content);
         await this.storage.store(memoryUnit);
     }
@@ -226,7 +234,7 @@ export class EpisodicMemory extends DeclarativeMemory {
     /**
      * Update the emotional context of a memory
      */
-    async updateEmotionalContext(memoryId: string, emotionalContext: EmotionalContext): Promise<void> {
+    async updateEmotionalContext(memoryId: string, emotionalContext: any): Promise<void> {
         const memory = await this.retrieve(memoryId);
         if (!memory) {
             throw new Error(`Memory ${memoryId} not found`);
@@ -279,5 +287,66 @@ export class EpisodicMemory extends DeclarativeMemory {
                'location' in content &&
                'actors' in content &&
                'actions' in content;
+    }
+
+    /**
+     * Add an episodic memory
+     */
+    async addEpisode(episode: IMemoryUnit): Promise<void> {
+        const node: IGraphNode = {
+            ...episode,
+            type: 'episode',
+            temporal: {
+                eventTime: episode.timestamp || new Date(),
+                ingestionTime: new Date()
+            },
+            metadata: episode.metadata || new Map()
+        };
+
+        await this.storage.addNode(node);
+        await this.index.indexNode(node);
+    }
+
+    /**
+     * Find episodes within a time range
+     */
+    async findInTimeRange(start: Date, end: Date): Promise<IMemoryUnit[]> {
+        return this.storage.findNodes({
+            nodeTypes: ['episode'],
+            temporal: {
+                from: start,
+                to: end,
+                timelineType: 'event'
+            }
+        });
+    }
+
+    /**
+     * Get temporal context for an episode
+     */
+    async getTemporalContext(episodeId: string): Promise<{
+        episode: IMemoryUnit;
+        before: IMemoryUnit[];
+        after: IMemoryUnit[];
+    }> {
+        const episode = await this.storage.retrieve(episodeId);
+        if (!episode) throw new Error(`Episode ${episodeId} not found`);
+
+        const [before, after] = await Promise.all([
+            this.findInTimeRange(
+                new Date(episode.timestamp.getTime() - 24 * 60 * 60 * 1000),
+                episode.timestamp
+            ),
+            this.findInTimeRange(
+                episode.timestamp,
+                new Date(episode.timestamp.getTime() + 24 * 60 * 60 * 1000)
+            )
+        ]);
+
+        return {
+            episode,
+            before: before.filter(e => e.id !== episodeId),
+            after: after.filter(e => e.id !== episodeId)
+        };
     }
 }
