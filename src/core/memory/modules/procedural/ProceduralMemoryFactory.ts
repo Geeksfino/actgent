@@ -13,27 +13,38 @@ export class ProceduralMemoryFactory {
      * @returns A new procedural memory unit
      */
     static createMemoryUnit(content: any, metadata?: Map<string, any>): IProceduralMemoryUnit {
-        const timestamp = new Date();
-        const proceduralMetadata = {
-            type: MemoryType.PROCEDURAL,
-            timestamp,
-            proficiency: metadata?.get('proficiency') || 0.1,
-            successCount: 0,
-            failureCount: 0,
-            lastExecuted: undefined
-        } as ProceduralMetadata;
+        const now = new Date();
+        
+        // Create metadata with required fields
+        const proceduralMetadata = new Map<string, any>([
+            ['type', MemoryType.PROCEDURAL],
+            ['timestamp', now],
+            ['proficiency', 0.1],
+            ['successCount', 0],
+            ['failureCount', 0],
+            ['lastExecuted', now]
+        ]) as ProceduralMetadata;
+
+        // Merge with provided metadata if any
+        if (metadata) {
+            for (const [key, value] of metadata.entries()) {
+                proceduralMetadata.set(key, value);
+            }
+        }
 
         return {
             id: crypto.randomUUID(),
             memoryType: MemoryType.PROCEDURAL,
-            timestamp,
+            timestamp: now,
             content,
             metadata: proceduralMetadata,
+            lastAccessed: now,
             accessCount: 0,
-            lastAccessed: timestamp,
-            procedure: content.procedure,
-            expectedOutcomes: content.expectedOutcomes || [],
-            applicableContext: content.applicableContext || []
+            procedure: '',
+            expectedOutcomes: [],
+            applicableContext: [],
+            createdAt: now,
+            validAt: now
         };
     }
 
@@ -43,27 +54,40 @@ export class ProceduralMemoryFactory {
      * @returns A procedural memory unit
      */
     static fromExisting(data: Partial<IProceduralMemoryUnit>): IProceduralMemoryUnit {
-        const timestamp = new Date();
-        const metadata = {
-            type: MemoryType.PROCEDURAL,
-            timestamp,
-            proficiency: data.metadata?.get('proficiency') || 0.1,
-            successCount: data.metadata?.get('successCount') || 0,
-            failureCount: data.metadata?.get('failureCount') || 0,
-            lastExecuted: data.metadata?.get('lastExecuted')
-        } as ProceduralMetadata;
+        const now = new Date();
+        
+        // Create metadata with required fields, using existing values or defaults
+        const metadata = new Map<string, any>([
+            ['type', MemoryType.PROCEDURAL],
+            ['timestamp', data.timestamp || now],
+            ['proficiency', data.metadata?.get('proficiency') || 0.1],
+            ['successCount', data.metadata?.get('successCount') || 0],
+            ['failureCount', data.metadata?.get('failureCount') || 0],
+            ['lastExecuted', data.metadata?.get('lastExecuted') || now]
+        ]) as ProceduralMetadata;
+
+        // Merge any additional metadata
+        if (data.metadata) {
+            for (const [key, value] of data.metadata.entries()) {
+                if (!['type', 'timestamp', 'proficiency', 'successCount', 'failureCount', 'lastExecuted'].includes(key)) {
+                    metadata.set(key, value);
+                }
+            }
+        }
 
         return {
             id: data.id || crypto.randomUUID(),
             memoryType: MemoryType.PROCEDURAL,
-            timestamp: data.timestamp || timestamp,
+            timestamp: data.timestamp || now,
             content: data.content,
             metadata,
-            lastAccessed: data.lastAccessed || timestamp,
+            lastAccessed: data.lastAccessed || now,
             accessCount: data.accessCount || 0,
             procedure: data.procedure || '',
             expectedOutcomes: data.expectedOutcomes || [],
-            applicableContext: data.applicableContext || []
+            applicableContext: data.applicableContext || [],
+            createdAt: data.createdAt || now,
+            validAt: data.validAt || now
         };
     }
 

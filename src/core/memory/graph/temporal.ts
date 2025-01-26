@@ -1,73 +1,146 @@
-import { ITemporalMetadata } from './types';
+import { IGraphNode, IGraphEdge, TemporalMode } from './types';
 
 /**
  * Temporal index for efficient time-based queries
  */
 export class TemporalIndex {
-    private eventIndex: Map<string, Date>;     // nodeId -> eventTime
-    private ingestionIndex: Map<string, Date>; // nodeId -> ingestionTime
-    private validityIndex: Map<string, { from: Date; to?: Date }>;
+    private nodeIndex: {
+        byCreatedAt: Map<string, Date>;
+        byExpiredAt: Map<string, Date>;
+        byValidAt: Map<string, Date>;
+    };
+    
+    private edgeIndex: {
+        byCreatedAt: Map<string, Date>;
+        byExpiredAt: Map<string, Date>;
+        byValidAt: Map<string, Date>;
+        byInvalidAt: Map<string, Date>;
+    };
 
     constructor() {
-        this.eventIndex = new Map();
-        this.ingestionIndex = new Map();
-        this.validityIndex = new Map();
+        this.nodeIndex = {
+            byCreatedAt: new Map(),
+            byExpiredAt: new Map(),
+            byValidAt: new Map()
+        };
+        
+        this.edgeIndex = {
+            byCreatedAt: new Map(),
+            byExpiredAt: new Map(),
+            byValidAt: new Map(),
+            byInvalidAt: new Map()
+        };
     }
 
     /**
      * Add or update temporal metadata for a node
      */
-    addNode(nodeId: string, temporal: ITemporalMetadata): void {
-        this.eventIndex.set(nodeId, temporal.eventTime);
-        this.ingestionIndex.set(nodeId, temporal.ingestionTime);
-        
-        if (temporal.validFrom) {
-            this.validityIndex.set(nodeId, {
-                from: temporal.validFrom,
-                to: temporal.validTo
-            });
+    addNode(node: IGraphNode): void {
+        const id = node.id;
+        this.nodeIndex.byCreatedAt.set(id, node.createdAt);
+        if (node.expiredAt) {
+            this.nodeIndex.byExpiredAt.set(id, node.expiredAt);
+        }
+        if (node.validAt) {
+            this.nodeIndex.byValidAt.set(id, node.validAt);
         }
     }
 
     /**
-     * Find nodes within a time range
+     * Add or update temporal metadata for an edge
      */
-    findNodesInRange(start: Date, end: Date, timelineType: 'event' | 'ingestion' = 'event'): string[] {
-        const index = timelineType === 'event' ? this.eventIndex : this.ingestionIndex;
-        
-        return Array.from(index.entries())
-            .filter(([_, time]) => time >= start && time <= end)
-            .map(([id, _]) => id);
+    addEdge(edge: IGraphEdge): void {
+        const id = edge.id;
+        this.edgeIndex.byCreatedAt.set(id, edge.createdAt);
+        if (edge.expiredAt) {
+            this.edgeIndex.byExpiredAt.set(id, edge.expiredAt);
+        }
+        if (edge.validAt) {
+            this.edgeIndex.byValidAt.set(id, edge.validAt);
+        }
+        if (edge.invalidAt) {
+            this.edgeIndex.byInvalidAt.set(id, edge.invalidAt);
+        }
     }
 
     /**
-     * Get nodes valid at a specific point in time
+     * Find nodes valid at a specific point in time
      */
-    findValidNodes(at: Date): string[] {
-        return Array.from(this.validityIndex.entries())
-            .filter(([_, validity]) => {
-                const isAfterStart = at >= validity.from;
-                const isBeforeEnd = !validity.to || at <= validity.to;
-                return isAfterStart && isBeforeEnd;
-            })
-            .map(([id, _]) => id);
+    findValidNodes(at: Date, mode: TemporalMode = TemporalMode.BUSINESS_TIME): string[] {
+        switch (mode) {
+            case TemporalMode.SYSTEM_TIME:
+                return Array.from(this.nodeIndex.byCreatedAt.entries())
+                    .filter(([id, created]) => {
+                        const expired = this.nodeIndex.byExpiredAt.get(id);
+                        return created <= at && (!expired || expired > at);
+                    })
+                    .map(([id, _]) => id);
+                
+            case TemporalMode.BUSINESS_TIME:
+                return Array.from(this.nodeIndex.byValidAt.entries())
+                    .filter(([_, validAt]) => validAt <= at)
+                    .map(([id, _]) => id);
+                
+            case TemporalMode.BI_TEMPORAL:
+                return Array.from(this.nodeIndex.byCreatedAt.entries())
+                    .filter(([id, created]) => {
+                        const expired = this.nodeIndex.byExpiredAt.get(id);
+                        const validAt = this.nodeIndex.byValidAt.get(id);
+                        return created <= at && 
+                               (!expired || expired > at) &&
+                               (!validAt || validAt <= at);
+                    })
+                    .map(([id, _]) => id);
+        }
     }
 
     /**
-     * Remove a node from all temporal indices
+     * Find edges valid at a specific point in time
      */
-    removeNode(nodeId: string): void {
-        this.eventIndex.delete(nodeId);
-        this.ingestionIndex.delete(nodeId);
-        this.validityIndex.delete(nodeId);
+    findValidEdges(at: Date, mode: TemporalMode = TemporalMode.BUSINESS_TIME): string[] {
+        switch (mode) {
+            case TemporalMode.SYSTEM_TIME:
+                return Array.from(this.edgeIndex.byCreatedAt.entries())
+                    .filter(([id, created]) => {
+                        const expired = this.edgeIndex.byExpiredAt.get(id);
+                        return created <= at && (!expired || expired > at);
+                    })
+                    .map(([id, _]) => id);
+                
+            case TemporalMode.BUSINESS_TIME:
+                return Array.from(this.edgeIndex.byValidAt.entries())
+                    .filter(([id, validAt]) => {
+                        const invalidAt = this.edgeIndex.byInvalidAt.get(id);
+                        return validAt <= at && (!invalidAt || invalidAt > at);
+                    })
+                    .map(([id, _]) => id);
+                
+            case TemporalMode.BI_TEMPORAL:
+                return Array.from(this.edgeIndex.byCreatedAt.entries())
+                    .filter(([id, created]) => {
+                        const expired = this.edgeIndex.byExpiredAt.get(id);
+                        const validAt = this.edgeIndex.byValidAt.get(id);
+                        const invalidAt = this.edgeIndex.byInvalidAt.get(id);
+                        return created <= at && 
+                               (!expired || expired > at) &&
+                               (!validAt || validAt <= at) &&
+                               (!invalidAt || invalidAt > at);
+                    })
+                    .map(([id, _]) => id);
+        }
     }
 
     /**
      * Clear all indices
      */
     clear(): void {
-        this.eventIndex.clear();
-        this.ingestionIndex.clear();
-        this.validityIndex.clear();
+        this.nodeIndex.byCreatedAt.clear();
+        this.nodeIndex.byExpiredAt.clear();
+        this.nodeIndex.byValidAt.clear();
+        
+        this.edgeIndex.byCreatedAt.clear();
+        this.edgeIndex.byExpiredAt.clear();
+        this.edgeIndex.byValidAt.clear();
+        this.edgeIndex.byInvalidAt.clear();
     }
 }

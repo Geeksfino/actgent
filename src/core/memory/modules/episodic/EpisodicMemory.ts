@@ -7,7 +7,7 @@ import { DeclarativeMemory } from '../../DeclarativeMemory';
 import { IMemoryStorage, IMemoryIndex, IGraphStorage, IGraphIndex } from '../../storage';
 import { IEpisodicMemoryUnit } from './types';
 import { GraphOperations } from '../../graph/operations';
-import { IGraphNode, IGraphEdge } from '../../graph/types';
+import { IGraphNode, IGraphEdge, GraphFilter } from '../../graph/types';
 import { GraphLLMProcessor } from '../../graph/llm/processor';
 import crypto from 'crypto';
 
@@ -50,50 +50,25 @@ export class EpisodicMemory extends DeclarativeMemory {
                     emotionalTrends: []
                 },
                 coherenceScore: metadata?.get('coherenceScore') || 1.0,
-                emotionalIntensity: metadata?.get('emotionalIntensity') || 0,
+                emotionalIntensity: metadata?.get('emotionalIntensity') || 0.5,
                 contextualRelevance: metadata?.get('contextualRelevance') || 1.0,
-                temporalDistance: 0,
+                temporalDistance: metadata?.get('temporalDistance') || 0,
                 userInstruction: content,
                 timestamp: now
             };
         } else {
-            if (!schema) {
-                throw new Error('Schema is required for object content');
-            }
-            const validationResult = schema.safeParse(content);
-            if (!validationResult.success) {
-                throw new Error(`Invalid content: ${validationResult.error}`);
-            }
-            validatedContent = validationResult.data;
+            validatedContent = schema ? schema.parse(content) : content;
         }
 
-        const memoryUnit: IEpisodicMemoryUnit = {
+        return {
             id: crypto.randomUUID(),
             content: validatedContent,
             metadata: metadata || new Map(),
             timestamp: now,
-            memoryType: MemoryType.EPISODIC
+            memoryType: MemoryType.EPISODIC,
+            createdAt: now,
+            validAt: now
         };
-
-        // Create graph node
-        const graphNode: IGraphNode = {
-            id: memoryUnit.id,
-            type: 'episode',
-            content: memoryUnit.content,
-            metadata: memoryUnit.metadata,
-            timestamp: memoryUnit.timestamp,
-            memoryType: memoryUnit.memoryType,
-            temporal: {
-                eventTime: new Date(memoryUnit.content.timeSequence),
-                ingestionTime: now,
-                validFrom: now
-            }
-        };
-
-        // Store in graph
-        (this.storage as IGraphStorage).addNode(graphNode);
-
-        return memoryUnit;
     }
 
     /**
@@ -128,15 +103,7 @@ export class EpisodicMemory extends DeclarativeMemory {
      */
     public async findTemporalContext(episodeId: string, contextSize: number = 4): Promise<IEpisodicMemoryUnit[]> {
         const episodes = await this.graphOps.getTemporalContext(episodeId, contextSize);
-        return episodes
-            .filter(node => node.type === 'episode')
-            .map(node => ({
-                id: node.id,
-                content: node.content,
-                metadata: node.metadata,
-                timestamp: node.timestamp,
-                memoryType: MemoryType.EPISODIC
-            }));
+        return this.graphNodesToEpisodicUnits(episodes);
     }
 
     /**
@@ -149,13 +116,7 @@ export class EpisodicMemory extends DeclarativeMemory {
         };
         
         const episodes = await (this.storage as IGraphStorage).findNodes(filter);
-        return episodes.map(node => ({
-            id: node.id,
-            content: node.content,
-            metadata: node.metadata,
-            timestamp: node.timestamp,
-            memoryType: MemoryType.EPISODIC
-        }));
+        return this.graphNodesToEpisodicUnits(episodes);
     }
 
     /**
@@ -168,13 +129,7 @@ export class EpisodicMemory extends DeclarativeMemory {
         };
         
         const episodes = await (this.storage as IGraphStorage).findNodes(filter);
-        return episodes.map(node => ({
-            id: node.id,
-            content: node.content,
-            metadata: node.metadata,
-            timestamp: node.timestamp,
-            memoryType: MemoryType.EPISODIC
-        }));
+        return this.graphNodesToEpisodicUnits(episodes);
     }
 
     /**
@@ -194,13 +149,7 @@ export class EpisodicMemory extends DeclarativeMemory {
         };
 
         const episodes = await (this.storage as IGraphStorage).findNodes(filter);
-        return episodes.map(node => ({
-            id: node.id,
-            content: node.content,
-            metadata: node.metadata,
-            timestamp: node.timestamp,
-            memoryType: MemoryType.EPISODIC
-        }));
+        return this.graphNodesToEpisodicUnits(episodes);
     }
 
     /**
@@ -210,13 +159,12 @@ export class EpisodicMemory extends DeclarativeMemory {
         const edge: IGraphEdge = {
             id: crypto.randomUUID(),
             type: relationType,
-            sourceId,
-            targetId,
+            sourceId: sourceId,
+            targetId: targetId,
             metadata: new Map(),
-            temporal: {
-                eventTime: new Date(),
-                ingestionTime: new Date()
-            }
+            createdAt: new Date(),
+            validAt: new Date(),
+            episodeIds: [sourceId, targetId]  // Add required episodeIds
         };
 
         await (this.storage as IGraphStorage).addEdge(edge);
@@ -292,61 +240,281 @@ export class EpisodicMemory extends DeclarativeMemory {
     /**
      * Add an episodic memory
      */
-    async addEpisode(episode: IMemoryUnit): Promise<void> {
+    async addEpisode(content: string, metadata?: Map<string, any>): Promise<string> {
+        const now = new Date();
         const node: IGraphNode = {
-            ...episode,
+            id: crypto.randomUUID(),
             type: 'episode',
-            temporal: {
-                eventTime: episode.timestamp || new Date(),
-                ingestionTime: new Date()
-            },
-            metadata: episode.metadata || new Map()
+            content,
+            metadata: metadata || new Map(),
+            timestamp: now,
+            memoryType: MemoryType.EPISODIC,
+            createdAt: now,
+            validAt: now  // Episode's business time is when it was created
         };
-
-        await this.storage.addNode(node);
-        await this.index.indexNode(node);
+        
+        return this.storage.addNode(node);
     }
 
     /**
-     * Find episodes within a time range
+     * Add a relation between episodes
      */
-    async findInTimeRange(start: Date, end: Date): Promise<IMemoryUnit[]> {
-        return this.storage.findNodes({
+    async addRelation(sourceId: string, targetId: string, relation: string): Promise<string> {
+        const now = new Date();
+        const edge: IGraphEdge = {
+            id: crypto.randomUUID(),
+            type: relation,
+            sourceId: sourceId,
+            targetId: targetId,
+            metadata: new Map(),
+            createdAt: now,
+            validAt: now,
+            episodeIds: [sourceId, targetId]
+        };
+        
+        return this.storage.addEdge(edge);
+    }
+
+    /**
+     * Find episodes in a given time range
+     */
+    protected async findEpisodesInRange(start: Date, end: Date): Promise<IEpisodicMemoryUnit[]> {
+        const filter: GraphFilter = {
             nodeTypes: ['episode'],
             temporal: {
-                from: start,
-                to: end,
-                timelineType: 'event'
+                validAfter: start,
+                validBefore: end
             }
+        };
+        
+        const nodes = await (this.storage as IGraphStorage).findNodes(filter);
+        return this.graphNodesToEpisodicUnits(nodes);
+    }
+
+    /**
+     * Find episodes by content
+     */
+    protected async findEpisodesByContent(query: string): Promise<IEpisodicMemoryUnit[]> {
+        const nodes = await (this.storage as IGraphStorage).findNodes({
+            nodeTypes: ['episode']
         });
+
+        return this.graphNodesToEpisodicUnits(nodes);
+    }
+
+    /**
+     * Find episodes by metadata
+     */
+    protected async findEpisodesByMetadata(metadata: Map<string, any>): Promise<IEpisodicMemoryUnit[]> {
+        const nodes = await (this.storage as IGraphStorage).findNodes({
+            nodeTypes: ['episode'],
+            metadata
+        });
+
+        return this.graphNodesToEpisodicUnits(nodes);
+    }
+
+    /**
+     * Find episodes by type
+     */
+    protected async findEpisodesByType(type: string): Promise<IEpisodicMemoryUnit[]> {
+        const nodes = await (this.storage as IGraphStorage).findNodes({
+            nodeTypes: ['episode']
+        });
+
+        return this.graphNodesToEpisodicUnits(nodes);
+    }
+
+    /**
+     * Create an edge between nodes
+     */
+    protected async createEdge(sourceId: string, targetId: string, relation: string): Promise<void> {
+        const edge: IGraphEdge = {
+            id: crypto.randomUUID(),
+            type: relation,
+            sourceId,
+            targetId,
+            metadata: new Map(),
+            createdAt: new Date(),
+            episodeIds: []
+        };
+        
+        await (this.storage as IGraphStorage).addEdge(edge);
+    }
+
+    /**
+     * Convert a graph node to an episodic memory unit
+     */
+    protected graphNodeToEpisodicUnit(node: IGraphNode): IEpisodicMemoryUnit {
+        const timestamp = node.validAt || node.createdAt;
+        return {
+            id: node.id,
+            content: {
+                ...node.content,
+                timestamp
+            },
+            metadata: node.metadata,
+            memoryType: MemoryType.EPISODIC,
+            createdAt: node.createdAt,
+            timestamp
+        };
+    }
+
+    /**
+     * Convert an episodic memory unit to a graph node
+     */
+    protected episodicUnitToGraphNode(unit: IEpisodicMemoryUnit): IGraphNode {
+        return {
+            id: unit.id,
+            type: 'episode',
+            content: unit.content,
+            metadata: unit.metadata,
+            createdAt: unit.createdAt,
+            validAt: unit.content.timestamp,
+            memoryType: unit.memoryType,
+            timestamp: unit.timestamp
+        };
+    }
+
+    /**
+     * Convert multiple graph nodes to episodic memory units
+     */
+    protected graphNodesToEpisodicUnits(nodes: IGraphNode[]): IEpisodicMemoryUnit[] {
+        return nodes
+            .filter(node => node.type === 'episode')
+            .map(node => this.graphNodeToEpisodicUnit(node));
+    }
+
+    /**
+     * Find temporally adjacent episodes
+     */
+    protected async findTemporallyAdjacentEpisodes(episodeId: string): Promise<[IEpisodicMemoryUnit[], IEpisodicMemoryUnit[]]> {
+        const episode = await (this.storage as IGraphStorage).getNode(episodeId);
+        if (!episode) {
+            throw new Error(`Episode ${episodeId} not found`);
+        }
+
+        // Use mutable variables for date calculations
+        const referenceDate = episode.validAt || episode.createdAt;
+        let beforeStartTime = new Date(referenceDate.getTime() - 24 * 60 * 60 * 1000);
+        let afterEndTime = new Date(referenceDate.getTime() + 24 * 60 * 60 * 1000);
+
+        // Handle undefined validAt by using createdAt as fallback
+        if (episode.validAt) {
+            if (episode.validAt < beforeStartTime) {
+                beforeStartTime = new Date(episode.validAt.getTime());
+            }
+            if (episode.validAt > afterEndTime) {
+                afterEndTime = new Date(episode.validAt.getTime());
+            }
+        }
+
+        const [beforeNodes, afterNodes] = await Promise.all([
+            this.findEpisodesInRange(beforeStartTime, referenceDate),
+            this.findEpisodesInRange(referenceDate, afterEndTime)
+        ]);
+
+        return [
+            beforeNodes.filter(e => e.id !== episodeId),
+            afterNodes.filter(e => e.id !== episodeId)
+        ];
+    }
+
+    /**
+     * Get adjacent episodes
+     */
+    async getAdjacentEpisodes(episodeId: string): Promise<[IGraphNode[], IGraphNode[]]> {
+        const episode = await (this.storage as IGraphStorage).getNode(episodeId);
+        if (!episode) {
+            throw new Error(`Episode ${episodeId} not found`);
+        }
+
+        const referenceDate = episode.validAt || episode.createdAt;
+        const startDate = new Date(referenceDate.getTime() - 24 * 60 * 60 * 1000);
+        const endDate = new Date(referenceDate.getTime() + 24 * 60 * 60 * 1000);
+
+        // Find episodes before and after
+        const [beforeNodes, afterNodes] = await Promise.all([
+            (this.storage as IGraphStorage).findNodes({
+                nodeTypes: ['episode'],
+                temporal: {
+                    validBefore: referenceDate
+                },
+                maxDistance: 5
+            }),
+            (this.storage as IGraphStorage).findNodes({
+                nodeTypes: ['episode'],
+                temporal: {
+                    validAfter: referenceDate
+                },
+                maxDistance: 5
+            })
+        ]);
+
+        return [beforeNodes, afterNodes];
+    }
+
+    /**
+     * Find temporally adjacent episodes in business time
+     */
+    protected async findTemporallyAdjacentEpisodesInBusinessTime(episodeId: string): Promise<[IGraphNode[], IGraphNode[]]> {
+        const episode = await (this.storage as IGraphStorage).getNode(episodeId);
+        if (!episode?.validAt) {
+            return [[], []];
+        }
+
+        // Find episodes before and after
+        const [beforeNodes, afterNodes] = await Promise.all([
+            (this.storage as IGraphStorage).findNodes({
+                nodeTypes: ['episode'],
+                temporal: {
+                    validBefore: episode.validAt
+                },
+                maxDistance: 5
+            }),
+            (this.storage as IGraphStorage).findNodes({
+                nodeTypes: ['episode'],
+                temporal: {
+                    validAfter: episode.validAt
+                },
+                maxDistance: 5
+            })
+        ]);
+
+        return [beforeNodes, afterNodes];
     }
 
     /**
      * Get temporal context for an episode
      */
-    async getTemporalContext(episodeId: string): Promise<{
+    public async getTemporalContext(episodeId: string): Promise<{
         episode: IMemoryUnit;
         before: IMemoryUnit[];
         after: IMemoryUnit[];
     }> {
-        const episode = await this.storage.retrieve(episodeId);
-        if (!episode) throw new Error(`Episode ${episodeId} not found`);
+        const episode = await (this.storage as IGraphStorage).getNode(episodeId);
+        if (!episode) {
+            throw new Error(`Episode ${episodeId} not found`);
+        }
 
-        const [before, after] = await Promise.all([
-            this.findInTimeRange(
-                new Date(episode.timestamp.getTime() - 24 * 60 * 60 * 1000),
-                episode.timestamp
-            ),
-            this.findInTimeRange(
-                episode.timestamp,
-                new Date(episode.timestamp.getTime() + 24 * 60 * 60 * 1000)
-            )
+        // Use mutable variables for date calculations
+        const referenceDate = episode.validAt || episode.createdAt;
+        const searchStartDate = new Date(referenceDate.getTime() - 24 * 60 * 60 * 1000);
+        const searchEndDate = new Date(referenceDate.getTime() + 24 * 60 * 60 * 1000);
+
+        // Convert nodes to memory units
+        const [beforeUnits, afterUnits] = await Promise.all([
+            this.findEpisodesInRange(searchStartDate, referenceDate),
+            this.findEpisodesInRange(referenceDate, searchEndDate)
         ]);
 
+        // Convert episode to memory unit
+        const episodeUnit = this.graphNodeToEpisodicUnit(episode);
+
         return {
-            episode,
-            before: before.filter(e => e.id !== episodeId),
-            after: after.filter(e => e.id !== episodeId)
+            episode: episodeUnit,
+            before: beforeUnits,
+            after: afterUnits
         };
     }
 }

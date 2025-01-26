@@ -184,16 +184,24 @@ export class MemoryConsolidator implements IMemoryConsolidation {
     }
 
     protected createConsolidatedMemory(memories: IMemoryUnit[]): IMemoryUnit {
-        return {
+        const now = new Date();
+        const consolidatedContent = this.mergeContents(memories);
+        const consolidatedMetadata = this.mergeMetadata(memories);
+
+        const consolidatedUnit = {
             id: crypto.randomUUID(),
-            content: this.mergeContents(memories),
-            metadata: this.mergeMetadata(memories),
-            timestamp: new Date(),
+            content: consolidatedContent,
+            metadata: consolidatedMetadata,
+            timestamp: now,
             memoryType: MemoryType.EPISODIC,
             priority: this.calculatePriority(memories),
             consolidationMetrics: this.calculateConsolidationMetrics(memories),
-            associations: new Set(memories.map(m => m.id))
+            associations: new Set(memories.map(m => m.id)),
+            createdAt: now,
+            validAt: now
         };
+
+        return consolidatedUnit;
     }
 
     private mergeContents(memories: IMemoryUnit[]): any {

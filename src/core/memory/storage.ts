@@ -47,6 +47,7 @@ export interface IMemoryIndex {
 export interface IGraphStorage extends IMemoryStorage {
     // Node operations
     addNode(node: IGraphNode): Promise<string>;
+    getNode(id: string): Promise<IGraphNode | null>;
     updateNode(id: string, node: Partial<IGraphNode>): Promise<void>;
     findNodes(filter: GraphFilter): Promise<IGraphNode[]>;
     getNeighbors(nodeId: string): Promise<IGraphNode[]>;

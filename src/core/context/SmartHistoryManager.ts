@@ -55,13 +55,15 @@ export class SmartHistoryManager implements IHistoryManager {
             });
         }
 
+        const now = new Date();
         await this.workingMemory.store({
             id: message.id,
             content: message.content,
             metadata,
             timestamp: message.timestamp,
             accessCount: 0,
-            lastAccessed: new Date()
+            lastAccessed: now,
+            createdAt: now
         });
     }
 
@@ -210,7 +212,8 @@ export class SmartHistoryManager implements IHistoryManager {
                 metadata,
                 timestamp: node.message.timestamp,
                 accessCount: 0,
-                lastAccessed: new Date()
+                lastAccessed: now,
+                createdAt: now
             });
         }
     }

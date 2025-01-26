@@ -15,12 +15,12 @@ export class EpisodicMemoryFactory {
         content: any,
         metadata: Map<string, any>
     ): IMemoryUnit {
-        const timestamp = new Date();
+        const now = new Date();
         const importance = metadata?.get('importance') || 0.5;
         
         // Create metadata with emotional context
         const memoryMetadata = new Map<string, any>();
-        memoryMetadata.set('timestamp', timestamp);
+        memoryMetadata.set('timestamp', now);
         memoryMetadata.set('importance', importance);
         memoryMetadata.set('emotionalContext', metadata?.get('emotionalContext') || {
             valence: 0,
@@ -31,11 +31,13 @@ export class EpisodicMemoryFactory {
         return {
             id: crypto.randomUUID(),
             memoryType: MemoryType.EPISODIC,
-            timestamp,
+            timestamp: now,
             content,
             metadata: memoryMetadata,
-            lastAccessed: timestamp,
-            accessCount: 0
+            lastAccessed: now,
+            accessCount: 0,
+            createdAt: now,
+            validAt: now
         };
     }
 }

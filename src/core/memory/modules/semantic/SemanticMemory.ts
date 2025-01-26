@@ -5,9 +5,9 @@ import {
 } from '../../base';
 import { DeclarativeMemory } from '../../DeclarativeMemory';
 import { IMemoryStorage, IMemoryIndex, IGraphStorage, IGraphIndex } from '../../storage';
-import { ISemanticMemoryUnit, ConceptNode, ConceptRelation, RelationType, createSemanticMetadata } from './types';
+import { ISemanticMemoryUnit, ConceptNode, ConceptRelation, RelationType } from './types';
 import { GraphOperations } from '../../graph/operations';
-import { IGraphNode, IGraphEdge, TraversalOptions } from '../../graph/types';
+import { IGraphNode, IGraphEdge, TraversalOptions, GraphFilter } from '../../graph/types';
 import { EmbeddingSearch } from '../../graph/search/embedding';
 import { ResultReranker } from '../../graph/search/reranking';
 import { GraphLLMProcessor } from '../../graph/llm/processor';
@@ -77,12 +77,15 @@ export class SemanticMemory extends DeclarativeMemory {
             }
         }
 
+        // Create memory unit with validated content
         const memoryUnit: ISemanticMemoryUnit = {
             id: crypto.randomUUID(),
             content: validatedContent,
-            metadata: metadata || createSemanticMetadata(now),
+            metadata: metadata || new Map(),
             timestamp: now,
-            memoryType: MemoryType.SEMANTIC
+            memoryType: MemoryType.SEMANTIC,
+            createdAt: now,  // Add required createdAt field
+            validAt: now    // Semantic memories are valid from creation by default
         };
 
         // Create graph node
@@ -93,11 +96,8 @@ export class SemanticMemory extends DeclarativeMemory {
             metadata: memoryUnit.metadata,
             timestamp: memoryUnit.timestamp,
             memoryType: memoryUnit.memoryType,
-            temporal: {
-                eventTime: 'lastVerified' in validatedContent ? validatedContent.lastVerified : now,
-                ingestionTime: now,
-                validFrom: 'lastVerified' in validatedContent ? validatedContent.lastVerified : now
-            }
+            createdAt: now,
+            validAt: now
         };
 
         // Store in graph
@@ -120,7 +120,7 @@ export class SemanticMemory extends DeclarativeMemory {
     async findSimilar(query: string): Promise<IMemoryUnit[]> {
         // Get embedding from LLM processor
         const embedding = await this.llm.process(
-            GraphTask.GENERATE_EMBEDDING,
+            GraphTask.PREPARE_FOR_EMBEDDING,
             { text: query },
             z.array(z.number())
         );
@@ -150,9 +150,8 @@ export class SemanticMemory extends DeclarativeMemory {
         return this.storage.findNodes({
             nodeTypes: ['concept'],
             temporal: {
-                from: start,
-                to: end,
-                timelineType: 'event'
+                validAfter: start,
+                validBefore: end
             }
         });
     }
@@ -231,13 +230,14 @@ export class SemanticMemory extends DeclarativeMemory {
      */
     private convertToConceptNode(node: IGraphNode): ConceptNode {
         const content = node.content as ConceptNode;
+        const validAt = node.validAt || node.createdAt;
         return {
             id: node.id,
             name: content.name,
             type: content.type,
             confidence: content.confidence,
             source: content.source,
-            lastVerified: node.temporal.eventTime,
+            lastVerified: validAt,
             properties: node.metadata
         };
     }
@@ -270,5 +270,75 @@ export class SemanticMemory extends DeclarativeMemory {
                'sourceId' in content &&
                'targetId' in content &&
                'type' in content;
+    }
+
+    async addConcept(content: string, metadata?: Map<string, any>): Promise<string> {
+        const now = new Date();
+        const node: IGraphNode = {
+            id: crypto.randomUUID(),
+            type: 'concept',
+            content,
+            metadata: metadata || new Map(),
+            timestamp: now,
+            memoryType: MemoryType.SEMANTIC,
+            createdAt: now,
+            validAt: now  // Concept's business time is when it was created
+        };
+        
+        return this.storage.addNode(node);
+    }
+
+    async addRelation(sourceId: string, targetId: string, relation: string): Promise<string> {
+        const now = new Date();
+        const edge: IGraphEdge = {
+            id: crypto.randomUUID(),
+            type: relation,
+            sourceId: sourceId,
+            targetId: targetId,
+            metadata: new Map(),
+            createdAt: now,
+            validAt: now,
+            episodeIds: [],  // Add required episodeIds
+        };
+        
+        return this.storage.addEdge(edge);
+    }
+
+    async findConceptsValidAt(date: Date): Promise<IGraphNode[]> {
+        const filter: GraphFilter = {
+            nodeTypes: ['concept'],
+            temporal: {
+                validAfter: date,
+                validBefore: date
+            }
+        };
+        
+        return this.storage.findNodes(filter);
+    }
+
+    protected toSemanticContent(node: IGraphNode): ConceptNode | ConceptRelation {
+        const validAt = node.validAt || node.createdAt;
+        if (node.type === 'concept') {
+            return {
+                id: node.id,
+                name: (node.content as ConceptNode).name,
+                type: 'concept',
+                confidence: node.metadata.get('confidence') || 1.0,
+                source: node.metadata.get('source') || 'system',
+                lastVerified: validAt,
+                properties: node.metadata,
+                weight: 1.0  // Default weight for concept nodes
+            } as ConceptNode;
+        } else {
+            return {
+                id: node.id,
+                sourceId: (node.content as ConceptRelation).sourceId,
+                targetId: (node.content as ConceptRelation).targetId,
+                type: (node.content as ConceptRelation).type,
+                weight: node.metadata.get('weight') || 1.0,
+                confidence: node.metadata.get('confidence') || 1.0,
+                properties: node.metadata
+            } as ConceptRelation;
+        }
     }
 }

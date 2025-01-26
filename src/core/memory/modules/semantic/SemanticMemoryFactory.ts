@@ -10,7 +10,7 @@ export class SemanticMemoryFactory {
      * Create a memory unit from content and metadata
      */
     static createMemoryUnit(content: any, metadata?: Map<string, any>): ISemanticMemoryUnit {
-        const timestamp = new Date();
+        const now = new Date();
         if (content.type === 'concept') {
             return SemanticMemoryFactory.createConceptNode(
                 content.name,
@@ -39,25 +39,27 @@ export class SemanticMemoryFactory {
         properties: Map<string, any> = new Map(),
         metadata?: Map<string, any>
     ): ISemanticMemoryUnit {
-        const timestamp = new Date();
+        const now = new Date();
         const concept: ConceptNode = {
             id: crypto.randomUUID(),
             name,
             type,
             confidence: metadata?.get('confidence') || 1.0,
             source: metadata?.get('source') || 'user',
-            lastVerified: timestamp,
+            lastVerified: now,
             properties
         };
 
         return {
             id: crypto.randomUUID(),
             memoryType: MemoryType.SEMANTIC,
-            timestamp,
+            timestamp: now,
             content: concept,
-            metadata: createSemanticMetadata(timestamp),
-            lastAccessed: timestamp,
-            accessCount: 0
+            metadata: createSemanticMetadata(now),
+            lastAccessed: now,
+            accessCount: 0,
+            createdAt: now,
+            validAt: now
         };
     }
 
@@ -71,7 +73,7 @@ export class SemanticMemoryFactory {
         properties: Map<string, any> = new Map(),
         metadata?: Map<string, any>
     ): ISemanticMemoryUnit {
-        const timestamp = new Date();
+        const now = new Date();
         const relation: ConceptRelation = {
             id: crypto.randomUUID(),
             sourceId,
@@ -85,11 +87,13 @@ export class SemanticMemoryFactory {
         return {
             id: crypto.randomUUID(),
             memoryType: MemoryType.SEMANTIC,
-            timestamp,
+            timestamp: now,
             content: relation,
-            metadata: createSemanticMetadata(timestamp),
-            lastAccessed: timestamp,
-            accessCount: 0
+            metadata: createSemanticMetadata(now),
+            lastAccessed: now,
+            accessCount: 0,
+            createdAt: now,
+            validAt: now
         };
     }
 }

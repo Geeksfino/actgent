@@ -55,15 +55,21 @@ export class ProceduralMemory extends LongTermMemory<IProceduralMemoryUnit> {
             ['lastExecuted', metadata?.get('lastExecuted') || now]
         ]) as ProceduralMetadata;
 
+        const procedure = typeof validatedContent === 'string' ? validatedContent : JSON.stringify(validatedContent);
+        const expectedOutcomes = metadata?.get('expectedOutcomes') || [];
+        const applicableContext = metadata?.get('applicableContext') || [];
+
+        // Create memory unit with validated content
         return {
             id: crypto.randomUUID(),
             content: validatedContent,
             metadata: proceduralMetadata,
             timestamp: now,
             memoryType: MemoryType.PROCEDURAL,
-            procedure: typeof validatedContent === 'string' ? validatedContent : JSON.stringify(validatedContent),
-            expectedOutcomes: metadata?.get('expectedOutcomes') || [],
-            applicableContext: metadata?.get('applicableContext') || []
+            procedure,
+            expectedOutcomes,
+            applicableContext,
+            createdAt: now  // Add required createdAt field
         };
     }
 

@@ -14,15 +14,18 @@ export class WorkingMemoryFactory {
      * @returns A new working memory unit
      */
     static createMemoryUnit(content: any, priority: number = 0.5, relevance: number = 0.5): IWorkingMemoryUnit {
-        const timestamp = new Date();
+        const now = new Date();
+        const metadata = createWorkingMetadata(now, priority, relevance);
         return {
             id: crypto.randomUUID(),
             memoryType: MemoryType.WORKING,
-            timestamp,
+            timestamp: now,
             content,
-            metadata: createWorkingMetadata(timestamp, priority, relevance),
-            lastAccessed: timestamp,
-            accessCount: 0
+            metadata,
+            lastAccessed: now,
+            accessCount: 0,
+            createdAt: now,
+            validAt: now
         };
     }
 
@@ -43,7 +46,9 @@ export class WorkingMemoryFactory {
             content: data.content,
             metadata: createWorkingMetadata(timestamp, priority, relevance),
             lastAccessed: data.lastAccessed || timestamp,
-            accessCount: data.accessCount || 0
+            accessCount: data.accessCount || 0,
+            createdAt: data.createdAt || timestamp,
+            validAt: data.validAt || timestamp
         };
     }
 }

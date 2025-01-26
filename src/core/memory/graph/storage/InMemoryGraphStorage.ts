@@ -1,9 +1,8 @@
 import { IGraphStorage } from '../../storage';
 import { InMemoryStorage } from '../../storage/InMemoryStorage';
-import { IGraphNode, IGraphEdge, GraphFilter } from '../types';
-import { TemporalIndex } from '../temporal';
-import { EmbeddingSearch } from '../search/embedding';
+import { IGraphNode, IGraphEdge, GraphFilter, TemporalMode } from '../types';
 import { IMemoryUnit, MemoryFilter } from '../../base';
+import { EmbeddingSearch } from '../search/embedding';
 import crypto from 'crypto';
 
 /**
@@ -12,17 +11,43 @@ import crypto from 'crypto';
 export class InMemoryGraphStorage extends InMemoryStorage implements IGraphStorage {
     private nodes: Map<string, IGraphNode>;
     private edges: Map<string, IGraphEdge>;
-    private temporalIndex: TemporalIndex;
-    private embeddingSearch: EmbeddingSearch;
     private adjacencyList: Map<string, Set<string>>;
+    private embeddingSearch: EmbeddingSearch;
+    
+    // Temporal indices for efficient querying
+    private nodeTemporalIndex: {
+        byCreatedAt: Map<string, Date>;
+        byExpiredAt: Map<string, Date>;
+        byValidAt: Map<string, Date>;
+    };
+    
+    private edgeTemporalIndex: {
+        byCreatedAt: Map<string, Date>;
+        byExpiredAt: Map<string, Date>;
+        byValidAt: Map<string, Date>;
+        byInvalidAt: Map<string, Date>;
+    };
 
     constructor(maxCapacity: number = 1000) {
         super(maxCapacity);
         this.nodes = new Map();
         this.edges = new Map();
-        this.temporalIndex = new TemporalIndex();
-        this.embeddingSearch = new EmbeddingSearch();
         this.adjacencyList = new Map();
+        this.embeddingSearch = new EmbeddingSearch();
+        
+        // Initialize temporal indices
+        this.nodeTemporalIndex = {
+            byCreatedAt: new Map(),
+            byExpiredAt: new Map(),
+            byValidAt: new Map()
+        };
+        
+        this.edgeTemporalIndex = {
+            byCreatedAt: new Map(),
+            byExpiredAt: new Map(),
+            byValidAt: new Map(),
+            byInvalidAt: new Map()
+        };
     }
 
     // IMemoryStorage implementation
@@ -73,8 +98,16 @@ export class InMemoryGraphStorage extends InMemoryStorage implements IGraphStora
         // Store as both memory unit and graph node
         this.nodes.set(id, node);
         
-        // Update indices
-        this.temporalIndex.addNode(id, node.temporal);
+        // Update temporal indices
+        this.nodeTemporalIndex.byCreatedAt.set(node.id, node.createdAt);
+        if (node.expiredAt) {
+            this.nodeTemporalIndex.byExpiredAt.set(node.id, node.expiredAt);
+        }
+        if (node.validAt) {
+            this.nodeTemporalIndex.byValidAt.set(node.id, node.validAt);
+        }
+
+        // Update embedding search if available
         if (node.metadata?.get('embedding')) {
             this.embeddingSearch.addEmbedding(id, node.metadata.get('embedding'));
         }
@@ -93,40 +126,39 @@ export class InMemoryGraphStorage extends InMemoryStorage implements IGraphStora
     }
 
     async findNodes(filter: GraphFilter): Promise<IGraphNode[]> {
-        const nodes: IGraphNode[] = [];
+        let nodes = Array.from(this.nodes.values());
         
-        for (const [_, node] of this.nodes) {
-            let matches = true;
-
-            // Check node types
-            if (filter.nodeTypes && !filter.nodeTypes.includes(node.type)) {
-                matches = false;
-            }
-
-            // Check temporal constraints
-            if (filter.temporal) {
-                const { from, to, timelineType = 'event' } = filter.temporal;
-                const time = timelineType === 'event' ? 
-                    node.temporal.eventTime : 
-                    node.temporal.ingestionTime;
-
-                if (from && time < from) matches = false;
-                if (to && time > to) matches = false;
-            }
-
-            // Check metadata
-            if (filter.metadata) {
-                for (const [key, value] of filter.metadata) {
-                    if (node.metadata.get(key) !== value) {
-                        matches = false;
-                        break;
-                    }
-                }
-            }
-
-            if (matches) nodes.push(node);
+        // Apply type filter
+        if (filter.nodeTypes?.length) {
+            nodes = nodes.filter(node => filter.nodeTypes!.includes(node.type));
         }
-
+        
+        // Apply temporal filter
+        if (filter.temporal) {
+            const { createdAfter, createdBefore, expiredAfter, expiredBefore,
+                   validAfter, validBefore } = filter.temporal;
+                   
+            nodes = nodes.filter(node => {
+                if (createdAfter && node.createdAt < createdAfter) return false;
+                if (createdBefore && node.createdAt > createdBefore) return false;
+                if (expiredAfter && node.expiredAt && node.expiredAt < expiredAfter) return false;
+                if (expiredBefore && node.expiredAt && node.expiredAt > expiredBefore) return false;
+                if (validAfter && node.validAt && node.validAt < validAfter) return false;
+                if (validBefore && node.validAt && node.validAt > validBefore) return false;
+                return true;
+            });
+        }
+        
+        // Apply metadata filter
+        if (filter.metadata?.size) {
+            nodes = nodes.filter(node => {
+                for (const [key, value] of filter.metadata!.entries()) {
+                    if (node.metadata.get(key) !== value) return false;
+                }
+                return true;
+            });
+        }
+        
         return nodes;
     }
 
@@ -147,7 +179,24 @@ export class InMemoryGraphStorage extends InMemoryStorage implements IGraphStora
         const id = edge.id || crypto.randomUUID();
         edge.id = id;
 
+        // Validate that source and target nodes exist
+        if (!this.nodes.has(edge.sourceId) || !this.nodes.has(edge.targetId)) {
+            throw new Error('Source or target node does not exist');
+        }
+
         this.edges.set(id, edge);
+
+        // Update temporal indices
+        this.edgeTemporalIndex.byCreatedAt.set(edge.id, edge.createdAt);
+        if (edge.expiredAt) {
+            this.edgeTemporalIndex.byExpiredAt.set(edge.id, edge.expiredAt);
+        }
+        if (edge.validAt) {
+            this.edgeTemporalIndex.byValidAt.set(edge.id, edge.validAt);
+        }
+        if (edge.invalidAt) {
+            this.edgeTemporalIndex.byInvalidAt.set(edge.id, edge.invalidAt);
+        }
 
         // Update adjacency list
         let sourceNeighbors = this.adjacencyList.get(edge.sourceId);
@@ -235,6 +284,83 @@ export class InMemoryGraphStorage extends InMemoryStorage implements IGraphStora
         return nodeIds
             .map(id => this.nodes.get(id))
             .filter((node): node is IGraphNode => node !== undefined);
+    }
+
+    async findValidAt(date: Date, mode: TemporalMode = TemporalMode.BUSINESS_TIME): Promise<{nodes: IGraphNode[], edges: IGraphEdge[]}> {
+        let nodes = Array.from(this.nodes.values());
+        let edges = Array.from(this.edges.values());
+        
+        switch (mode) {
+            case TemporalMode.SYSTEM_TIME:
+                // Filter by system time
+                nodes = nodes.filter(node => 
+                    node.createdAt <= date && (!node.expiredAt || node.expiredAt > date)
+                );
+                edges = edges.filter(edge =>
+                    edge.createdAt <= date && (!edge.expiredAt || edge.expiredAt > date)
+                );
+                break;
+                
+            case TemporalMode.BUSINESS_TIME:
+                // Filter by business time
+                nodes = nodes.filter(node =>
+                    !node.validAt || node.validAt <= date
+                );
+                edges = edges.filter(edge =>
+                    (!edge.validAt || edge.validAt <= date) &&
+                    (!edge.invalidAt || edge.invalidAt > date)
+                );
+                break;
+                
+            case TemporalMode.BI_TEMPORAL:
+                // Filter by both system and business time
+                nodes = nodes.filter(node =>
+                    node.createdAt <= date &&
+                    (!node.expiredAt || node.expiredAt > date) &&
+                    (!node.validAt || node.validAt <= date)
+                );
+                edges = edges.filter(edge =>
+                    edge.createdAt <= date &&
+                    (!edge.expiredAt || edge.expiredAt > date) &&
+                    (!edge.validAt || edge.validAt <= date) &&
+                    (!edge.invalidAt || edge.invalidAt > date)
+                );
+                break;
+        }
+        
+        return { nodes, edges };
+    }
+
+    async invalidateEdge(edgeId: string, at: Date): Promise<void> {
+        const edge = await this.getEdge(edgeId);
+        if (edge) {
+            edge.expiredAt = at;
+            this.edgeTemporalIndex.byExpiredAt.set(edgeId, at);
+        }
+    }
+
+    async clear(): Promise<void> {
+        this.nodes.clear();
+        this.edges.clear();
+        this.adjacencyList.clear();
+        
+        // Clear temporal indices
+        this.nodeTemporalIndex.byCreatedAt.clear();
+        this.nodeTemporalIndex.byExpiredAt.clear();
+        this.nodeTemporalIndex.byValidAt.clear();
+        
+        this.edgeTemporalIndex.byCreatedAt.clear();
+        this.edgeTemporalIndex.byExpiredAt.clear();
+        this.edgeTemporalIndex.byValidAt.clear();
+        this.edgeTemporalIndex.byInvalidAt.clear();
+    }
+
+    async getNode(id: string): Promise<IGraphNode | null> {
+        return this.nodes.get(id) || null;
+    }
+
+    async getEdge(id: string): Promise<IGraphEdge | null> {
+        return this.edges.get(id) || null;
     }
 
     private isGraphNode(memory: IMemoryUnit): memory is IGraphNode {

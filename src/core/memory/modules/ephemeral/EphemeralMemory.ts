@@ -46,12 +46,14 @@ class EphemeralMemory implements IMemory<EphemeralMemoryUnit> {
             }
         }
 
+        const now = new Date();
         return {
             id: crypto.randomUUID(),
             content: validatedContent,
             metadata: metadata || new Map(),
-            timestamp: new Date(),
-            memoryType: MemoryType.EPHEMERAL
+            timestamp: now,
+            memoryType: MemoryType.EPHEMERAL,
+            createdAt: now
         };
     }
 

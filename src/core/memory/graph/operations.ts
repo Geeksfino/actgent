@@ -1,4 +1,4 @@
-import { IGraphNode, IGraphEdge, GraphFilter, TraversalOptions } from './types';
+import { IGraphNode, IGraphEdge, GraphFilter, TraversalOptions, TemporalMode } from './types';
 import { IGraphStorage } from '../storage';
 import { GraphLLMProcessor } from './llm/processor';
 import { 
@@ -8,7 +8,8 @@ import {
     EmbeddingSchema, 
     SearchResultSchema,
     TemporalSchema,
-    SearchResult
+    SearchResult,
+    TemporalResult
 } from './llm/types';
 
 /**
@@ -62,7 +63,7 @@ export class GraphOperations {
 
         // Use LLM to find meaningful path
         const path = await this.llm.process(
-            GraphTask.FIND_PATH,
+            GraphTask.EVALUATE_PATHS,
             { start: source, end: target, nodes, edges },
             PathSchema
         );
@@ -82,7 +83,7 @@ export class GraphOperations {
             GraphTask.EXTRACT_TEMPORAL,
             { 
                 text: node.content,
-                referenceTime: node.temporal.eventTime.toISOString()
+                referenceTime: node.validAt?.toISOString() || new Date().toISOString()
             },
             TemporalSchema
         );
@@ -90,9 +91,8 @@ export class GraphOperations {
         // Find nodes within temporal context
         const filter: GraphFilter = {
             temporal: {
-                from: new Date(temporal.validFrom || temporal.eventTime),
-                to: new Date(temporal.validTo || temporal.eventTime),
-                timelineType: 'event'
+                validAfter: temporal.validAt,
+                validBefore: temporal.invalidAt
             }
         };
 
@@ -112,7 +112,7 @@ export class GraphOperations {
 
         // Use LLM to detect communities
         const communities = await this.llm.process(
-            GraphTask.DETECT_COMMUNITIES,
+            GraphTask.REFINE_COMMUNITIES,
             { nodes, edges },
             CommunitySchema
         );
@@ -132,14 +132,14 @@ export class GraphOperations {
      */
     async searchNodes(query: string): Promise<IGraphNode[]> {
         // Generate embedding using LLM
-        const embedding = await this.llm.process(
-            GraphTask.GENERATE_EMBEDDING,
+        const prepared = await this.llm.process(
+            GraphTask.PREPARE_FOR_EMBEDDING,
             { text: query },
             EmbeddingSchema
         );
 
         // Search using embedding
-        const results = await this.storage.search(embedding);
+        const results = await this.storage.search(prepared);
 
         // Rerank using LLM
         const ranked = await this.llm.process<SearchResult>(
@@ -151,5 +151,36 @@ export class GraphOperations {
         return results.filter(r => 
             ranked.find(rank => rank.id === r.id)
         );
+    }
+
+    async findNodesInTimeRange(start: Date, end: Date, mode: TemporalMode = TemporalMode.BUSINESS_TIME): Promise<IGraphNode[]> {
+        const filter: GraphFilter = {
+            temporal: mode === TemporalMode.SYSTEM_TIME ? {
+                createdAfter: start,
+                createdBefore: end
+            } : {
+                validAfter: start,
+                validBefore: end
+            }
+        };
+        
+        return this.storage.findNodes(filter);
+    }
+
+    async updateNodeTemporalInfo(nodeId: string, temporalInfo: TemporalResult): Promise<void> {
+        const node = await this.storage.getNode(nodeId);
+        if (!node) {
+            throw new Error(`Node ${nodeId} not found`);
+        }
+
+        // Update business time
+        if (temporalInfo.validAt) {
+            node.validAt = temporalInfo.validAt;
+        }
+        if (temporalInfo.invalidAt) {
+            node.invalidAt = temporalInfo.invalidAt;
+        }
+
+        await this.storage.addNode(node);
     }
 }

@@ -33,13 +33,19 @@ export interface IMemoryUnit {
     id: string;
     content: any;
     metadata: Map<string, any>;
-    timestamp: Date;
+    timestamp: Date;        // Legacy timestamp, kept for backward compatibility
     memoryType: MemoryType;
     accessCount?: number;
     lastAccessed?: Date;
     priority?: number;
     consolidationMetrics?: ConsolidationMetrics;
     associations?: Set<string>;
+    
+    // Temporal fields
+    createdAt: Date;      // When we knew about it (system time)
+    expiredAt?: Date;     // When this version was superseded (system time)
+    validAt?: Date;       // When it was true (business time)
+    invalidAt?: Date;     // When it stopped being true (business time)
 }
 
 /**
@@ -122,6 +128,16 @@ export interface MemoryFilter {
     contentFilters?: Map<string, any>[];
     orderBy?: 'lastAccessed' | 'accessCount' | 'timestamp';
     limit?: number;
+    temporal?: {
+        createdAfter?: Date;
+        createdBefore?: Date;
+        expiredAfter?: Date;
+        expiredBefore?: Date;
+        validAfter?: Date;
+        validBefore?: Date;
+        invalidAfter?: Date;
+        invalidBefore?: Date;
+    };
 }
 
 /**

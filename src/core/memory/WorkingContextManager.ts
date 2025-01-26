@@ -113,11 +113,18 @@ export class WorkingContextManager {
         }
 
         // Store updated context in working memory
+        const now = new Date();
+        const contextDomain = this.currentContext && 'domain' in this.currentContext ? this.currentContext.domain : 'general';
         await this.workingMemory.store({
-            id: 'current_context',
+            id: crypto.randomUUID(),
             content: this.currentContext,
-            metadata: new Map([['type', 'context']]),
-            timestamp: new Date()
+            metadata: new Map([
+                ['type', 'working_context'],
+                ['domain', contextDomain]
+            ]),
+            timestamp: now,
+            createdAt: now,
+            validAt: now
         });
 
         // Emit context change event

@@ -1,17 +1,26 @@
 import { z } from 'zod';
-import { IGraphNode, IGraphEdge, ITemporalMetadata } from '../types';
+import { IGraphNode, IGraphEdge } from '../types';
+
+/**
+ * Available graph operation functions
+ */
+export enum GraphFunction {
+  UPDATE_SEARCH_RANKS = 'update_search_ranks',
+  REFINE_COMMUNITIES = 'refine_communities',
+  EVALUATE_PATHS = 'evaluate_paths',
+  ADD_TEMPORAL_EDGES = 'add_temporal_edges',
+  PREPARE_FOR_EMBEDDING = 'prepare_for_embedding'
+}
 
 /**
  * Available LLM tasks for graph operations
  */
 export enum GraphTask {
-  FIND_COMMUNITIES = 'find_communities',
-  GENERATE_EMBEDDING = 'generate_embedding',
   RERANK_RESULTS = 'rerank_results',
-  EXTRACT_TEMPORAL = 'extract_temporal',
-  FIND_PATH = 'find_path',
-  PARSE_DATE = 'parse_date',
-  DETECT_COMMUNITIES = 'detect_communities'
+  REFINE_COMMUNITIES = 'refine_communities',
+  EVALUATE_PATHS = 'evaluate_paths',
+  PREPARE_FOR_EMBEDDING = 'prepare_for_embedding',
+  EXTRACT_TEMPORAL = 'extract_temporal'
 }
 
 /**
@@ -41,14 +50,110 @@ export const SearchResultSchema = z.array(z.object({
 }));
 
 /**
+ * Schema for embedding preparation
+ */
+export const PrepareForEmbeddingSchema = z.object({
+  function: z.literal(GraphFunction.PREPARE_FOR_EMBEDDING),
+  arguments: z.object({
+    text: z.string(),
+    key_concepts: z.array(z.string()),
+    suggested_context: z.string()
+  })
+});
+
+/**
+ * Schema for search results
+ */
+export const UpdateSearchRanksSchema = z.object({
+  function: z.literal(GraphFunction.UPDATE_SEARCH_RANKS),
+  arguments: z.object({
+    ranked_results: z.array(z.object({
+      id: z.string(),
+      score: z.number().min(0).max(1),
+      relevance_explanation: z.string()
+    })),
+    search_context: z.object({
+      query_intent: z.string(),
+      key_concepts: z.array(z.string())
+    })
+  })
+});
+
+/**
+ * Schema for community refinement
+ */
+export const RefinedCommunitiesSchema = z.object({
+  function: z.literal(GraphFunction.REFINE_COMMUNITIES),
+  arguments: z.object({
+    communities: z.array(z.object({
+      id: z.string(),
+      name: z.string(),
+      nodes: z.array(z.string()),
+      description: z.string(),
+      confidence: z.number().min(0).max(1)
+    })),
+    relationships: z.array(z.object({
+      source: z.string(),
+      target: z.string(),
+      type: z.string(),
+      description: z.string()
+    })).optional()
+  })
+});
+
+/**
+ * Schema for path evaluation
+ */
+export const EvaluatePathsSchema = z.object({
+  function: z.literal(GraphFunction.EVALUATE_PATHS),
+  arguments: z.object({
+    paths: z.array(z.object({
+      path_id: z.string(),
+      nodes: z.array(z.string()),
+      relevance_score: z.number().min(0).max(1),
+      explanation: z.string(),
+      key_relationships: z.array(z.object({
+        from: z.string(),
+        to: z.string(),
+        significance: z.string()
+      }))
+    }))
+  })
+});
+
+/**
+ * Schema for temporal extraction
+ */
+export const ExtractTemporalSchema = z.object({
+  function: z.literal(GraphFunction.ADD_TEMPORAL_EDGES),
+  arguments: z.object({
+    edges: z.array(z.object({
+      source: z.string(),
+      target: z.string(),
+      type: z.string(),
+      start_time: z.string().datetime().optional(),
+      end_time: z.string().datetime().optional(),
+      confidence: z.number().min(0).max(1)
+    }))
+  })
+});
+
+/**
  * Schema for temporal extraction
  */
 export const TemporalSchema = z.object({
-  eventTime: z.string().datetime(),
-  ingestionTime: z.string().datetime(),
-  validFrom: z.string().datetime().optional(),
-  validTo: z.string().datetime().optional(),
+  validAt: z.date().optional(),
+  invalidAt: z.date().optional(),
   confidence: z.number().min(0).max(1)
+});
+
+/**
+ * Schema for temporal validation
+ */
+export const TemporalValidationSchema = z.object({
+  isValid: z.boolean(),
+  confidence: z.number().min(0).max(1),
+  reason: z.string().optional()
 });
 
 /**
@@ -73,8 +178,18 @@ export const CommunitySchema = z.object({
   }))
 });
 
+export const CommunityResult = z.object({
+  communities: z.array(z.array(z.string())),
+  explanation: z.string()
+});
+
 export type Embedding = z.infer<typeof EmbeddingSchema>;
 export type SearchResult = z.infer<typeof SearchResultSchema>;
+export type PrepareForEmbedding = z.infer<typeof PrepareForEmbeddingSchema>;
+export type UpdateSearchRanks = z.infer<typeof UpdateSearchRanksSchema>;
+export type RefinedCommunities = z.infer<typeof RefinedCommunitiesSchema>;
+export type EvaluatePaths = z.infer<typeof EvaluatePathsSchema>;
 export type TemporalResult = z.infer<typeof TemporalSchema>;
+export type TemporalValidationResult = z.infer<typeof TemporalValidationSchema>;
 export type PathResult = z.infer<typeof PathSchema>;
-export type CommunityResult = z.infer<typeof CommunitySchema>;
+export type CommunityResult = z.infer<typeof CommunityResult>;
