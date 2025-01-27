@@ -8,6 +8,29 @@ export interface RerankerConfig {
     maxResults?: number;
     minScore?: number;
     model?: string;
+    weights?: {
+        relevance?: number;    // Base relevance score
+        crossEncoder?: number; // Cross-encoder semantic score
+        diversity?: number;    // MMR diversity score
+        temporal?: number;     // Time-based score
+        connectivity?: number; // Graph connectivity score
+        importance?: number;   // Node importance score
+    };
+    crossEncoder?: {
+        model: string;
+        batchSize: number;
+        scoreThreshold: number;
+        maxTokens?: number;
+        temperature?: number;
+    };
+    mmr?: {
+        diversityWeight: number;
+        lambda: number;
+    };
+    temporal?: {
+        decayRate: number;
+        referenceTime?: Date;
+    };
 }
 
 /**

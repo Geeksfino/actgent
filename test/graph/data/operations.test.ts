@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { GraphOperations } from '../../../src/core/memory/graph/data/operations';
+import { MemoryGraph } from '../../../src/core/memory/graph/data/operations';
 import { InMemoryGraphStorage } from '../../../src/core/memory/graph/data/InMemoryGraphStorage';
 import { GraphLLMProcessor } from '../../../src/core/memory/graph/processing/llm/processor';
 import { GraphFilter, IGraphNode, IGraphEdge, GraphMemoryType } from '../../../src/core/memory/graph/data/types';
@@ -8,9 +8,9 @@ import { MockDataGenerator } from '../utils/mock_data';
 // Mock LLM processor
 let mockLLMProcessor: GraphLLMProcessor;
 
-describe('GraphOperations', () => {
+describe('MemoryGraph', () => {
     let storage: InMemoryGraphStorage;
-    let operations: GraphOperations;
+    let operations: MemoryGraph;
 
     beforeEach(() => {
         storage = new InMemoryGraphStorage();
@@ -21,7 +21,7 @@ describe('GraphOperations', () => {
             llm: {},
             config: {}
         } as unknown as GraphLLMProcessor;
-        operations = new GraphOperations(storage, mockLLMProcessor);
+        operations = new MemoryGraph(storage, mockLLMProcessor);
         vi.clearAllMocks();
     });
 

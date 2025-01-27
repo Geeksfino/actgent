@@ -229,6 +229,7 @@ export class TemporalHybridSearch extends HybridSearch {
 
         // Filter out null results and rerank
         const rerankedResults = await this.reranker.rerank(
+            query,
             nodesWithScores.filter((item): item is { node: IGraphNode; score: number } => item !== null),
             filter
         );

@@ -18,9 +18,9 @@ import {
 } from '../processing/llm/types';
 
 /**
- * Core graph operations implementation using LLM for complex operations
+ * Core memory graph implementation using LLM for complex operations
  */
-export class GraphOperations {
+export class MemoryGraph {
     constructor(
         private storage: IGraphStorage,
         private llm: GraphLLMProcessor

@@ -11,7 +11,7 @@ export {
 
 // Storage implementations
 export { InMemoryGraphStorage } from './data/InMemoryGraphStorage';
-export { GraphOperations } from './data/operations';
+export { MemoryGraph } from './data/operations';
 
 // Processing
 export { GraphLLMProcessor } from './processing/llm/processor';

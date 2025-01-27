@@ -1,6 +1,6 @@
 import { IMemoryUnit } from './base';
 import { MemoryFilter } from './base';
-import { IGraphNode, IGraphEdge, GraphFilter, GraphResult } from './graph/types';
+import { IGraphNode, IGraphEdge, GraphFilter } from './graph/types';
 
 /**
  * Interface for memory retrieval operations
