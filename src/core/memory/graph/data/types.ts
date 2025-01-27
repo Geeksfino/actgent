@@ -1,3 +1,5 @@
+import { GraphTask } from '../types';
+
 /**
  * Base interface for graph storage and indexing operations
  */
@@ -149,14 +151,4 @@ export enum CoreTemporalMode {
     CURRENT = 'current',
     HISTORICAL = 'historical',
     ALL = 'all'
-}
-
-/**
- * Graph operation tasks
- */
-export enum GraphTask {
-    EVALUATE_TEMPORAL = 'evaluate_temporal',
-    EVALUATE_PATHS = 'evaluate_paths',
-    EVALUATE_COMMUNITY = 'evaluate_community',
-    EVALUATE_SEARCH = 'evaluate_search'
 }

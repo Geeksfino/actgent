@@ -8,9 +8,8 @@ import {
 } from './types';
 import { GraphLLMProcessor } from '../processing/llm/processor';
 import { TimeMode } from '../processing/temporal/temporal';
-
+import { GraphTask } from '../types';
 import { 
-    GraphTask,
     PathResult,
     CommunityResult,
     SearchResult,

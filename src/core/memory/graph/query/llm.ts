@@ -1,6 +1,7 @@
 import { IGraphNode } from '../data/types';
 import { GraphLLMProcessor } from '../processing/llm/processor';
-import { GraphTask, SearchResult } from '../processing/llm/types';
+import { SearchResult } from '../processing/llm/types';
+import { GraphTask } from '../types';
 import { IReranker, RerankerConfig, RerankResult } from './types';
 
 /**

@@ -1,36 +1,11 @@
 import { z } from 'zod';
 import { IGraphNode, IGraphEdge } from '../../data/types';
-
-/**
- * Available graph operation functions
- */
-export enum GraphFunction {
-    UPDATE_SEARCH_RANKS = 'update_search_ranks',
-    REFINE_COMMUNITIES = 'refine_communities',
-    EVALUATE_PATHS = 'evaluate_paths',
-    ADD_TEMPORAL_EDGES = 'add_temporal_edges',
-    PREPARE_FOR_EMBEDDING = 'prepare_for_embedding'
-}
-
-/**
- * Available LLM tasks for graph operations
- */
-export enum GraphTask {
-    RERANK_RESULTS = 'rerank_results',
-    REFINE_COMMUNITIES = 'refine_communities',
-    EVALUATE_PATHS = 'evaluate_paths',
-    EXTRACT_TEMPORAL = 'extract_temporal',
-    PREPARE_FOR_EMBEDDING = 'prepare_for_embedding'
-}
+import { GraphTask, LLMConfig } from '../../types';
 
 /**
  * Configuration for LLM requests
  */
-export interface LLMConfig {
-    model: string;
-    temperature: number;
-    maxTokens: number;
-}
+// Removed LLMConfig interface
 
 // Zod Schemas for LLM responses
 export const EmbeddingSchema = z.array(z.number());
@@ -87,3 +62,5 @@ export type SearchResult = z.infer<typeof SearchResultSchema>[number];
 export type PathResult = z.infer<typeof PathSchema>[number];
 export type CommunityResult = z.infer<typeof CommunitySchema>[number];
 export type TemporalResult = z.infer<typeof TemporalSchema>[number];
+
+export { GraphTask } from '../../types';

@@ -1,25 +1,6 @@
 import { z } from 'zod';
 import { IGraphNode, IGraphEdge } from '../../data/types';
-
-/**
- * Available LLM tasks for graph operations
- */
-export enum GraphTask {
-    RERANK_RESULTS = 'rerank_results',
-    REFINE_COMMUNITIES = 'refine_communities',
-    EVALUATE_PATHS = 'evaluate_paths',
-    EXTRACT_TEMPORAL = 'extract_temporal',
-    PREPARE_FOR_EMBEDDING = 'prepare_for_embedding'
-}
-
-/**
- * Configuration for LLM requests
- */
-export interface LLMConfig {
-    model: string;
-    temperature: number;
-    maxTokens: number;
-}
+import { GraphTask } from '../../types';
 
 // Zod Schemas for LLM responses
 export const EmbeddingSchema = z.array(z.number());
@@ -48,6 +29,18 @@ export const TemporalSchema = z.array(z.object({
     relationship: z.string(),
     confidence: z.number()
 }));
+
+/**
+ * Schema for episode consolidation results
+ */
+export const EpisodeConsolidationSchema = z.object({
+    content: z.string().describe('The consolidated content that summarizes the pattern or theme'),
+    sourceEpisodeIds: z.array(z.string()).describe('IDs of the source episodes that were consolidated'),
+    confidence: z.number().min(0).max(1).describe('Confidence score for the consolidation'),
+    metadata: z.record(z.any()).optional().describe('Additional metadata about the consolidation')
+});
+
+export type EpisodeConsolidation = z.infer<typeof EpisodeConsolidationSchema>;
 
 // Result Types
 export interface SearchResult {

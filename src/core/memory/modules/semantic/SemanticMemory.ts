@@ -3,15 +3,24 @@ import {
     MemoryFilter,
     IMemoryUnit
 } from '../../base';
+import { 
+    IGraphNode, 
+    IGraphEdge, 
+    IGraphStorage,
+    IGraphIndex,
+    GraphFilter
+} from '../../graph/data/types';
+import { GraphTask } from '../../graph/types';
+import { 
+    ConceptNode, 
+    ConceptRelation, 
+    RelationType,
+    ISemanticMemoryUnit 
+} from './types';
 import { DeclarativeMemory } from '../../DeclarativeMemory';
-import { IMemoryStorage, IMemoryIndex, IGraphStorage, IGraphIndex } from '../../storage';
-import { ISemanticMemoryUnit, ConceptNode, ConceptRelation, RelationType } from './types';
-import { GraphOperations } from '../../graph/operations';
-import { IGraphNode, IGraphEdge, TraversalOptions, GraphFilter } from '../../graph/types';
-import { EmbeddingSearch } from '../../graph/search/embedding';
-import { ResultReranker } from '../../graph/search/reranking';
-import { GraphLLMProcessor } from '../../graph/llm/processor';
-import { GraphTask } from '../../graph/llm/types';
+import { GraphLLMProcessor } from '../../graph/processing/llm/processor';
+import { MemoryGraph } from '../../graph/data/operations';
+import { IMemoryStorage, IMemoryIndex } from '../../storage';
 import crypto from 'crypto';
 import { z } from 'zod';
 
@@ -22,34 +31,160 @@ interface INodeWithScore {
 }
 
 /**
+ * Adapter to make IGraphStorage work with IMemoryStorage
+ */
+class GraphStorageAdapter implements IMemoryStorage {
+    constructor(private graphStorage: IGraphStorage) {}
+
+    async store(memory: IMemoryUnit): Promise<void> {
+        const node = await this.memoryUnitToGraphNode(memory);
+        await this.graphStorage.addNode(node);
+    }
+
+    async retrieve(id: string): Promise<IMemoryUnit | null> {
+        const node = await this.graphStorage.getNode(id);
+        return node ? this.graphNodeToMemoryUnit(node) : null;
+    }
+
+    async retrieveByFilter(filter: MemoryFilter): Promise<IMemoryUnit[]> {
+        const graphFilter: GraphFilter = {
+            nodeTypes: ['concept'],
+            metadata: filter.metadataFilters?.[0],
+            maxResults: filter.limit
+        };
+        const { nodes } = await this.graphStorage.query(graphFilter);
+        return nodes.map(node => this.graphNodeToMemoryUnit(node));
+    }
+
+    async update(memory: IMemoryUnit): Promise<void> {
+        const node = await this.memoryUnitToGraphNode(memory);
+        await this.graphStorage.updateNode(node.id, node);
+    }
+
+    async delete(id: string): Promise<void> {
+        await this.graphStorage.deleteNode(id);
+    }
+
+    getSize(): number {
+        return -1; // Unlimited
+    }
+
+    getCapacity(): number {
+        return -1; // Unlimited
+    }
+
+    async add(id: string, memory: IMemoryUnit): Promise<void> {
+        const node = await this.memoryUnitToGraphNode(memory);
+        node.id = id;
+        await this.graphStorage.addNode(node);
+    }
+
+    async get(id: string): Promise<IMemoryUnit | null> {
+        return this.retrieve(id);
+    }
+
+    async remove(id: string): Promise<void> {
+        return this.delete(id);
+    }
+
+    async clear(): Promise<void> {
+        const { nodes } = await this.graphStorage.query({});
+        for (const node of nodes) {
+            await this.graphStorage.deleteNode(node.id);
+        }
+    }
+
+    async getAll(): Promise<IMemoryUnit[]> {
+        const { nodes } = await this.graphStorage.query({});
+        return nodes.map(node => this.graphNodeToMemoryUnit(node));
+    }
+
+    private async memoryUnitToGraphNode(unit: IMemoryUnit): Promise<IGraphNode> {
+        return {
+            id: unit.id || crypto.randomUUID(),
+            type: 'concept',
+            content: unit.content,
+            metadata: unit.metadata || new Map(),
+            createdAt: unit.createdAt || new Date(),
+            expiredAt: unit.expiredAt,
+            validAt: unit.validAt
+        };
+    }
+
+    private graphNodeToMemoryUnit(node: IGraphNode): IMemoryUnit {
+        return {
+            id: node.id,
+            memoryType: MemoryType.SEMANTIC,
+            content: node.content,
+            metadata: node.metadata,
+            createdAt: node.createdAt,
+            expiredAt: node.expiredAt,
+            validAt: node.validAt,
+            timestamp: node.createdAt // Use createdAt as the legacy timestamp
+        };
+    }
+}
+
+/**
+ * Adapter to make IGraphIndex work with IMemoryIndex
+ */
+class GraphIndexAdapter implements IMemoryIndex {
+    constructor(private graphIndex: IGraphIndex) {}
+
+    async add(unit: IMemoryUnit): Promise<void> {
+        const node: IGraphNode = {
+            id: unit.id,
+            type: 'concept',
+            content: unit.content,
+            metadata: unit.metadata,
+            createdAt: unit.createdAt,
+            expiredAt: unit.expiredAt,
+            validAt: unit.validAt
+        };
+        await this.graphIndex.indexNode(node);
+    }
+
+    async search(query: string): Promise<string[]> {
+        // For now, just search by metadata
+        return this.graphIndex.searchByMetadata({ query });
+    }
+
+    async update(unit: IMemoryUnit): Promise<void> {
+        await this.add(unit); // Re-index the unit
+    }
+
+    async delete(id: string): Promise<void> {
+        // No direct way to delete from index, will be handled by storage cleanup
+    }
+
+    async remove(id: string): Promise<void> {
+        await this.delete(id);
+    }
+}
+
+/**
  * Semantic memory implementation using graph-based storage
  */
 export class SemanticMemory extends DeclarativeMemory {
-    protected graphOps: GraphOperations;
-    protected embeddingSearch: EmbeddingSearch;
-    protected reranker: ResultReranker;
+    protected graphOps: MemoryGraph;
     protected llm: GraphLLMProcessor;
-    protected storage: IGraphStorage;
-    protected index: IGraphIndex;
 
-    constructor(storage: IGraphStorage, index: IGraphIndex, llmClient?: any) {
-        super(storage, index, MemoryType.SEMANTIC);
-        this.storage = storage;
-        this.index = index;
+    constructor(graphStorage: IGraphStorage, graphIndex: IGraphIndex, llmClient?: any) {
+        const storageAdapter = new GraphStorageAdapter(graphStorage);
+        const indexAdapter = new GraphIndexAdapter(graphIndex);
+        super(storageAdapter, indexAdapter, MemoryType.SEMANTIC);
         this.llm = new GraphLLMProcessor(llmClient);
-        this.graphOps = new GraphOperations(storage, this.llm);
-        this.embeddingSearch = new EmbeddingSearch();
-        this.reranker = new ResultReranker();
+        this.graphOps = new MemoryGraph(graphStorage, this.llm);
     }
 
     /**
      * Create a semantic memory unit
      */
-    public override createMemoryUnit<C>(
+    public createMemoryUnit<C>(
         content: string | C, 
         schema?: z.ZodType<C>, 
         metadata?: Map<string, any>
-    ): ISemanticMemoryUnit {
+    ): IMemoryUnit {
         let validatedContent: ConceptNode | ConceptRelation;
         const now = new Date();
 
@@ -67,278 +202,119 @@ export class SemanticMemory extends DeclarativeMemory {
             if (!schema) {
                 throw new Error('Schema is required for object content');
             }
+
             const validationResult = schema.safeParse(content);
             if (!validationResult.success) {
-                throw new Error(`Invalid content: ${validationResult.error}`);
+                throw new Error(`Invalid memory content: ${validationResult.error}`);
             }
             validatedContent = validationResult.data as ConceptNode | ConceptRelation;
-            if (!this.isConceptNode(validatedContent) && !this.isConceptRelation(validatedContent)) {
-                throw new Error('Content must be either a ConceptNode or ConceptRelation');
-            }
         }
 
-        // Create memory unit with validated content
-        const memoryUnit: ISemanticMemoryUnit = {
+        return {
             id: crypto.randomUUID(),
             content: validatedContent,
             metadata: metadata || new Map(),
             timestamp: now,
             memoryType: MemoryType.SEMANTIC,
-            createdAt: now,  // Add required createdAt field
-            validAt: now    // Semantic memories are valid from creation by default
-        };
-
-        // Create graph node
-        const graphNode: IGraphNode = {
-            id: memoryUnit.id,
-            type: 'concept',
-            content: memoryUnit.content,
-            metadata: memoryUnit.metadata,
-            timestamp: memoryUnit.timestamp,
-            memoryType: memoryUnit.memoryType,
+            lastAccessed: now,
+            accessCount: 0,
             createdAt: now,
             validAt: now
         };
-
-        // Store in graph
-        (this.storage as IGraphStorage).addNode(graphNode);
-
-        return memoryUnit;
     }
 
     /**
      * Check if a memory unit is of semantic type
      */
-    isMemoryUnitOfType(unit: IMemoryUnit): unit is ISemanticMemoryUnit {
-        return unit.memoryType === MemoryType.SEMANTIC &&
-               (this.isConceptNode(unit.content) || this.isConceptRelation(unit.content));
+    public isMemoryUnitOfType(unit: IMemoryUnit): unit is ISemanticMemoryUnit {
+        return unit.memoryType === MemoryType.SEMANTIC;
     }
 
     /**
      * Find semantically similar memories
      */
-    async findSimilar(query: string): Promise<IMemoryUnit[]> {
-        // Get embedding from LLM processor
-        const embedding = await this.llm.process(
-            GraphTask.PREPARE_FOR_EMBEDDING,
-            { text: query },
-            z.array(z.number())
-        );
-        
-        // Search using embedding
-        const nodeIds = this.embeddingSearch.search(embedding);
-        
-        // Retrieve full nodes
-        const nodes = await Promise.all(
-            nodeIds.map(id => this.storage.retrieve(id))
-        );
-        
-        return nodes.filter((node): node is IMemoryUnit => node !== null);
+    public async findSimilar(query: string): Promise<ISemanticMemoryUnit[]> {
+        // Use graph operations to find similar concepts
+        const nodes = await this.graphOps.getNodes({
+            nodeTypes: ['concept']
+        } as GraphFilter);
+
+        // Use LLM to rerank results
+        const results = await this.llm.process<INodeWithScore[]>(GraphTask.RERANK_RESULTS, { 
+            query,
+            nodes,
+            maxResults: 10
+        });
+
+        // Convert back to memory units
+        return results.map(result => this.graphNodeToMemoryUnit(result.node) as ISemanticMemoryUnit);
     }
 
     /**
-     * Find memories connected in the knowledge graph
+     * Find related concepts
      */
-    async findConnected(memoryId: string, options?: TraversalOptions): Promise<IMemoryUnit[]> {
-        return this.graphOps.getNeighbors(memoryId, options);
+    public async findRelatedConcepts(conceptId: string): Promise<ISemanticMemoryUnit[]> {
+        const { nodes } = await this.graphOps.getNeighbors(conceptId);
+        return nodes.map(node => this.graphNodeToMemoryUnit(node));
     }
 
     /**
-     * Find memories within a time range
+     * Add a relation between concepts
      */
-    async findInTimeRange(start: Date, end: Date): Promise<IMemoryUnit[]> {
-        return this.storage.findNodes({
+    public async addRelation(sourceId: string, targetId: string, relationType: RelationType): Promise<string> {
+        const relationId = crypto.randomUUID();
+        const now = new Date();
+
+        const relation: ConceptRelation = {
+            id: relationId,
+            type: relationType,
+            sourceId,
+            targetId,
+            weight: 1.0,
+            confidence: 1.0,
+            properties: new Map([['source', 'direct-input'], ['lastVerified', now.toISOString()]])
+        };
+
+        const memoryUnit = await this.createMemoryUnit(relation);
+        await this.storage.store(memoryUnit);
+        return relationId;
+    }
+
+    /**
+     * Find concepts valid at a specific time
+     */
+    public async findConceptsValidAt(date: Date): Promise<ISemanticMemoryUnit[]> {
+        const nodes = await this.graphOps.getNodes({
             nodeTypes: ['concept'],
             temporal: {
-                validAfter: start,
-                validBefore: end
+                validAt: date
             }
-        });
+        } as GraphFilter);
+        
+        return nodes.map((node: IGraphNode<any>) => this.graphNodeToMemoryUnit(node) as ISemanticMemoryUnit);
     }
 
     /**
-     * Get a memory's context including related memories and associations
+     * Convert graph node to memory unit
      */
-    async getMemoryContext(memoryId: string): Promise<{
-        memory: IMemoryUnit;
-        related: IMemoryUnit[];
-        temporal: IMemoryUnit[];
-    }> {
-        const memory = await this.storage.retrieve(memoryId);
-        if (!memory) throw new Error(`Memory ${memoryId} not found`);
-
-        const [related, temporal] = await Promise.all([
-            this.findConnected(memoryId),
-            this.findInTimeRange(
-                new Date(memory.timestamp.getTime() - 24 * 60 * 60 * 1000),
-                new Date(memory.timestamp.getTime() + 24 * 60 * 60 * 1000)
-            )
-        ]);
-
-        return {
-            memory,
-            related,
-            temporal: temporal.filter((m: IMemoryUnit) => m.id !== memoryId)
-        };
-    }
-
-    /**
-     * Find similar concepts using embeddings
-     */
-    async findSimilarConcepts(conceptId: string): Promise<ISemanticMemoryUnit[]> {
-        const concept = await this.storage.retrieve(conceptId);
-        if (!concept) throw new Error(`Concept ${conceptId} not found`);
-        if (!this.isMemoryUnitOfType(concept)) {
-            throw new Error(`Memory ${conceptId} is not a semantic memory unit`);
-        }
-
-        const embedding = concept.metadata.get('embedding');
-        if (!embedding) throw new Error(`No embedding found for concept ${conceptId}`);
-
-        const nodeIds = this.embeddingSearch.search(embedding);
-        const nodes = await Promise.all(
-            nodeIds.map(id => this.storage.retrieve(id))
-        );
-
-        return nodes
-            .filter((node): node is ISemanticMemoryUnit => 
-                node !== null && 
-                this.isMemoryUnitOfType(node)
-            );
-    }
-
-    /**
-     * Find concepts by traversing the graph
-     */
-    public async findRelatedConcepts(conceptId: string, maxDistance: number = 2): Promise<ConceptNode[]> {
-        const nodes = await this.graphOps.findRelated(conceptId, maxDistance);
-        return nodes
-            .filter(node => node.type === 'concept')
-            .map(node => this.convertToConceptNode(node));
-    }
-
-    /**
-     * Find path between concepts
-     */
-    public async findConceptPath(sourceId: string, targetId: string): Promise<ConceptRelation[]> {
-        const edges = await this.graphOps.findPath(sourceId, targetId);
-        return edges.map(edge => this.convertToConceptRelation(edge));
-    }
-
-    /**
-     * Convert graph node to concept node
-     */
-    private convertToConceptNode(node: IGraphNode): ConceptNode {
-        const content = node.content as ConceptNode;
-        const validAt = node.validAt || node.createdAt;
+    private graphNodeToMemoryUnit(node: IGraphNode<any>): ISemanticMemoryUnit {
         return {
             id: node.id,
-            name: content.name,
-            type: content.type,
-            confidence: content.confidence,
-            source: content.source,
-            lastVerified: validAt,
-            properties: node.metadata
-        };
-    }
-
-    /**
-     * Convert graph edge to concept relation
-     */
-    private convertToConceptRelation(edge: IGraphEdge): ConceptRelation {
-        return {
-            id: edge.id,
-            sourceId: edge.sourceId,
-            targetId: edge.targetId,
-            type: edge.type as RelationType,
-            weight: edge.weight || 1.0,
-            confidence: edge.metadata.get('confidence') || 1.0,
-            properties: edge.metadata
-        };
-    }
-
-    private isConceptNode(content: any): content is ConceptNode {
-        return content && 
-               typeof content === 'object' &&
-               'name' in content &&
-               'confidence' in content;
-    }
-
-    private isConceptRelation(content: any): content is ConceptRelation {
-        return content && 
-               typeof content === 'object' &&
-               'sourceId' in content &&
-               'targetId' in content &&
-               'type' in content;
-    }
-
-    async addConcept(content: string, metadata?: Map<string, any>): Promise<string> {
-        const now = new Date();
-        const node: IGraphNode = {
-            id: crypto.randomUUID(),
-            type: 'concept',
-            content,
-            metadata: metadata || new Map(),
-            timestamp: now,
             memoryType: MemoryType.SEMANTIC,
-            createdAt: now,
-            validAt: now  // Concept's business time is when it was created
+            content: node.content,
+            metadata: node.metadata,
+            createdAt: node.createdAt,
+            expiredAt: node.expiredAt,
+            validAt: node.validAt,
+            timestamp: node.createdAt // Use createdAt as the legacy timestamp
         };
-        
-        return this.storage.addNode(node);
     }
 
-    async addRelation(sourceId: string, targetId: string, relation: string): Promise<string> {
-        const now = new Date();
-        const edge: IGraphEdge = {
-            id: crypto.randomUUID(),
-            type: relation,
-            sourceId: sourceId,
-            targetId: targetId,
-            metadata: new Map(),
-            createdAt: now,
-            validAt: now,
-            episodeIds: [],  // Add required episodeIds
-        };
-        
-        return this.storage.addEdge(edge);
+    private isConceptNode(node: IGraphNode<any>): node is IGraphNode<ConceptNode> {
+        return node && node.content && node.type === 'concept';
     }
 
-    async findConceptsValidAt(date: Date): Promise<IGraphNode[]> {
-        const filter: GraphFilter = {
-            nodeTypes: ['concept'],
-            temporal: {
-                validAfter: date,
-                validBefore: date
-            }
-        };
-        
-        return this.storage.findNodes(filter);
-    }
-
-    protected toSemanticContent(node: IGraphNode): ConceptNode | ConceptRelation {
-        const validAt = node.validAt || node.createdAt;
-        if (node.type === 'concept') {
-            return {
-                id: node.id,
-                name: (node.content as ConceptNode).name,
-                type: 'concept',
-                confidence: node.metadata.get('confidence') || 1.0,
-                source: node.metadata.get('source') || 'system',
-                lastVerified: validAt,
-                properties: node.metadata,
-                weight: 1.0  // Default weight for concept nodes
-            } as ConceptNode;
-        } else {
-            return {
-                id: node.id,
-                sourceId: (node.content as ConceptRelation).sourceId,
-                targetId: (node.content as ConceptRelation).targetId,
-                type: (node.content as ConceptRelation).type,
-                weight: node.metadata.get('weight') || 1.0,
-                confidence: node.metadata.get('confidence') || 1.0,
-                properties: node.metadata
-            } as ConceptRelation;
-        }
+    private isConceptRelation(node: IGraphNode<any>): node is IGraphNode<ConceptRelation> {
+        return node && node.content && node.type === 'relation';
     }
 }

@@ -120,6 +120,7 @@ export interface MemoryFilter {
     ids?: string[];
     types?: MemoryType[];
     query?: string;
+    embedding?: number[];  // For similarity search
     dateRange?: {
         start?: Date;
         end?: Date;

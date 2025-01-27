@@ -1,6 +1,7 @@
 import { IGraphNode, IGraphEdge, TemporalMode, IGraphStorage } from '../../data/types';
 import { GraphLLMProcessor } from '../llm/processor';
-import { GraphTask, TemporalResult } from '../llm/types';
+import { TemporalResult } from '../llm/types';
+import { GraphTask } from '../../types';
 
 /**
  * Temporal modes for querying graph state

@@ -6,8 +6,13 @@ export {
     TraversalOptions,
     IGraphStorage,
     IGraphMemoryUnit,
-    GraphMemoryType
+    GraphMemoryType,
 } from './data/types';
+export { 
+    GraphTask,
+    GraphConfig,
+    LLMConfig 
+} from './types';
 
 // Storage implementations
 export { InMemoryGraphStorage } from './data/InMemoryGraphStorage';
@@ -16,12 +21,10 @@ export { MemoryGraph } from './data/operations';
 // Processing
 export { GraphLLMProcessor } from './processing/llm/processor';
 export { 
-    GraphTask,
     PathResult,
     CommunityResult,
     SearchResult,
-    TemporalResult,
-    LLMConfig
+    TemporalResult
 } from './processing/llm/types';
 
 // Query and Search

@@ -1,6 +1,7 @@
 import { IGraphNode, IGraphEdge } from '../../data/types';
 import { GraphLLMProcessor } from '../llm/processor';
-import { GraphTask, CommunityResult } from '../llm/types';
+import { CommunityResult } from '../llm/types';
+import { GraphTask } from '../../types';
 
 /**
  * Community detection options

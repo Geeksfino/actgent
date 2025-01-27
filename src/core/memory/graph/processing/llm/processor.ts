@@ -1,12 +1,12 @@
 import { z } from 'zod';
 import { 
-    GraphTask, 
-    LLMConfig,
     PathSchema,
     CommunitySchema,
     SearchResultSchema,
-    TemporalSchema
+    TemporalSchema,
+    EpisodeConsolidationSchema
 } from './types';
+import { GraphTask, LLMConfig } from '../../types';
 
 const DEFAULT_CONFIG: LLMConfig = {
     model: 'deepseek-coder-6.7b-instruct',
@@ -68,7 +68,13 @@ export class GraphLLMProcessor {
                     prompt: `Prepare text for embedding:\n${JSON.stringify(data)}`,
                     functionSchema: z.array(z.number())
                 };
-            
+
+            case GraphTask.CONSOLIDATE_EPISODES:
+                return {
+                    prompt: `Analyze these episodes and identify patterns to consolidate them into higher-level memories:\n${JSON.stringify(data)}`,
+                    functionSchema: EpisodeConsolidationSchema
+                };
+
             case GraphTask.EXTRACT_TEMPORAL:
                 return {
                     prompt: `Extract temporal relationships from:\n${JSON.stringify(data)}`,
@@ -92,6 +98,8 @@ export class GraphLLMProcessor {
                 return 'extract_temporal';
             case GraphTask.PREPARE_FOR_EMBEDDING:
                 return 'prepare_for_embedding';
+            case GraphTask.CONSOLIDATE_EPISODES:
+                return 'consolidate_episodes';
             default:
                 throw new Error(`Unknown task: ${task}`);
         }
