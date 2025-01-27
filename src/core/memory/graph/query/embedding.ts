@@ -1,4 +1,6 @@
-import { IGraphNode } from '../types';
+import { IGraphNode } from '../data/types';
+import { GraphLLMProcessor } from '../processing/entity/processor';
+import { GraphTask, EmbeddingSchema } from '../processing/entity/types';
 
 /**
  * Vector embedding search functionality
