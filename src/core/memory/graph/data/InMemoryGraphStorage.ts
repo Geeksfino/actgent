@@ -559,4 +559,136 @@ export class InMemoryGraphStorage implements IGraphStorage {
 
         return true;
     }
+
+    /**
+     * Find paths between two nodes in the graph
+     */
+    async findPaths(options: {
+        startId: string;
+        endId: string;
+        maxLength?: number;
+        edgeTypes?: string[];
+        limit?: number;
+    }): Promise<Array<{
+        nodes: IGraphNode[];
+        edges: IGraphEdge[];
+        length: number;
+    }>> {
+        const {
+            startId,
+            endId,
+            maxLength = 5,
+            edgeTypes = ['*'],
+            limit = 10
+        } = options;
+
+        // Use breadth-first search to find paths
+        const queue: Array<{
+            path: string[];
+            edges: IGraphEdge[];
+        }> = [{ path: [startId], edges: [] }];
+        const paths: Array<{
+            nodes: IGraphNode[];
+            edges: IGraphEdge[];
+            length: number;
+        }> = [];
+        const visited = new Set<string>();
+
+        while (queue.length > 0 && paths.length < limit) {
+            const { path, edges } = queue.shift()!;
+            const currentId = path[path.length - 1];
+
+            if (currentId === endId) {
+                // Found a path to target
+                const nodes = await Promise.all(path.map(id => this.getNode(id)));
+                paths.push({
+                    nodes: nodes.filter((n): n is IGraphNode => n !== null),
+                    edges,
+                    length: path.length - 1
+                });
+                continue;
+            }
+
+            if (path.length >= maxLength) continue;
+
+            // Get outgoing edges
+            const outEdges = Array.from(this.edges.values()).filter(edge => {
+                if (edge.sourceId !== currentId) return false;
+                if (edgeTypes[0] !== '*' && !edgeTypes.includes(edge.type)) return false;
+                return true;
+            });
+
+            // Add next steps to queue
+            for (const edge of outEdges) {
+                const nextId = edge.targetId;
+                if (path.includes(nextId)) continue; // Avoid cycles
+                
+                const pathKey = path.join(',') + ',' + nextId;
+                if (visited.has(pathKey)) continue;
+                
+                visited.add(pathKey);
+                queue.push({
+                    path: [...path, nextId],
+                    edges: [...edges, edge]
+                });
+            }
+        }
+
+        return paths;
+    }
+
+    /**
+     * Find connected nodes based on edge and node types
+     */
+    async findConnectedNodes(options: {
+        startId: string;
+        edgeTypes?: string[];
+        nodeTypes?: string[];
+        direction?: 'incoming' | 'outgoing' | 'both';
+        limit?: number;
+    }): Promise<IGraphNode[]> {
+        const {
+            startId,
+            edgeTypes = ['*'],
+            nodeTypes = ['*'],
+            direction = 'both',
+            limit = 100
+        } = options;
+
+        const connectedNodes = new Set<string>();
+        const edges = Array.from(this.edges.values());
+
+        // Filter edges based on direction and types
+        const relevantEdges = edges.filter(edge => {
+            if (edgeTypes[0] !== '*' && !edgeTypes.includes(edge.type)) return false;
+
+            if (direction === 'outgoing') {
+                return edge.sourceId === startId;
+            } else if (direction === 'incoming') {
+                return edge.targetId === startId;
+            } else {
+                return edge.sourceId === startId || edge.targetId === startId;
+            }
+        });
+
+        // Collect connected node IDs
+        for (const edge of relevantEdges) {
+            if (connectedNodes.size >= limit) break;
+            
+            const connectedId = edge.sourceId === startId ? edge.targetId : edge.sourceId;
+            connectedNodes.add(connectedId);
+        }
+
+        // Get node objects and filter by type
+        const nodes = await Promise.all(
+            Array.from(connectedNodes).map(id => this.getNode(id))
+        );
+
+        return nodes
+            .filter((n): n is IGraphNode => 
+                n !== null && 
+                (nodeTypes[0] === '*' || nodeTypes.includes(n.type))
+            )
+            .slice(0, limit);
+    }
 }

@@ -1,34 +1,31 @@
 import { IGraphNode, IGraphEdge, GraphFilter } from '../data/types';
 import { MemoryGraph } from '../data/operations';
-import { RerankerConfig, RerankResult } from './types';
-
-interface RankingFeatures {
-    relevanceScore: number;     // Base relevance score from search
-    crossEncoderScore?: number; // Score from cross-encoder
-    diversityScore?: number;    // MMR diversity score
-    recency: number;            // Time-based score
-    connectivity: number;       // Graph connectivity score
-    importance: number;         // Node importance score
-}
+import { RerankerConfig, RankingFeatures, GraphFeatures } from './types';
+import { GraphRankingOps } from './graph_ops';
 
 const DEFAULT_CONFIG: Required<RerankerConfig> = {
     maxResults: 10,
     minScore: 0.1,
     model: 'gpt-4',
     weights: {
-        relevance: 0.2,
+        relevance: 0.4,
         crossEncoder: 0.3,
         diversity: 0.1,
         temporal: 0.1,
         connectivity: 0.15,
-        importance: 0.15
+        importance: 0.15,
+        graph: {
+            distance: 0.1,
+            mentions: 0.1,
+            paths: 0.1
+        }
     },
     crossEncoder: {
         model: 'gpt-4',
         batchSize: 10,
         scoreThreshold: 0.5,
-        maxTokens: 1000,
-        temperature: 0.0
+        maxTokens: 100,
+        temperature: 0.7
     },
     mmr: {
         diversityWeight: 0.3,
@@ -36,21 +33,34 @@ const DEFAULT_CONFIG: Required<RerankerConfig> = {
     },
     temporal: {
         decayRate: 0.1
+    },
+    rrf: {
+        k: 60,                // constant to control ranking influence
+        useRankFusion: true,  // whether to use RRF instead of linear combination
+        useAsPreranker: false // whether to use RRF as pre-ranker
+    },
+    graph: {
+        centerNodeId: undefined,
+        queryNodeIds: [],
+        maxPathLength: 3,
+        edgeTypes: []
     }
 };
 
 /**
- * Enhanced result reranking system with cross-encoder and MMR
+ * Enhanced result reranking system with cross-encoder, MMR, and graph features
  */
 export class ResultReranker {
     private config: Required<RerankerConfig>;
+    private graphOps: GraphRankingOps;
 
     constructor(
-        private graphOps: MemoryGraph,
+        private graph: MemoryGraph,
         private llm: { generateText(prompt: string): Promise<string> },
         config: Partial<RerankerConfig> = {}
     ) {
         this.config = this.mergeConfig(DEFAULT_CONFIG, config);
+        this.graphOps = new GraphRankingOps(graph);
     }
 
     /**
@@ -58,23 +68,58 @@ export class ResultReranker {
      */
     async rerank(
         query: string,
-        nodes: Array<{ node: IGraphNode; score: number }>,
+        nodes: Array<{ node: IGraphNode; score: number; source?: 'embedding' | 'text' | 'llm' | 'graph' }>,
         filter?: GraphFilter
     ): Promise<Array<{ node: IGraphNode; score: number }>> {
+        // Group nodes by source and calculate ranks
+        const nodesBySource = nodes.reduce((acc, { node, score, source }) => {
+            if (source) {
+                if (!acc[source]) acc[source] = [];
+                acc[source].push({ node, score });
+            }
+            return acc;
+        }, {} as Record<string, Array<{ node: IGraphNode; score: number }>>);
+
+        // Calculate ranks for each source
+        const ranks = new Map<string, Map<string, number>>();
+        for (const [source, sourceNodes] of Object.entries(nodesBySource)) {
+            const sourceRanks = new Map<string, number>();
+            sourceNodes
+                .sort((a, b) => b.score - a.score)
+                .forEach(({ node }, index) => {
+                    sourceRanks.set(node.id, index + 1);
+                });
+            ranks.set(source, sourceRanks);
+        }
+
+        // Calculate features for all nodes
         const features = await Promise.all(
-            nodes.map(async ({ node, score }) => ({
+            nodes.map(async ({ node, score, source }) => ({
                 node,
-                features: await this.calculateFeatures(node, score, query)
+                features: await this.calculateFeatures(node, score, query, {
+                    embedding: source === 'embedding' ? ranks.get('embedding')?.get(node.id) : undefined,
+                    text: source === 'text' ? ranks.get('text')?.get(node.id) : undefined,
+                    llm: source === 'llm' ? ranks.get('llm')?.get(node.id) : undefined,
+                    graph: source === 'graph' ? ranks.get('graph')?.get(node.id) : undefined
+                })
             }))
         );
 
-        // Apply MMR if diversity weight is set
-        if (this.config.weights?.diversity && this.config.weights.diversity > 0) {
-            return this.applyMMR(features);
+        // Apply RRF as pre-ranker if configured
+        let rankedFeatures = features;
+        if (this.config.rrf?.useAsPreranker) {
+            rankedFeatures = this.applyRRF(features);
         }
 
-        // Otherwise, combine scores normally
-        return this.combineScores(features);
+        // Apply MMR if diversity weight is set
+        if (this.config.weights?.diversity && this.config.weights.diversity > 0) {
+            return this.applyMMR(rankedFeatures);
+        }
+
+        // Use RRF or linear combination based on config
+        return this.config.rrf?.useRankFusion && !this.config.rrf?.useAsPreranker ? 
+            this.combineScores(this.applyRRF(rankedFeatures)) : 
+            this.combineScores(rankedFeatures);
     }
 
     /**
@@ -83,12 +128,14 @@ export class ResultReranker {
     private async calculateFeatures(
         node: IGraphNode,
         baseScore: number,
-        query: string
+        query: string,
+        ranks: { embedding?: number; text?: number; llm?: number; graph?: number } = {}
     ): Promise<RankingFeatures> {
-        const [crossEncoderScore, connectivity, importance] = await Promise.all([
+        const [crossEncoderScore, connectivity, importance, graphFeatures] = await Promise.all([
             this.calculateCrossEncoderScore(query, node),
             this.calculateConnectivity(node),
-            this.calculateImportance(node)
+            this.calculateImportance(node),
+            this.calculateGraphFeatures(node)
         ]);
 
         return {
@@ -96,8 +143,28 @@ export class ResultReranker {
             crossEncoderScore,
             recency: this.calculateRecency(node),
             connectivity,
-            importance
+            importance,
+            graph: graphFeatures,
+            ranks
         };
+    }
+
+    /**
+     * Calculate graph-specific features
+     */
+    private async calculateGraphFeatures(node: IGraphNode): Promise<GraphFeatures | undefined> {
+        const { graph: graphConfig } = this.config;
+        if (!graphConfig?.centerNodeId && !graphConfig?.queryNodeIds?.length) {
+            return undefined;
+        }
+
+        return await this.graphOps.calculateGraphFeatures(
+            node,
+            graphConfig.centerNodeId,
+            graphConfig.queryNodeIds,
+            graphConfig.maxPathLength,
+            graphConfig.edgeTypes
+        );
     }
 
     /**
@@ -107,7 +174,7 @@ export class ResultReranker {
         query: string,
         node: IGraphNode
     ): Promise<number> {
-        if (!this.config.weights.crossEncoder) return 0;
+        if (!this.config.weights?.crossEncoder) return 0;
 
         const prompt = `Compare the relevance between the query and the text.
 Query: ${query}
@@ -124,36 +191,32 @@ Return only the numeric score.`;
     }
 
     /**
-     * Apply Maximal Marginal Relevance reranking
+     * Apply MMR for diversity
      */
-    private applyMMR(
-        features: Array<{ node: IGraphNode; features: RankingFeatures }>
-    ): Array<{ node: IGraphNode; score: number }> {
-        const selected: typeof features = [];
+    private applyMMR(features: Array<{ node: IGraphNode; features: RankingFeatures }>): Array<{ node: IGraphNode; score: number }> {
+        const lambda = this.config.mmr?.lambda ?? 0.5;
+        const selected: Array<{ node: IGraphNode; score: number }> = [];
         const candidates = [...features];
-        const { lambda } = this.config.mmr;
 
         while (selected.length < this.config.maxResults && candidates.length > 0) {
             let bestScore = -Infinity;
             let bestIndex = -1;
 
+            // Find the best candidate
             for (let i = 0; i < candidates.length; i++) {
                 const candidate = candidates[i];
-                const relevance = this.calculateCombinedScore(candidate.features);
+                const relevance = candidate.features.relevanceScore;
                 
-                const diversity = selected.length === 0 ? 1 :
-                    Math.min(...selected.map(s => {
-                        if (!candidate.node.embedding || !s.node.embedding) {
-                            return 1; // Maximum diversity if embeddings not available
-                        }
-                        return 1 - this.calculateSimilarity(
-                            candidate.node.embedding,
-                            s.node.embedding
-                        );
-                    }));
+                // Calculate diversity penalty
+                let diversityPenalty = 0;
+                if (selected.length > 0) {
+                    const similarities = selected.map(s => 
+                        this.calculateSimilarity(candidate.node, s.node)
+                    );
+                    diversityPenalty = Math.max(...similarities);
+                }
 
-                const score = lambda * relevance + (1 - lambda) * diversity;
-
+                const score = lambda * relevance - (1 - lambda) * diversityPenalty;
                 if (score > bestScore) {
                     bestScore = score;
                     bestIndex = i;
@@ -162,42 +225,109 @@ Return only the numeric score.`;
 
             if (bestIndex === -1) break;
 
-            const selected_item = candidates[bestIndex];
-            selected.push(selected_item);
-            candidates.splice(bestIndex, 1);
+            const best = candidates.splice(bestIndex, 1)[0];
+            selected.push({ node: best.node, score: bestScore });
         }
 
-        return selected.map(item => ({
-            node: item.node,
-            score: this.calculateCombinedScore(item.features)
+        return selected;
+    }
+
+    /**
+     * Apply RRF to rerank results
+     */
+    private applyRRF(features: Array<{ node: IGraphNode; features: RankingFeatures }>): Array<{ node: IGraphNode; features: RankingFeatures }> {
+        const k = this.config.rrf?.k ?? 60;
+        
+        return features.map(({ node, features }) => {
+            let rrf = 0;
+            let count = 0;
+
+            // Calculate RRF score
+            const ranks = features.ranks;
+            if (ranks.embedding !== undefined) {
+                rrf += 1 / (k + ranks.embedding);
+                count++;
+            }
+            if (ranks.text !== undefined) {
+                rrf += 1 / (k + ranks.text);
+                count++;
+            }
+            if (ranks.llm !== undefined) {
+                rrf += 1 / (k + ranks.llm);
+                count++;
+            }
+            if (ranks.graph !== undefined) {
+                rrf += 1 / (k + ranks.graph);
+                count++;
+            }
+
+            // Normalize by number of rankings
+            if (count > 0) {
+                rrf /= count;
+            }
+
+            // Return with updated features
+            return {
+                node,
+                features: {
+                    ...features,
+                    relevanceScore: rrf
+                }
+            };
+        });
+    }
+
+    /**
+     * Combine scores using linear combination
+     */
+    private combineScores(features: Array<{ node: IGraphNode; features: RankingFeatures }>): Array<{ node: IGraphNode; score: number }> {
+        return features.map(({ node, features }) => ({
+            node,
+            score: this.combineWithFeatures(features.relevanceScore, features)
         }));
     }
 
     /**
-     * Calculate similarity between two embeddings
+     * Calculate similarity between two nodes
      */
-    private calculateSimilarity(a: number[], b: number[]): number {
-        const dotProduct = a.reduce((sum, val, i) => sum + val * b[i], 0);
-        const magnitudeA = Math.sqrt(a.reduce((sum, val) => sum + val * val, 0));
-        const magnitudeB = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));
-        return dotProduct / (magnitudeA * magnitudeB);
+    private calculateSimilarity(node1: IGraphNode, node2: IGraphNode): number {
+        if (!node1.embedding || !node2.embedding) {
+            return 0;
+        }
+
+        // Cosine similarity between embeddings
+        const dotProduct = node1.embedding.reduce((sum, val, i) => sum + val * node2.embedding![i], 0);
+        const norm1 = Math.sqrt(node1.embedding.reduce((sum, val) => sum + val * val, 0));
+        const norm2 = Math.sqrt(node2.embedding.reduce((sum, val) => sum + val * val, 0));
+        
+        return dotProduct / (norm1 * norm2);
     }
 
     /**
-     * Calculate recency score
+     * Calculate maximum similarity between a node and a list of nodes
+     */
+    private calculateMaxSimilarity(node: IGraphNode, nodes: IGraphNode[]): number {
+        if (nodes.length === 0) return 0;
+        return Math.max(...nodes.map(n => this.calculateSimilarity(node, n)));
+    }
+
+    /**
+     * Calculate recency score based on temporal distance
      */
     private calculateRecency(node: IGraphNode): number {
-        const now = this.config.temporal.referenceTime ?? new Date();
-        const age = now.getTime() - node.createdAt.getTime();
-        const days = age / (1000 * 60 * 60 * 24);
-        return Math.exp(-this.config.temporal.decayRate * days);
+        const decayRate = this.config.temporal?.decayRate ?? 0.1;
+        const now = new Date();
+        const timestamp = node.metadata?.get('timestamp');
+        const nodeDate = timestamp ? new Date(timestamp) : now;
+        const timeDiff = Math.abs(now.getTime() - nodeDate.getTime());
+        return Math.exp(-decayRate * timeDiff / (1000 * 60 * 60 * 24)); // Decay per day
     }
 
     /**
      * Calculate node connectivity score
      */
     private async calculateConnectivity(node: IGraphNode): Promise<number> {
-        const edges = await this.graphOps.getEdges({ nodeIds: [node.id] });
+        const edges = await this.graph.getEdges({ nodeIds: [node.id] });
         return Math.min(1, edges.length / 10); // Normalize by assuming 10 connections is max
     }
 
@@ -206,7 +336,7 @@ Return only the numeric score.`;
      */
     private async calculateImportance(node: IGraphNode): Promise<number> {
         // Could be enhanced with PageRank or other graph metrics
-        const incomingEdges = await this.graphOps.getEdges({
+        const incomingEdges = await this.graph.getEdges({
             nodeIds: [node.id]
         });
         return Math.min(1, incomingEdges.length / 5); // Normalize
@@ -215,36 +345,37 @@ Return only the numeric score.`;
     /**
      * Combine feature scores using configured weights
      */
-    private combineScores(
-        features: Array<{ node: IGraphNode; features: RankingFeatures }>
-    ): Array<{ node: IGraphNode; score: number }> {
-        return features
-            .map(({ node, features }) => ({
-                node,
-                score: this.calculateCombinedScore(features)
-            }))
-            .sort((a, b) => b.score - a.score)
-            .slice(0, this.config.maxResults)
-            .filter(({ score }) => score >= this.config.minScore);
-    }
+    private combineWithFeatures(rrf: number, features: RankingFeatures): number {
+        const weights = this.config.weights || {};
+        const graphWeights = weights.graph || {};
+        
+        let score = rrf * 0.4 + // RRF gets significant weight
+            (features.crossEncoderScore || 0) * (weights.crossEncoder ?? 0.3) +
+            features.recency * (weights.temporal ?? 0.1) +
+            features.connectivity * (weights.connectivity ?? 0.15) +
+            features.importance * (weights.importance ?? 0.15);
 
-    /**
-     * Combine all feature scores using configured weights
-     */
-    private calculateCombinedScore(features: RankingFeatures): number {
-        const weights = this.config.weights;
-        let totalWeight = 0;
-        let weightedScore = 0;
+        // Add graph feature scores if available
+        if (features.graph) {
+            const { distance, episodeMentions, paths } = features.graph;
+            
+            // Distance score (inverse of distance)
+            if (distance !== Infinity) {
+                score += (1 / (1 + distance)) * (graphWeights.distance ?? 0.1);
+            }
 
-        for (const [key, weight] of Object.entries(weights)) {
-            if (weight > 0) {
-                const score = features[key as keyof RankingFeatures] ?? 0;
-                weightedScore += score * weight;
-                totalWeight += weight;
+            // Episode mentions score
+            score += (episodeMentions / 10) * (graphWeights.mentions ?? 0.1); // Normalize by assuming 10 is a lot
+
+            // Path score (consider path length and diversity)
+            if (paths.length > 0) {
+                const pathScore = paths.reduce((sum, path) => 
+                    sum + (1 / path.length) * (path.types.length / path.length), 0) / paths.length;
+                score += pathScore * (graphWeights.paths ?? 0.1);
             }
         }
 
-        return weightedScore / totalWeight;
+        return score;
     }
 
     /**
@@ -260,7 +391,9 @@ Return only the numeric score.`;
             weights: { ...base.weights, ...override.weights },
             crossEncoder: { ...base.crossEncoder, ...override.crossEncoder },
             mmr: { ...base.mmr, ...override.mmr },
-            temporal: { ...base.temporal, ...override.temporal }
+            temporal: { ...base.temporal, ...override.temporal },
+            rrf: { ...base.rrf, ...override.rrf },
+            graph: { ...base.graph, ...override.graph }
         };
     }
 }

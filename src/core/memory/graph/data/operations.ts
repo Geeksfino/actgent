@@ -19,7 +19,7 @@ import {
 /**
  * Core memory graph implementation using LLM for complex operations
  */
-export class MemoryGraph {
+export class MemoryGraph implements IGraphStorage {
     constructor(
         private storage: IGraphStorage,
         private llm: GraphLLMProcessor
@@ -28,15 +28,57 @@ export class MemoryGraph {
     /**
      * Add a node to the graph
      */
-    async addNode(node: IGraphNode): Promise<void> {
-        await this.storage.addNode(node);
+    async addNode(node: IGraphNode): Promise<string> {
+        return this.storage.addNode(node);
+    }
+
+    /**
+     * Get a node by id
+     */
+    async getNode(id: string): Promise<IGraphNode | null> {
+        return this.storage.getNode(id);
+    }
+
+    /**
+     * Update a node in the graph
+     */
+    async updateNode(id: string, updates: Partial<IGraphNode>): Promise<void> {
+        return this.storage.updateNode(id, updates);
+    }
+
+    /**
+     * Delete a node from the graph
+     */
+    async deleteNode(id: string): Promise<void> {
+        return this.storage.deleteNode(id);
     }
 
     /**
      * Add an edge to the graph
      */
-    async addEdge(edge: IGraphEdge): Promise<void> {
-        await this.storage.addEdge(edge);
+    async addEdge(edge: IGraphEdge): Promise<string> {
+        return this.storage.addEdge(edge);
+    }
+
+    /**
+     * Get an edge by id
+     */
+    async getEdge(id: string): Promise<IGraphEdge | null> {
+        return this.storage.getEdge(id);
+    }
+
+    /**
+     * Update an edge in the graph
+     */
+    async updateEdge(id: string, updates: Partial<IGraphEdge>): Promise<void> {
+        return this.storage.updateEdge(id, updates);
+    }
+
+    /**
+     * Delete an edge from the graph
+     */
+    async deleteEdge(id: string): Promise<void> {
+        return this.storage.deleteEdge(id);
     }
 
     /**
@@ -48,35 +90,95 @@ export class MemoryGraph {
     }
 
     /**
-     * Get edges matching filter
+     * Get edges either by filter or by node IDs
      */
-    async getEdges(filter: GraphFilter): Promise<IGraphEdge[]> {
-        const result = await this.storage.query({
-            edgeTypes: filter.edgeTypes,
-            timeWindow: filter.timeWindow,
-            maxResults: filter.maxResults,
-            temporal: filter.temporal,
-            metadata: filter.metadata
-        });
-        return result.edges;
+    async getEdges(param: GraphFilter | string[]): Promise<IGraphEdge[]> {
+        if (Array.isArray(param)) {
+            // Case: getEdges(nodeIds: string[])
+            return this.storage.getEdges(param);
+        } else {
+            // Case: getEdges(filter: GraphFilter)
+            const result = await this.storage.query({
+                edgeTypes: param.edgeTypes,
+                timeWindow: param.timeWindow,
+                maxResults: param.maxResults,
+                temporal: param.temporal,
+                metadata: param.metadata
+            });
+            return result.edges;
+        }
+    }
+
+    /**
+     * Query the graph
+     */
+    async query(filter: GraphFilter): Promise<{nodes: IGraphNode[], edges: IGraphEdge[]}> {
+        return this.storage.query(filter);
+    }
+
+    /**
+     * Traverse the graph
+     */
+    async traverse(startNodeId: string, options: TraversalOptions): Promise<{nodes: IGraphNode[], edges: IGraphEdge[]}> {
+        return this.storage.traverse(startNodeId, options);
     }
 
     /**
      * Find paths between nodes
      */
-    async findPaths(sourceId: string, targetId: string, options?: TraversalOptions): Promise<PathResult[]> {
-        const result = await this.storage.query({});
-        const paths = await this.llm.process<PathResult[]>(
-            GraphTask.EVALUATE_PATHS,
-            {
-                start: sourceId,
-                end: targetId,
-                nodes: result.nodes,
-                edges: result.edges,
-                options
-            }
-        );
-        return paths;
+    async findPaths(options: {
+        startId: string;
+        endId: string;
+        maxLength?: number;
+        edgeTypes?: string[];
+        limit?: number;
+    }): Promise<Array<{
+        nodes: IGraphNode[];
+        edges: IGraphEdge[];
+        length: number;
+    }>> {
+        return this.storage.findPaths(options);
+    }
+
+    /**
+     * Find connected nodes
+     */
+    async findConnectedNodes(options: {
+        startId: string;
+        edgeTypes?: string[];
+        nodeTypes?: string[];
+        direction?: 'incoming' | 'outgoing' | 'both';
+        limit?: number;
+    }): Promise<IGraphNode[]> {
+        return this.storage.findConnectedNodes(options);
+    }
+
+    /**
+     * Find paths between nodes using LLM
+     */
+    async findPathsWithLLM(sourceId: string, targetId: string, options?: TraversalOptions): Promise<PathResult[]> {
+        const result = await this.llm.process<{paths: PathResult[]}>(GraphTask.EVALUATE_PATHS, {
+            start: sourceId,
+            end: targetId,
+            options
+        });
+
+        return result.paths;
+    }
+
+    /**
+     * Find and refine communities in the graph using LLM
+     */
+    async findCommunities(options?: {
+        nodeTypes?: string[];
+        minSize?: number;
+        maxSize?: number;
+    }): Promise<CommunityResult[]> {
+        const result = await this.llm.process<{communities: CommunityResult[]}>(GraphTask.REFINE_COMMUNITIES, {
+            options
+        });
+
+        return result.communities;
     }
 
     /**
@@ -91,17 +193,6 @@ export class MemoryGraph {
             nodes: result.nodes.filter(n => n.id !== nodeId),
             edges: result.edges
         };
-    }
-
-    /**
-     * Update a node in the graph
-     */
-    async updateNode(id: string, updates: Partial<IGraphNode>): Promise<void> {
-        const node = await this.storage.getNode(id);
-        if (!node) {
-            throw new Error(`Node ${id} not found`);
-        }
-        await this.storage.updateNode(id, { ...node, ...updates });
     }
 
     /**
@@ -195,14 +286,6 @@ export class MemoryGraph {
         }
 
         return result;
-    }
-
-    /**
-     * Find communities
-     */
-    async findCommunities(nodeIds: string[]): Promise<CommunityResult[]> {
-        // Implementation
-        return [];
     }
 
     /**

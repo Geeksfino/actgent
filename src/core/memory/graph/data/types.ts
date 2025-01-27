@@ -99,8 +99,31 @@ export interface IGraphStorage<N = any, E = any> {
     deleteEdge(id: string): Promise<void>;
 
     // Query operations
-    query(filter: GraphFilter): Promise<{nodes: IGraphNode<N>[], edges: IGraphEdge<E>[]}>;
-    traverse(startNodeId: string, options: TraversalOptions): Promise<{nodes: IGraphNode<N>[], edges: IGraphEdge<E>[]}>;
+    query(filter: GraphFilter): Promise<{nodes: IGraphNode<N>[], edges: IGraphEdge<E>[]}>; 
+    traverse(startNodeId: string, options: TraversalOptions): Promise<{nodes: IGraphNode<N>[], edges: IGraphEdge<E>[]}>; 
+    
+    // Graph traversal operations
+    findPaths(options: {
+        startId: string;
+        endId: string;
+        maxLength?: number;
+        edgeTypes?: string[];
+        limit?: number;
+    }): Promise<Array<{
+        nodes: IGraphNode<N>[];
+        edges: IGraphEdge<E>[];
+        length: number;
+    }>>;
+    
+    findConnectedNodes(options: {
+        startId: string;
+        edgeTypes?: string[];
+        nodeTypes?: string[];
+        direction?: 'incoming' | 'outgoing' | 'both';
+        limit?: number;
+    }): Promise<IGraphNode<N>[]>;
+    
+    getEdges(nodeIds: string[]): Promise<IGraphEdge<E>[]>;
 }
 
 /**

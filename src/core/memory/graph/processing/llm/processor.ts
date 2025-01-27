@@ -1,16 +1,18 @@
 import { z } from 'zod';
-import { 
-    PathSchema,
-    CommunitySchema,
-    SearchResultSchema,
-    TemporalSchema,
-    EpisodeConsolidationSchema
-} from './types';
 import { GraphTask, LLMConfig } from '../../types';
+import { 
+    PathSchema, 
+    CommunitySchema, 
+    SearchResultSchema,
+    EntityResolutionSchema,
+    BatchEntityResolutionSchema,
+    EdgeResolutionSchema,
+    BatchEdgeResolutionSchema
+} from '../entity/types';
 
 const DEFAULT_CONFIG: LLMConfig = {
-    model: 'deepseek-coder-6.7b-instruct',
-    temperature: 0.2,
+    model: 'gpt-4',
+    temperature: 0.0,
     maxTokens: 1000
 };
 
@@ -69,18 +71,30 @@ export class GraphLLMProcessor {
                     functionSchema: z.array(z.number())
                 };
 
-            case GraphTask.CONSOLIDATE_EPISODES:
+            case GraphTask.DEDUPE_NODE:
                 return {
-                    prompt: `Analyze these episodes and identify patterns to consolidate them into higher-level memories:\n${JSON.stringify(data)}`,
-                    functionSchema: EpisodeConsolidationSchema
+                    prompt: data.prompt,
+                    functionSchema: EntityResolutionSchema
                 };
 
-            case GraphTask.EXTRACT_TEMPORAL:
+            case GraphTask.DEDUPE_EDGE:
                 return {
-                    prompt: `Extract temporal relationships from:\n${JSON.stringify(data)}`,
-                    functionSchema: TemporalSchema
+                    prompt: data.prompt,
+                    functionSchema: EdgeResolutionSchema
                 };
-            
+
+            case GraphTask.DEDUPE_BATCH:
+                return {
+                    prompt: data.prompt,
+                    functionSchema: BatchEntityResolutionSchema
+                };
+
+            case GraphTask.DEDUPE_BATCH_EDGES:
+                return {
+                    prompt: data.prompt,
+                    functionSchema: BatchEdgeResolutionSchema
+                };
+
             default:
                 throw new Error(`Unknown task: ${task}`);
         }
@@ -100,6 +114,14 @@ export class GraphLLMProcessor {
                 return 'prepare_for_embedding';
             case GraphTask.CONSOLIDATE_EPISODES:
                 return 'consolidate_episodes';
+            case GraphTask.DEDUPE_NODE:
+                return 'dedupe_node';
+            case GraphTask.DEDUPE_EDGE:
+                return 'dedupe_edge';
+            case GraphTask.DEDUPE_BATCH:
+                return 'dedupe_batch';
+            case GraphTask.DEDUPE_BATCH_EDGES:
+                return 'dedupe_batch_edges';
             default:
                 throw new Error(`Unknown task: ${task}`);
         }
