@@ -253,14 +253,54 @@ export class InMemoryGraphStorage implements IGraphStorage {
         
         // Filter nodes
         for (const node of this.nodes.values()) {
-            if (!filter.nodeTypes || filter.nodeTypes.includes(node.type)) {
+            let include = true;
+            
+            // Type filter
+            if (filter.nodeTypes && !filter.nodeTypes.includes(node.type)) {
+                include = false;
+            }
+            
+            // Time window filter
+            if (include && filter.timeWindow) {
+                if (node.createdAt > filter.timeWindow.end || 
+                    (node.expiredAt && node.expiredAt <= filter.timeWindow.start)) {
+                    include = false;
+                }
+            }
+            
+            // Temporal filter
+            if (include && filter.temporal) {
+                include = this.applyTemporalFilter(node, filter.temporal);
+            }
+            
+            if (include) {
                 nodes.push(node);
             }
         }
         
         // Filter edges
         for (const edge of this.edges.values()) {
-            if (!filter.edgeTypes || filter.edgeTypes.includes(edge.type)) {
+            let include = true;
+            
+            // Type filter
+            if (filter.edgeTypes && !filter.edgeTypes.includes(edge.type)) {
+                include = false;
+            }
+            
+            // Time window filter
+            if (include && filter.timeWindow) {
+                if (edge.createdAt > filter.timeWindow.end || 
+                    (edge.expiredAt && edge.expiredAt <= filter.timeWindow.start)) {
+                    include = false;
+                }
+            }
+            
+            // Temporal filter
+            if (include && filter.temporal) {
+                include = this.applyTemporalFilter(edge, filter.temporal);
+            }
+            
+            if (include) {
                 edges.push(edge);
             }
         }
@@ -271,7 +311,7 @@ export class InMemoryGraphStorage implements IGraphStorage {
     async traverse(startNodeId: string, options: TraversalOptions): Promise<{nodes: IGraphNode[], edges: IGraphEdge[]}> {
         const visited = new Set<string>();
         const nodes: IGraphNode[] = [];
-        const edges: IGraphEdge[] = [];
+        const edges: Set<IGraphEdge> = new Set(); // Use Set to prevent duplicate edges
         const queue: {nodeId: string; depth: number}[] = [{nodeId: startNodeId, depth: 0}];
         
         while (queue.length > 0) {
@@ -293,7 +333,13 @@ export class InMemoryGraphStorage implements IGraphStorage {
                 const outbound = this.adjacencyList.get(nodeId);
                 if (outbound) {
                     for (const targetId of outbound) {
-                        connectedNodes.add(targetId);
+                        const edge = Array.from(this.edges.values()).find(e => 
+                            e.sourceId === nodeId && e.targetId === targetId
+                        );
+                        if (edge) {
+                            edges.add(edge);
+                            connectedNodes.add(targetId);
+                        }
                     }
                 }
             }
@@ -302,28 +348,26 @@ export class InMemoryGraphStorage implements IGraphStorage {
                 // Inbound edges
                 for (const [sourceId, targets] of this.adjacencyList.entries()) {
                     if (targets.has(nodeId)) {
-                        connectedNodes.add(sourceId);
+                        const edge = Array.from(this.edges.values()).find(e => 
+                            e.sourceId === sourceId && e.targetId === nodeId
+                        );
+                        if (edge) {
+                            edges.add(edge);
+                            connectedNodes.add(sourceId);
+                        }
                     }
                 }
             }
             
             // Add connected nodes to queue
-            for (const connectedId of connectedNodes) {
-                if (!visited.has(connectedId)) {
-                    queue.push({nodeId: connectedId, depth: depth + 1});
-                }
-            }
-            
-            // Collect edges
-            for (const edge of this.edges.values()) {
-                if ((edge.sourceId === nodeId || edge.targetId === nodeId) &&
-                    (!options.edgeTypes || options.edgeTypes.includes(edge.type))) {
-                    edges.push(edge);
+            for (const nextId of connectedNodes) {
+                if (!visited.has(nextId)) {
+                    queue.push({nodeId: nextId, depth: depth + 1});
                 }
             }
         }
         
-        return { nodes, edges };
+        return { nodes, edges: Array.from(edges) };
     }
 
     async invalidateEdge(edgeId: string, at: Date): Promise<void> {
@@ -477,20 +521,40 @@ export class InMemoryGraphStorage implements IGraphStorage {
             createdAfter, createdBefore,
             expiredAfter, expiredBefore,
             validAfter, validBefore,
-            invalidAfter, invalidBefore
+            invalidAfter, invalidBefore,
+            validAt
         } = temporal;
 
-        if (createdAfter && item.createdAt < createdAfter) return false;
-        if (createdBefore && item.createdAt > createdBefore) return false;
-        if (expiredAfter && item.expiredAt && item.expiredAt < expiredAfter) return false;
-        if (expiredBefore && item.expiredAt && item.expiredAt > expiredBefore) return false;
-        if (validAfter && item.validAt && item.validAt < validAfter) return false;
-        if (validBefore && item.validAt && item.validAt > validBefore) return false;
-        
+        // Handle point-in-time validity check first
+        if (validAt) {
+            // Item must exist at validAt
+            if (item.createdAt >= validAt) return false;
+
+            // Item must not be expired at validAt
+            if (item.expiredAt && item.expiredAt <= validAt) return false;
+
+            // For edges, check invalidation time
+            if ('invalidAt' in item && item.invalidAt && item.invalidAt <= validAt) return false;
+
+            // Check validAt - item must be valid at or before the query time
+            if (item.validAt && item.validAt > validAt) return false;
+
+            return true;
+        }
+
+        // Handle time range checks if not using validAt
+        if (createdAfter && item.createdAt <= createdAfter) return false;
+        if (createdBefore && item.createdAt >= createdBefore) return false;
+
+        if (expiredAfter && item.expiredAt && item.expiredAt <= expiredAfter) return false;
+        if (expiredBefore && item.expiredAt && item.expiredAt >= expiredBefore) return false;
+
+        if (validAfter && item.validAt && item.validAt <= validAfter) return false;
+        if (validBefore && item.validAt && item.validAt >= validBefore) return false;
+
         if ('invalidAt' in item) {
-            const edge = item as IGraphEdge;
-            if (invalidAfter && edge.invalidAt && edge.invalidAt < invalidAfter) return false;
-            if (invalidBefore && edge.invalidAt && edge.invalidAt > invalidBefore) return false;
+            if (invalidAfter && item.invalidAt && item.invalidAt <= invalidAfter) return false;
+            if (invalidBefore && item.invalidAt && item.invalidAt >= invalidBefore) return false;
         }
 
         return true;

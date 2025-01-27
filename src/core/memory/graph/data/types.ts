@@ -63,6 +63,7 @@ export interface GraphFilter {
         validBefore?: Date;
         invalidAfter?: Date;
         invalidBefore?: Date;
+        validAt?: Date;  // Point-in-time validity check
     };
     metadata?: Record<string, any>;
 }
