@@ -14,6 +14,10 @@ export {
     LLMConfig 
 } from './types';
 
+// Main exports
+export { GraphManager } from './GraphManager';
+export { createGraph, createTestGraph } from './factory';
+
 // Storage implementations
 export { InMemoryGraphStorage } from './data/InMemoryGraphStorage';
 export { MemoryGraph } from './data/operations';
@@ -24,8 +28,11 @@ export {
     PathResult,
     CommunityResult,
     SearchResult,
-    TemporalResult
-} from './processing/llm/types';
+    EntityResolution,
+    BatchEntityResolution,
+    EdgeResolution,
+    BatchEdgeResolution
+} from './processing/entity/types';
 
 // Query and Search
 export { 

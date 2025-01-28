@@ -1,57 +1,15 @@
 import { IGraphNode, IGraphEdge, GraphFilter } from '../data/types';
 import { MemoryGraph } from '../data/operations';
-import { RerankerConfig, RankingFeatures, GraphFeatures } from './types';
+import { RankingFeatures, GraphFeatures } from './types';
 import { GraphRankingOps } from './graph_ops';
-
-const DEFAULT_CONFIG: Required<RerankerConfig> = {
-    maxResults: 10,
-    minScore: 0.1,
-    model: 'gpt-4',
-    weights: {
-        relevance: 0.4,
-        crossEncoder: 0.3,
-        diversity: 0.1,
-        temporal: 0.1,
-        connectivity: 0.15,
-        importance: 0.15,
-        graph: {
-            distance: 0.1,
-            mentions: 0.1,
-            paths: 0.1
-        }
-    },
-    crossEncoder: {
-        model: 'gpt-4',
-        batchSize: 10,
-        scoreThreshold: 0.5,
-        maxTokens: 100,
-        temperature: 0.7
-    },
-    mmr: {
-        diversityWeight: 0.3,
-        lambda: 0.5
-    },
-    temporal: {
-        decayRate: 0.1
-    },
-    rrf: {
-        k: 60,                // constant to control ranking influence
-        useRankFusion: true,  // whether to use RRF instead of linear combination
-        useAsPreranker: false // whether to use RRF as pre-ranker
-    },
-    graph: {
-        centerNodeId: undefined,
-        queryNodeIds: [],
-        maxPathLength: 3,
-        edgeTypes: []
-    }
-};
+import { RerankerConfig } from '../config/types';
+import { DEFAULT_RERANKER_CONFIG } from '../config/defaults';
 
 /**
  * Enhanced result reranking system with cross-encoder, MMR, and graph features
  */
 export class ResultReranker {
-    private config: Required<RerankerConfig>;
+    private config: RerankerConfig;
     private graphOps: GraphRankingOps;
 
     constructor(
@@ -59,7 +17,7 @@ export class ResultReranker {
         private llm: { generateText(prompt: string): Promise<string> },
         config: Partial<RerankerConfig> = {}
     ) {
-        this.config = this.mergeConfig(DEFAULT_CONFIG, config);
+        this.config = this.mergeConfig(DEFAULT_RERANKER_CONFIG, config);
         this.graphOps = new GraphRankingOps(graph);
     }
 
@@ -71,55 +29,35 @@ export class ResultReranker {
         nodes: Array<{ node: IGraphNode; score: number; source?: 'embedding' | 'text' | 'llm' | 'graph' }>,
         filter?: GraphFilter
     ): Promise<Array<{ node: IGraphNode; score: number }>> {
-        // Group nodes by source and calculate ranks
-        const nodesBySource = nodes.reduce((acc, { node, score, source }) => {
-            if (source) {
-                if (!acc[source]) acc[source] = [];
-                acc[source].push({ node, score });
-            }
-            return acc;
-        }, {} as Record<string, Array<{ node: IGraphNode; score: number }>>);
-
-        // Calculate ranks for each source
-        const ranks = new Map<string, Map<string, number>>();
-        for (const [source, sourceNodes] of Object.entries(nodesBySource)) {
-            const sourceRanks = new Map<string, number>();
-            sourceNodes
-                .sort((a, b) => b.score - a.score)
-                .forEach(({ node }, index) => {
-                    sourceRanks.set(node.id, index + 1);
-                });
-            ranks.set(source, sourceRanks);
+        // Skip reranking if disabled
+        if (!this.config.enabled) {
+            return nodes.slice(0, this.config.maxResults);
         }
 
-        // Calculate features for all nodes
-        const features = await Promise.all(
+        // Calculate features for each node
+        const withFeatures = await Promise.all(
             nodes.map(async ({ node, score, source }) => ({
                 node,
-                features: await this.calculateFeatures(node, score, query, {
-                    embedding: source === 'embedding' ? ranks.get('embedding')?.get(node.id) : undefined,
-                    text: source === 'text' ? ranks.get('text')?.get(node.id) : undefined,
-                    llm: source === 'llm' ? ranks.get('llm')?.get(node.id) : undefined,
-                    graph: source === 'graph' ? ranks.get('graph')?.get(node.id) : undefined
-                })
+                features: await this.calculateFeatures(node, score, query, { [source || 'text']: score })
             }))
         );
 
-        // Apply RRF as pre-ranker if configured
-        let rankedFeatures = features;
-        if (this.config.rrf?.useAsPreranker) {
-            rankedFeatures = this.applyRRF(features);
+        // Apply reranking strategies based on config
+        let reranked = withFeatures;
+
+        // Apply RRF if configured
+        if (this.config.rrf?.useRankFusion) {
+            reranked = this.applyRRF(reranked);
         }
 
-        // Apply MMR if diversity weight is set
-        if (this.config.weights?.diversity && this.config.weights.diversity > 0) {
-            return this.applyMMR(rankedFeatures);
+        // Apply MMR if configured
+        if (this.config.mmr?.lambda !== undefined) {
+            return this.applyMMR(reranked);
         }
 
-        // Use RRF or linear combination based on config
-        return this.config.rrf?.useRankFusion && !this.config.rrf?.useAsPreranker ? 
-            this.combineScores(this.applyRRF(rankedFeatures)) : 
-            this.combineScores(rankedFeatures);
+        // Default to linear combination
+        return this.combineScores(reranked)
+            .slice(0, this.config.maxResults);
     }
 
     /**
@@ -153,17 +91,20 @@ export class ResultReranker {
      * Calculate graph-specific features
      */
     private async calculateGraphFeatures(node: IGraphNode): Promise<GraphFeatures | undefined> {
-        const { graph: graphConfig } = this.config;
-        if (!graphConfig?.centerNodeId && !graphConfig?.queryNodeIds?.length) {
+        if (!this.config.graphFeatures) {
             return undefined;
         }
 
+        const centerNodeId = this.config.graphFeatures.centerNodeId;
+        const maxPathLength = this.config.graphFeatures.maxPathLength ?? 3;
+        const edgeTypes = this.config.graphFeatures.edgeTypes ?? [];
+
         return await this.graphOps.calculateGraphFeatures(
             node,
-            graphConfig.centerNodeId,
-            graphConfig.queryNodeIds,
-            graphConfig.maxPathLength,
-            graphConfig.edgeTypes
+            centerNodeId,
+            this.config.graphFeatures.queryNodeIds,
+            maxPathLength,
+            edgeTypes
         );
     }
 
@@ -194,42 +135,60 @@ Return only the numeric score.`;
      * Apply MMR for diversity
      */
     private applyMMR(features: Array<{ node: IGraphNode; features: RankingFeatures }>): Array<{ node: IGraphNode; score: number }> {
+        const maxResults = this.config.maxResults ?? features.length;
         const lambda = this.config.mmr?.lambda ?? 0.5;
-        const selected: Array<{ node: IGraphNode; score: number }> = [];
+        const selected: IGraphNode[] = [];
         const candidates = [...features];
+        const result: Array<{ node: IGraphNode; score: number }> = [];
 
-        while (selected.length < this.config.maxResults && candidates.length > 0) {
+        // First, select the highest scoring document
+        const firstIndex = candidates.findIndex(c => 
+            c.features.relevanceScore === Math.max(...candidates.map(d => d.features.relevanceScore))
+        );
+        const [firstDoc] = candidates.splice(firstIndex, 1);
+        selected.push(firstDoc.node);
+        result.push({
+            node: firstDoc.node,
+            score: firstDoc.features.relevanceScore
+        });
+
+        // Then iteratively select documents maximizing MMR
+        while (selected.length < maxResults && candidates.length > 0) {
             let bestScore = -Infinity;
             let bestIndex = -1;
 
-            // Find the best candidate
+            // Find the best candidate considering both relevance and diversity
             for (let i = 0; i < candidates.length; i++) {
                 const candidate = candidates[i];
-                const relevance = candidate.features.relevanceScore;
+                const relevanceScore = candidate.features.relevanceScore;
                 
-                // Calculate diversity penalty
-                let diversityPenalty = 0;
-                if (selected.length > 0) {
-                    const similarities = selected.map(s => 
-                        this.calculateSimilarity(candidate.node, s.node)
-                    );
-                    diversityPenalty = Math.max(...similarities);
-                }
+                // Calculate diversity score as 1 minus maximum similarity to selected docs
+                const maxSimilarity = Math.max(...selected.map(node => 
+                    this.calculateSimilarity(candidate.node, node)
+                ));
+                const diversityScore = 1 - maxSimilarity;
 
-                const score = lambda * relevance - (1 - lambda) * diversityPenalty;
-                if (score > bestScore) {
-                    bestScore = score;
+                // MMR score combines relevance and diversity
+                const mmrScore = lambda * relevanceScore + (1 - lambda) * diversityScore;
+
+                if (mmrScore > bestScore) {
+                    bestScore = mmrScore;
                     bestIndex = i;
                 }
             }
 
             if (bestIndex === -1) break;
 
-            const best = candidates.splice(bestIndex, 1)[0];
-            selected.push({ node: best.node, score: bestScore });
+            // Add best candidate to results
+            const [bestCandidate] = candidates.splice(bestIndex, 1);
+            selected.push(bestCandidate.node);
+            result.push({
+                node: bestCandidate.node,
+                score: bestScore
+            });
         }
 
-        return selected;
+        return result;
     }
 
     /**
@@ -238,40 +197,47 @@ Return only the numeric score.`;
     private applyRRF(features: Array<{ node: IGraphNode; features: RankingFeatures }>): Array<{ node: IGraphNode; features: RankingFeatures }> {
         const k = this.config.rrf?.k ?? 60;
         
-        return features.map(({ node, features }) => {
-            let rrf = 0;
-            let count = 0;
-
-            // Calculate RRF score
-            const ranks = features.ranks;
-            if (ranks.embedding !== undefined) {
-                rrf += 1 / (k + ranks.embedding);
-                count++;
-            }
-            if (ranks.text !== undefined) {
-                rrf += 1 / (k + ranks.text);
-                count++;
-            }
-            if (ranks.llm !== undefined) {
-                rrf += 1 / (k + ranks.llm);
-                count++;
-            }
-            if (ranks.graph !== undefined) {
-                rrf += 1 / (k + ranks.graph);
-                count++;
-            }
-
-            // Normalize by number of rankings
-            if (count > 0) {
-                rrf /= count;
-            }
-
-            // Return with updated features
+        // Create rank maps for each feature
+        const ranks = new Map<string, Map<string, number>>();
+        const featureTypes = ['relevance', 'crossEncoder', 'temporal', 'connectivity', 'importance'] as const;
+        
+        // Calculate ranks for each feature
+        for (const feature of featureTypes) {
+            const featureRanks = new Map<string, number>();
+            [...features]
+                .sort((a, b) => {
+                    const scoreA = feature === 'relevance' ? a.features.relevanceScore :
+                        feature === 'crossEncoder' ? (a.features.crossEncoderScore ?? 0) :
+                        feature === 'temporal' ? (a.features.recency ?? 0) :
+                        feature === 'connectivity' ? (a.features.connectivity ?? 0) :
+                        a.features.importance ?? 0;
+                    
+                    const scoreB = feature === 'relevance' ? b.features.relevanceScore :
+                        feature === 'crossEncoder' ? (b.features.crossEncoderScore ?? 0) :
+                        feature === 'temporal' ? (b.features.recency ?? 0) :
+                        feature === 'connectivity' ? (b.features.connectivity ?? 0) :
+                        b.features.importance ?? 0;
+                    
+                    return scoreB - scoreA;
+                })
+                .forEach(({ node }, index) => {
+                    featureRanks.set(node.id, index + 1);
+                });
+            ranks.set(feature, featureRanks);
+        }
+        
+        // Calculate RRF score for each node
+        return features.map(item => {
+            const rrf = featureTypes.reduce((sum, feature) => {
+                const rank = ranks.get(feature)?.get(item.node.id) ?? features.length;
+                return sum + 1 / (k + rank);
+            }, 0);
+            
             return {
-                node,
+                node: item.node,
                 features: {
-                    ...features,
-                    relevanceScore: rrf
+                    ...item.features,
+                    rrf
                 }
             };
         });
@@ -283,7 +249,7 @@ Return only the numeric score.`;
     private combineScores(features: Array<{ node: IGraphNode; features: RankingFeatures }>): Array<{ node: IGraphNode; score: number }> {
         return features.map(({ node, features }) => ({
             node,
-            score: this.combineWithFeatures(features.relevanceScore, features)
+            score: this.combineWithFeatures(features.rrf ?? features.relevanceScore, features)
         }));
     }
 
@@ -295,12 +261,30 @@ Return only the numeric score.`;
             return 0;
         }
 
-        // Cosine similarity between embeddings
-        const dotProduct = node1.embedding.reduce((sum, val, i) => sum + val * node2.embedding![i], 0);
-        const norm1 = Math.sqrt(node1.embedding.reduce((sum, val) => sum + val * val, 0));
-        const norm2 = Math.sqrt(node2.embedding.reduce((sum, val) => sum + val * val, 0));
-        
-        return dotProduct / (norm1 * norm2);
+        const metric = this.config.mmr?.diversityMetric ?? 'cosine';
+
+        // Convert embeddings to arrays if they're Float32Array
+        const embedding1 = Array.from(node1.embedding);
+        const embedding2 = Array.from(node2.embedding);
+
+        if (metric === 'cosine') {
+            // Cosine similarity between embeddings
+            const dotProduct = embedding1.reduce((sum: number, val: number, i: number) => sum + val * embedding2[i], 0);
+            const norm1 = Math.sqrt(embedding1.reduce((sum: number, val: number) => sum + val * val, 0));
+            const norm2 = Math.sqrt(embedding2.reduce((sum: number, val: number) => sum + val * val, 0));
+            
+            return dotProduct / (norm1 * norm2);
+        } else if (metric === 'euclidean') {
+            // Euclidean distance (converted to similarity)
+            const squaredDist = embedding1.reduce((sum: number, val: number, i: number) => {
+                const diff = val - embedding2[i];
+                return sum + diff * diff;
+            }, 0);
+            // Convert distance to similarity (1 when identical, approaching 0 as distance increases)
+            return 1 / (1 + Math.sqrt(squaredDist));
+        }
+
+        return 0;
     }
 
     /**
@@ -317,10 +301,14 @@ Return only the numeric score.`;
     private calculateRecency(node: IGraphNode): number {
         const decayRate = this.config.temporal?.decayRate ?? 0.1;
         const now = new Date();
-        const timestamp = node.metadata?.get('timestamp');
-        const nodeDate = timestamp ? new Date(timestamp) : now;
-        const timeDiff = Math.abs(now.getTime() - nodeDate.getTime());
-        return Math.exp(-decayRate * timeDiff / (1000 * 60 * 60 * 24)); // Decay per day
+        const timestamp = node.metadata?.get('timestamp') as number;
+        
+        if (!timestamp) {
+            return 0;
+        }
+
+        const age = (now.getTime() - timestamp) / (1000 * 60 * 60); // Age in hours
+        return Math.exp(-decayRate * age);
     }
 
     /**
@@ -347,34 +335,26 @@ Return only the numeric score.`;
      */
     private combineWithFeatures(rrf: number, features: RankingFeatures): number {
         const weights = this.config.weights || {};
-        const graphWeights = weights.graph || {};
         
-        let score = rrf * 0.4 + // RRF gets significant weight
-            (features.crossEncoderScore || 0) * (weights.crossEncoder ?? 0.3) +
-            features.recency * (weights.temporal ?? 0.1) +
-            features.connectivity * (weights.connectivity ?? 0.15) +
-            features.importance * (weights.importance ?? 0.15);
-
-        // Add graph feature scores if available
-        if (features.graph) {
-            const { distance, episodeMentions, paths } = features.graph;
-            
-            // Distance score (inverse of distance)
-            if (distance !== Infinity) {
-                score += (1 / (1 + distance)) * (graphWeights.distance ?? 0.1);
-            }
-
-            // Episode mentions score
-            score += (episodeMentions / 10) * (graphWeights.mentions ?? 0.1); // Normalize by assuming 10 is a lot
-
-            // Path score (consider path length and diversity)
-            if (paths.length > 0) {
-                const pathScore = paths.reduce((sum, path) => 
-                    sum + (1 / path.length) * (path.types.length / path.length), 0) / paths.length;
-                score += pathScore * (graphWeights.paths ?? 0.1);
-            }
+        let score = rrf * 0.4; // RRF gets significant weight
+        
+        // Add weighted feature scores
+        if (features.crossEncoderScore !== undefined && weights.crossEncoder) {
+            score += features.crossEncoderScore * weights.crossEncoder;
         }
-
+        
+        if (features.recency !== undefined && weights.temporal) {
+            score += features.recency * weights.temporal;
+        }
+        
+        if (features.connectivity !== undefined && weights.connectivity) {
+            score += features.connectivity * weights.connectivity;
+        }
+        
+        if (features.importance !== undefined && weights.importance) {
+            score += features.importance * weights.importance;
+        }
+        
         return score;
     }
 
@@ -382,18 +362,18 @@ Return only the numeric score.`;
      * Deep merge configurations
      */
     private mergeConfig(
-        base: Required<RerankerConfig>,
+        base: RerankerConfig,
         override: Partial<RerankerConfig>
-    ): Required<RerankerConfig> {
+    ): RerankerConfig {
         return {
             ...base,
             ...override,
-            weights: { ...base.weights, ...override.weights },
-            crossEncoder: { ...base.crossEncoder, ...override.crossEncoder },
-            mmr: { ...base.mmr, ...override.mmr },
-            temporal: { ...base.temporal, ...override.temporal },
-            rrf: { ...base.rrf, ...override.rrf },
-            graph: { ...base.graph, ...override.graph }
+            mmr: override.mmr ? { ...base.mmr, ...override.mmr } : base.mmr,
+            rrf: override.rrf ? { ...base.rrf, ...override.rrf } : base.rrf,
+            crossEncoder: override.crossEncoder ? { ...base.crossEncoder, ...override.crossEncoder } : base.crossEncoder,
+            temporal: override.temporal ? { ...base.temporal, ...override.temporal } : base.temporal,
+            graphFeatures: override.graphFeatures ? { ...base.graphFeatures, ...override.graphFeatures } : base.graphFeatures,
+            weights: override.weights ? { ...base.weights, ...override.weights } : base.weights
         };
     }
 }

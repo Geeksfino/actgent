@@ -95,6 +95,7 @@ export interface RankingFeatures {
     recency: number;            // Time-based score
     connectivity: number;       // Graph connectivity score
     importance: number;         // Node importance score
+    rrf?: number;              // Reciprocal Rank Fusion score
     graph?: GraphFeatures;      // Graph-specific features
     ranks: {                    // Individual ranks from each system
         embedding?: number;

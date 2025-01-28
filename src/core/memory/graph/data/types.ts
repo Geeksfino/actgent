@@ -28,7 +28,7 @@ export interface IGraphUnit {
  */
 export interface IGraphNode<T = any> extends IGraphUnit {
     content: T;
-    embedding?: number[];  // Optional embedding vector for semantic search
+    embedding?: Float32Array | number[];  // Support both Float32Array and number[] for embeddings
 }
 
 /**

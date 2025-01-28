@@ -10,7 +10,9 @@ export class InMemoryGraphIndex<N = any, E = any> implements IGraphIndex<N, E> {
 
     async indexNode(node: IGraphNode<N>): Promise<void> {
         if (node.embedding) {
-            this.nodeEmbeddings.set(node.id, node.embedding);
+            // Convert Float32Array to number[] if needed
+            const embedding = Array.from(node.embedding);
+            this.nodeEmbeddings.set(node.id, embedding);
         }
         if (node.metadata) {
             this.nodeMetadata.set(node.id, Object.fromEntries(node.metadata));
