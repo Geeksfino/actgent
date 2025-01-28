@@ -96,6 +96,7 @@ describe('InMemoryGraphStorage', () => {
             const node = MockDataGenerator.generateNode();
             node.validAt = now;
             node.expiredAt = new Date(now.getTime() + 1000 * 60 * 60); // 1 hour from now
+            node.createdAt = now;
             
             const id = await storage.addNode(node);
             

@@ -133,15 +133,20 @@ class GraphFrameworkTest {
             await this.operations.addNode({
                 id: node.id,
                 type: 'episode',
-                content: node.content.text,
+                content: {
+                    body: node.content.text,
+                    source: 'test',
+                    sourceDescription: 'Test conversation',
+                    timestamp: new Date(node.timestamp)
+                },
                 metadata: new Map(Object.entries({
-                    timestamp: node.timestamp,
                     entities: node.content.entities
                 })),
-                createdAt: new Date()
+                createdAt: new Date(),
+                validAt: new Date(node.timestamp)  // Set validAt to match episode timestamp
             });
 
-            // Add entity nodes and relationships
+            // Process entities
             for (const entity of node.content.entities) {
                 const entityId = this.generateSafeEntityId(entity);
                 await this.operations.addNode({
@@ -149,23 +154,25 @@ class GraphFrameworkTest {
                     type: 'entity',
                     content: entity.value,
                     metadata: new Map(Object.entries({
-                        entityType: entity.type,
-                        ...entity.metadata
+                        entityType: entity.type,  // Store the entity type in metadata
+                        ...entity.metadata || {}
                     })),
-                    createdAt: new Date()
+                    createdAt: new Date(),
+                    validAt: new Date(node.timestamp)  // Set validAt to match episode timestamp
                 });
 
-                // Link episode to entity
+                // Link entity to episode
                 await this.operations.addEdge({
-                    id: `${node.id}_${entityId}_mentions`,
+                    id: `${node.id}_mentions_${entityId}`,  // Create a deterministic edge ID
                     sourceId: node.id,
                     targetId: entityId,
                     type: 'mentions',
-                    content: 'mentions',
+                    content: {},
                     metadata: new Map(Object.entries({
-                        timestamp: node.timestamp
+                        timestamp: node.timestamp  // Add timestamp to edge metadata
                     })),
-                    createdAt: new Date()
+                    createdAt: new Date(),
+                    validAt: new Date(node.timestamp)  // Set validAt to match episode timestamp
                 });
             }
         }

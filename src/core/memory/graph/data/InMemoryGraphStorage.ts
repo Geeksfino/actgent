@@ -206,31 +206,23 @@ export class InMemoryGraphStorage implements IGraphStorage {
     }
 
     private applyTemporalFilter(item: IGraphUnit, temporal?: GraphFilter['temporal']): boolean {
-        if (!temporal) return true;
+        if (!temporal) {
+            return true;
+        }
 
-        // Transaction time checks
-        if (temporal.createdAfter && item.createdAt <= temporal.createdAfter) return false;
-        if (temporal.createdBefore && item.createdAt >= temporal.createdBefore) return false;
-        if (temporal.expiredAfter && item.expiredAt && item.expiredAt <= temporal.expiredAfter) return false;
-        if (temporal.expiredBefore && item.expiredAt && item.expiredAt >= temporal.expiredBefore) return false;
+        const { validAt } = temporal;
+        if (!validAt) {
+            return true;
+        }
 
-        // Valid time checks
-        if (temporal.validAt) {
-            // Point-in-time validity check
-            if (!item.validAt || item.validAt > temporal.validAt) return false;
-            if ('invalidAt' in item && item.invalidAt && item.invalidAt <= temporal.validAt) return false;
-        } else {
-            // Range validity checks - only apply if validAt is set
-            if (item.validAt) {
-                if (temporal.validAfter && item.validAt < temporal.validAfter) return false;
-                if (temporal.validBefore && item.validAt > temporal.validBefore) return false;
-            }
-            
-            // Only check invalidAt for edges that have a validAt
-            if (item.validAt && 'invalidAt' in item) {
-                if (temporal.invalidAfter && item.invalidAt && item.invalidAt < temporal.invalidAfter) return false;
-                if (temporal.invalidBefore && item.invalidAt && item.invalidAt > temporal.invalidBefore) return false;
-            }
+        // Check if the item is valid at the given time
+        if (!item.validAt || validAt < item.validAt) {
+            return false;
+        }
+
+        // Check if the item has expired
+        if (item.expiredAt && validAt >= item.expiredAt) {
+            return false;
         }
 
         return true;
@@ -238,7 +230,7 @@ export class InMemoryGraphStorage implements IGraphStorage {
 
     private applyEpisodeFilter(node: IGraphNode, filter?: EpisodeFilter): boolean {
         if (!filter || !isEpisodeNode(node)) {
-            return false;  // No filter or not an episode node, exclude it
+            return true;  // No filter or not an episode node, include it
         }
 
         const episode = node as IGraphNode<EpisodeContent>;
@@ -437,6 +429,7 @@ export class InMemoryGraphStorage implements IGraphStorage {
         // Episode-specific validation
         if (isEpisodeNode(item as IGraphNode)) {
             const episodeNode = item as IGraphNode<EpisodeContent>;
+
             if (!episodeNode.content?.timestamp) {
                 throw new Error('Episode nodes must have a timestamp');
             }
