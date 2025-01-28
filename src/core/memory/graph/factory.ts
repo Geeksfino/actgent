@@ -1,5 +1,6 @@
 import { GraphConfig } from './types';
 import { GraphManager } from './GraphManager';
+import { InMemoryGraphStorage } from './data/InMemoryGraphStorage';
 
 /**
  * Create a new GraphManager instance with default or custom configuration
@@ -7,6 +8,16 @@ import { GraphManager } from './GraphManager';
 export function createGraph(config: Partial<GraphConfig> = {}): GraphManager {
     // Merge with default configurations
     const fullConfig: GraphConfig = {
+        storage: {
+            type: 'memory',
+            maxCapacity: 10000,
+            ...config.storage
+        },
+        episode: {
+            validateTimestamp: true,
+            autoSetValidAt: true,
+            ...config.episode
+        },
         llm: {
             client: config.llm?.client,
             config: config.llm?.config || {
@@ -42,6 +53,7 @@ export function createTestGraph(config: Partial<GraphConfig> = {}): GraphManager
     };
 
     return createGraph({
+        ...config,
         llm: {
             client: mockLLMClient,
             config: {
@@ -49,7 +61,6 @@ export function createTestGraph(config: Partial<GraphConfig> = {}): GraphManager
                 temperature: 0.0,
                 maxTokens: 1000
             }
-        },
-        ...config
+        }
     });
 }

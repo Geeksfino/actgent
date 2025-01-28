@@ -2,6 +2,29 @@
  * Configuration for graph operations
  */
 export interface GraphConfig {
+    // Storage configuration
+    storage: {
+        type: 'memory' | 'neo4j';  // Extensible for future storage types
+        maxCapacity?: number;      // Maximum nodes in memory
+        options?: Record<string, any>;  // Storage-specific options
+    };
+
+    // Episode configuration
+    episode?: {
+        validateTimestamp?: boolean;  // Whether to enforce timestamp validation
+        autoSetValidAt?: boolean;     // Auto-set validAt to match episode timestamp
+    };
+
+    // Query configuration
+    query?: {
+        maxResults?: number;  // Default max results for queries
+        defaultTimeWindow?: {  // Default time window for temporal queries
+            start: Date;
+            end: Date;
+        };
+    };
+
+    // LLM configuration
     llm: {
         client: any; // OpenAI-compatible client
         config?: LLMConfig;
