@@ -1,4 +1,4 @@
-import { IGraphStorage, IGraphNode, IGraphEdge, GraphFilter, GraphMemoryType, TraversalOptions } from './types';
+import { IGraphStorage, IGraphNode, IGraphEdge, GraphFilter, GraphMemoryType, TraversalOptions, IGraphUnit, EpisodeContent, isEpisodeNode, EpisodeFilter } from './types';
 import crypto from 'crypto';
 
 /**
@@ -8,49 +8,22 @@ export class InMemoryGraphStorage implements IGraphStorage {
     private nodes: Map<string, IGraphNode>;
     private edges: Map<string, IGraphEdge>;
     private adjacencyList: Map<string, Set<string>>;
-    
-    // Temporal indices for efficient querying
-    private nodeTemporalIndex: {
-        byCreatedAt: Map<string, Date>;
-        byExpiredAt: Map<string, Date>;
-        byValidAt: Map<string, Date>;
-    };
-    
-    private edgeTemporalIndex: {
-        byCreatedAt: Map<string, Date>;
-        byExpiredAt: Map<string, Date>;
-        byValidAt: Map<string, Date>;
-        byInvalidAt: Map<string, Date>;
-    };
 
     constructor(maxCapacity: number = 1000) {
         this.nodes = new Map();
         this.edges = new Map();
         this.adjacencyList = new Map();
-        
-        // Initialize temporal indices
-        this.nodeTemporalIndex = {
-            byCreatedAt: new Map(),
-            byExpiredAt: new Map(),
-            byValidAt: new Map()
-        };
-        
-        this.edgeTemporalIndex = {
-            byCreatedAt: new Map(),
-            byExpiredAt: new Map(),
-            byValidAt: new Map(),
-            byInvalidAt: new Map()
-        };
     }
 
     // Graph-specific operations
     async addNode(node: IGraphNode): Promise<string> {
         const id = node.id || crypto.randomUUID();
         node.id = id;
+        
+        // Validate temporal consistency
+        this.validateTemporalConsistency(node);
+        
         this.nodes.set(id, node);
-        this.nodeTemporalIndex.byCreatedAt.set(id, node.createdAt);
-        if (node.expiredAt) this.nodeTemporalIndex.byExpiredAt.set(id, node.expiredAt);
-        if (node.validAt) this.nodeTemporalIndex.byValidAt.set(id, node.validAt);
         return id;
     }
 
@@ -63,21 +36,16 @@ export class InMemoryGraphStorage implements IGraphStorage {
         if (!node) throw new Error(`Node ${id} not found`);
         
         Object.assign(node, updates);
-        this.nodes.set(id, node);
         
-        // Update temporal indices
-        if (updates.expiredAt) this.nodeTemporalIndex.byExpiredAt.set(id, updates.expiredAt);
-        if (updates.validAt) this.nodeTemporalIndex.byValidAt.set(id, updates.validAt);
+        // Validate temporal consistency
+        this.validateTemporalConsistency(node);
+        
+        this.nodes.set(id, node);
     }
 
     async deleteNode(id: string): Promise<void> {
         // Remove from main storage
         this.nodes.delete(id);
-        
-        // Remove from temporal indices
-        this.nodeTemporalIndex.byCreatedAt.delete(id);
-        this.nodeTemporalIndex.byExpiredAt.delete(id);
-        this.nodeTemporalIndex.byValidAt.delete(id);
         
         // Remove connected edges
         for (const [edgeId, edge] of this.edges) {
@@ -94,6 +62,9 @@ export class InMemoryGraphStorage implements IGraphStorage {
         const id = edge.id || crypto.randomUUID();
         edge.id = id;
         
+        // Validate temporal consistency
+        this.validateTemporalConsistency(edge);
+        
         // Verify that source and target nodes exist
         if (!this.nodes.has(edge.sourceId) || !this.nodes.has(edge.targetId)) {
             throw new Error('Source or target node does not exist');
@@ -107,12 +78,6 @@ export class InMemoryGraphStorage implements IGraphStorage {
         }
         this.adjacencyList.get(edge.sourceId)!.add(edge.targetId);
         
-        // Update temporal indices
-        this.edgeTemporalIndex.byCreatedAt.set(id, edge.createdAt);
-        if (edge.expiredAt) this.edgeTemporalIndex.byExpiredAt.set(id, edge.expiredAt);
-        if (edge.validAt) this.edgeTemporalIndex.byValidAt.set(id, edge.validAt);
-        if (edge.invalidAt) this.edgeTemporalIndex.byInvalidAt.set(id, edge.invalidAt);
-        
         return id;
     }
 
@@ -125,12 +90,11 @@ export class InMemoryGraphStorage implements IGraphStorage {
         if (!edge) throw new Error(`Edge ${id} not found`);
         
         Object.assign(edge, updates);
-        this.edges.set(id, edge);
         
-        // Update temporal indices
-        if (updates.expiredAt) this.edgeTemporalIndex.byExpiredAt.set(id, updates.expiredAt);
-        if (updates.validAt) this.edgeTemporalIndex.byValidAt.set(id, updates.validAt);
-        if (updates.invalidAt) this.edgeTemporalIndex.byInvalidAt.set(id, updates.invalidAt);
+        // Validate temporal consistency
+        this.validateTemporalConsistency(edge);
+        
+        this.edges.set(id, edge);
     }
 
     async deleteEdge(id: string): Promise<void> {
@@ -139,12 +103,6 @@ export class InMemoryGraphStorage implements IGraphStorage {
         
         // Remove from main storage
         this.edges.delete(id);
-        
-        // Remove from temporal indices
-        this.edgeTemporalIndex.byCreatedAt.delete(id);
-        this.edgeTemporalIndex.byExpiredAt.delete(id);
-        this.edgeTemporalIndex.byValidAt.delete(id);
-        this.edgeTemporalIndex.byInvalidAt.delete(id);
         
         // Update adjacency list
         const sourceAdjList = this.adjacencyList.get(edge.sourceId);
@@ -247,64 +205,115 @@ export class InMemoryGraphStorage implements IGraphStorage {
         return { nodes, edges };
     }
 
-    async query(filter: GraphFilter): Promise<{nodes: IGraphNode[], edges: IGraphEdge[]}> {
-        const nodes: IGraphNode[] = [];
-        const edges: IGraphEdge[] = [];
-        
-        // Filter nodes
-        for (const node of this.nodes.values()) {
-            let include = true;
-            
-            // Type filter
-            if (filter.nodeTypes && !filter.nodeTypes.includes(node.type)) {
-                include = false;
+    private applyTemporalFilter(item: IGraphUnit, temporal?: GraphFilter['temporal']): boolean {
+        if (!temporal) return true;
+
+        // Transaction time checks
+        if (temporal.createdAfter && item.createdAt <= temporal.createdAfter) return false;
+        if (temporal.createdBefore && item.createdAt >= temporal.createdBefore) return false;
+        if (temporal.expiredAfter && item.expiredAt && item.expiredAt <= temporal.expiredAfter) return false;
+        if (temporal.expiredBefore && item.expiredAt && item.expiredAt >= temporal.expiredBefore) return false;
+
+        // Valid time checks
+        if (temporal.validAt) {
+            // Point-in-time validity check
+            if (!item.validAt || item.validAt > temporal.validAt) return false;
+            if ('invalidAt' in item && item.invalidAt && item.invalidAt <= temporal.validAt) return false;
+        } else {
+            // Range validity checks - only apply if validAt is set
+            if (item.validAt) {
+                if (temporal.validAfter && item.validAt < temporal.validAfter) return false;
+                if (temporal.validBefore && item.validAt > temporal.validBefore) return false;
             }
             
-            // Time window filter
-            if (include && filter.timeWindow) {
-                if (node.createdAt > filter.timeWindow.end || 
-                    (node.expiredAt && node.expiredAt <= filter.timeWindow.start)) {
-                    include = false;
-                }
-            }
-            
-            // Temporal filter
-            if (include && filter.temporal) {
-                include = this.applyTemporalFilter(node, filter.temporal);
-            }
-            
-            if (include) {
-                nodes.push(node);
+            // Only check invalidAt for edges that have a validAt
+            if (item.validAt && 'invalidAt' in item) {
+                if (temporal.invalidAfter && item.invalidAt && item.invalidAt < temporal.invalidAfter) return false;
+                if (temporal.invalidBefore && item.invalidAt && item.invalidAt > temporal.invalidBefore) return false;
             }
         }
-        
-        // Filter edges
-        for (const edge of this.edges.values()) {
-            let include = true;
-            
-            // Type filter
-            if (filter.edgeTypes && !filter.edgeTypes.includes(edge.type)) {
-                include = false;
-            }
-            
-            // Time window filter
-            if (include && filter.timeWindow) {
-                if (edge.createdAt > filter.timeWindow.end || 
-                    (edge.expiredAt && edge.expiredAt <= filter.timeWindow.start)) {
-                    include = false;
-                }
-            }
-            
-            // Temporal filter
-            if (include && filter.temporal) {
-                include = this.applyTemporalFilter(edge, filter.temporal);
-            }
-            
-            if (include) {
-                edges.push(edge);
+
+        return true;
+    }
+
+    private applyEpisodeFilter(node: IGraphNode, filter?: EpisodeFilter): boolean {
+        if (!filter || !isEpisodeNode(node)) {
+            return false;  // No filter or not an episode node, exclude it
+        }
+
+        const episode = node as IGraphNode<EpisodeContent>;
+
+        // Check source filter
+        if (filter.source && episode.content.source !== filter.source) {
+            return false;
+        }
+
+        // Check time range filter
+        if (filter.timeRange) {
+            if (!episode.validAt ||
+                episode.validAt < filter.timeRange.start ||
+                episode.validAt > filter.timeRange.end) {
+                return false;
             }
         }
-        
+
+        // Check entity references
+        if (filter.entityIds?.length) {
+            const connectedEdges = Array.from(this.edges.values())
+                .filter(edge => 
+                    edge.sourceId === episode.id && 
+                    filter.entityIds!.includes(edge.targetId)
+                );
+            return connectedEdges.length > 0;  // Only include if connected to at least one requested entity
+        }
+
+        return true;  // Include if all filters pass
+    }
+
+    async query(filter: GraphFilter = {}): Promise<{ nodes: IGraphNode[]; edges: IGraphEdge[] }> {
+        let nodes = Array.from(this.nodes.values());
+        let edges = Array.from(this.edges.values());
+
+        // Apply existing filters
+        if (filter.nodeTypes?.length) {
+            nodes = nodes.filter(node => filter.nodeTypes!.includes(node.type));
+        }
+
+        if (filter.edgeTypes?.length) {
+            edges = edges.filter(edge => filter.edgeTypes!.includes(edge.type));
+        }
+
+        if (filter.temporal) {
+            nodes = nodes.filter(node => this.applyTemporalFilter(node, filter.temporal));
+            edges = edges.filter(edge => this.applyTemporalFilter(edge, filter.temporal));
+        }
+
+        // Apply episode filter if present
+        if (filter.episode) {
+            nodes = nodes.filter(node => this.applyEpisodeFilter(node, filter.episode));
+            // Get edges connected to filtered nodes
+            const nodeIds = new Set(nodes.map(n => n.id));
+            edges = edges.filter(edge => 
+                nodeIds.has(edge.sourceId) || nodeIds.has(edge.targetId)
+            );
+        }
+
+        // Apply metadata filter
+        if (filter.metadata) {
+            nodes = nodes.filter(node => this.matchesMetadata(node.metadata, filter.metadata));
+            edges = edges.filter(edge => this.matchesMetadata(edge.metadata, filter.metadata));
+        }
+
+        // Apply limit if specified
+        if (typeof filter.limit === 'number' && filter.limit > 0) {
+            nodes = nodes.slice(0, filter.limit);
+            // Keep only edges connected to remaining nodes
+            const nodeIds = new Set(nodes.map(n => n.id));
+            edges = edges.filter(edge => 
+                nodeIds.has(edge.sourceId) && nodeIds.has(edge.targetId)
+            );
+        }
+
         return { nodes, edges };
     }
 
@@ -374,7 +383,6 @@ export class InMemoryGraphStorage implements IGraphStorage {
         const edge = await this.getEdge(edgeId);
         if (edge) {
             edge.expiredAt = at;
-            this.edgeTemporalIndex.byExpiredAt.set(edgeId, at);
         }
     }
 
@@ -382,16 +390,6 @@ export class InMemoryGraphStorage implements IGraphStorage {
         this.nodes.clear();
         this.edges.clear();
         this.adjacencyList.clear();
-        
-        // Clear temporal indices
-        this.nodeTemporalIndex.byCreatedAt.clear();
-        this.nodeTemporalIndex.byExpiredAt.clear();
-        this.nodeTemporalIndex.byValidAt.clear();
-        
-        this.edgeTemporalIndex.byCreatedAt.clear();
-        this.edgeTemporalIndex.byExpiredAt.clear();
-        this.edgeTemporalIndex.byValidAt.clear();
-        this.edgeTemporalIndex.byInvalidAt.clear();
     }
 
     async findNodes(filter: GraphFilter): Promise<IGraphNode[]> {
@@ -420,144 +418,37 @@ export class InMemoryGraphStorage implements IGraphStorage {
         });
     }
 
-    private removeNodeFromTemporalIndices(nodeId: string): void {
-        this.nodeTemporalIndex.byCreatedAt.delete(nodeId);
-        this.nodeTemporalIndex.byExpiredAt.delete(nodeId);
-        this.nodeTemporalIndex.byValidAt.delete(nodeId);
-    }
-
-    private removeEdgeFromTemporalIndices(edgeId: string): void {
-        this.edgeTemporalIndex.byCreatedAt.delete(edgeId);
-        this.edgeTemporalIndex.byExpiredAt.delete(edgeId);
-        this.edgeTemporalIndex.byValidAt.delete(edgeId);
-        this.edgeTemporalIndex.byInvalidAt.delete(edgeId);
-    }
-
-    async updateNodeTemporalIndices(node: IGraphNode) {
-        this.nodeTemporalIndex.byCreatedAt.set(node.id, node.createdAt);
-        if (node.expiredAt) {
-            this.nodeTemporalIndex.byExpiredAt.set(node.id, node.expiredAt);
+    private validateTemporalConsistency(item: IGraphUnit): void {
+        // Transaction time validation
+        if (item.expiredAt && item.expiredAt <= item.createdAt) {
+            throw new Error('expiredAt must be after createdAt');
         }
-        if (node.validAt) {
-            this.nodeTemporalIndex.byValidAt.set(node.id, node.validAt);
-        }
-    }
-
-    async updateEdgeTemporalIndices(edge: IGraphEdge) {
-        this.edgeTemporalIndex.byCreatedAt.set(edge.id, edge.createdAt);
-        if (edge.expiredAt) {
-            this.edgeTemporalIndex.byExpiredAt.set(edge.id, edge.expiredAt);
-        }
-        if (edge.validAt) {
-            this.edgeTemporalIndex.byValidAt.set(edge.id, edge.validAt);
-        }
-        if (edge.invalidAt) {
-            this.edgeTemporalIndex.byInvalidAt.set(edge.id, edge.invalidAt);
-        }
-    }
-
-    createNode(data: Partial<IGraphNode>): IGraphNode {
-        const id = data.id || crypto.randomUUID();
-        const timestamp = new Date();
-        return {
-            id,
-            type: data.type || 'default',
-            metadata: data.metadata || new Map(),
-            createdAt: timestamp,
-            expiredAt: data.expiredAt,
-            validAt: data.validAt,
-            content: data.content || {}
-        };
-    }
-
-    createEdge(data: Partial<IGraphEdge>): IGraphEdge {
-        const id = data.id || crypto.randomUUID();
-        const timestamp = new Date();
-        return {
-            id,
-            sourceId: data.sourceId || '',
-            targetId: data.targetId || '',
-            type: data.type || 'default',
-            metadata: data.metadata || new Map(),
-            createdAt: timestamp,
-            expiredAt: data.expiredAt,
-            validAt: data.validAt,
-            invalidAt: data.invalidAt,
-            weight: data.weight,
-            memoryType: GraphMemoryType.SEMANTIC,
-            content: data.content || {},
-            episodeIds: data.episodeIds || []
-        };
-    }
-
-    private deepCloneWithMaps<T>(obj: T): T {
-        if (obj === null || typeof obj !== 'object') {
-            return obj;
+        
+        // Valid time validation for edges
+        if ('invalidAt' in item && item.invalidAt) {
+            if (!item.validAt) {
+                throw new Error('invalidAt requires validAt to be set');
+            }
+            if (item.validAt >= item.invalidAt) {
+                throw new Error('validAt must be before invalidAt');
+            }
         }
 
-        if (obj instanceof Map) {
-            return new Map(obj) as any;
+        // Episode-specific validation
+        if (isEpisodeNode(item as IGraphNode)) {
+            const episodeNode = item as IGraphNode<EpisodeContent>;
+            if (!episodeNode.content?.timestamp) {
+                throw new Error('Episode nodes must have a timestamp');
+            }
+            // Set validAt to match episode timestamp if not set
+            if (!item.validAt) {
+                item.validAt = episodeNode.content.timestamp;
+            }
+            // Ensure validAt matches episode timestamp
+            else if (item.validAt.getTime() !== episodeNode.content.timestamp.getTime()) {
+                throw new Error('Episode validAt must match content timestamp');
+            }
         }
-
-        if (obj instanceof Set) {
-            return new Set(obj) as any;
-        }
-
-        if (Array.isArray(obj)) {
-            return obj.map(item => this.deepCloneWithMaps(item)) as any;
-        }
-
-        const cloned: any = {};
-        for (const [key, value] of Object.entries(obj)) {
-            cloned[key] = this.deepCloneWithMaps(value);
-        }
-        return cloned;
-    }
-
-    private applyTemporalFilter(item: IGraphNode | IGraphEdge, temporal?: GraphFilter['temporal']): boolean {
-        if (!temporal) return true;
-
-        const {
-            createdAfter, createdBefore,
-            expiredAfter, expiredBefore,
-            validAfter, validBefore,
-            invalidAfter, invalidBefore,
-            validAt
-        } = temporal;
-
-        // Handle point-in-time validity check first
-        if (validAt) {
-            // Item must exist at validAt
-            if (item.createdAt >= validAt) return false;
-
-            // Item must not be expired at validAt
-            if (item.expiredAt && item.expiredAt <= validAt) return false;
-
-            // For edges, check invalidation time
-            if ('invalidAt' in item && item.invalidAt && item.invalidAt <= validAt) return false;
-
-            // Check validAt - item must be valid at or before the query time
-            if (item.validAt && item.validAt > validAt) return false;
-
-            return true;
-        }
-
-        // Handle time range checks if not using validAt
-        if (createdAfter && item.createdAt <= createdAfter) return false;
-        if (createdBefore && item.createdAt >= createdBefore) return false;
-
-        if (expiredAfter && item.expiredAt && item.expiredAt <= expiredAfter) return false;
-        if (expiredBefore && item.expiredAt && item.expiredAt >= expiredBefore) return false;
-
-        if (validAfter && item.validAt && item.validAt <= validAfter) return false;
-        if (validBefore && item.validAt && item.validAt >= validBefore) return false;
-
-        if ('invalidAt' in item) {
-            if (invalidAfter && item.invalidAt && item.invalidAt <= invalidAfter) return false;
-            if (invalidBefore && item.invalidAt && item.invalidAt >= invalidBefore) return false;
-        }
-
-        return true;
     }
 
     /**
@@ -638,6 +529,25 @@ export class InMemoryGraphStorage implements IGraphStorage {
     }
 
     /**
+     * Get episodes within a time range, ordered by their occurrence time
+     * @param startTime Start of time range
+     * @param endTime End of time range
+     * @returns Array of episode nodes sorted by validAt
+     */
+    async getEpisodeTimeline(startTime: Date, endTime: Date): Promise<IGraphNode<EpisodeContent>[]> {
+        const nodes = Array.from(this.nodes.values())
+            .filter(node => 
+                isEpisodeNode(node) &&
+                node.validAt &&
+                node.validAt >= startTime &&
+                node.validAt <= endTime &&
+                (!node.expiredAt || node.expiredAt > new Date())  // Exclude expired nodes
+            ) as IGraphNode<EpisodeContent>[];
+        
+        return nodes.sort((a, b) => a.validAt!.getTime() - b.validAt!.getTime());
+    }
+
+    /**
      * Find connected nodes based on edge and node types
      */
     async findConnectedNodes(options: {
@@ -690,5 +600,74 @@ export class InMemoryGraphStorage implements IGraphStorage {
                 (nodeTypes[0] === '*' || nodeTypes.includes(n.type))
             )
             .slice(0, limit);
+    }
+
+    /**
+     * Check if metadata matches the filter criteria
+     */
+    private matchesMetadata(metadata: Map<string, any>, filter: Record<string, any> | undefined): boolean {
+        if (!filter) return true;
+        for (const [key, value] of Object.entries(filter)) {
+            const metaValue = metadata.get(key);
+            if (metaValue !== value) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    createNode(data: Partial<IGraphNode>): IGraphNode {
+        const id = data.id || crypto.randomUUID();
+        const timestamp = new Date();
+        return {
+            id,
+            type: data.type || 'default',
+            metadata: data.metadata || new Map(),
+            createdAt: timestamp,
+            expiredAt: data.expiredAt,
+            validAt: data.validAt,
+            content: data.content || {}
+        };
+    }
+
+    createEdge(data: Partial<IGraphEdge>): IGraphEdge {
+        const id = data.id || crypto.randomUUID();
+        const timestamp = new Date();
+        return {
+            id,
+            sourceId: data.sourceId || '',
+            targetId: data.targetId || '',
+            type: data.type || 'default',
+            metadata: data.metadata || new Map(),
+            createdAt: timestamp,
+            expiredAt: data.expiredAt,
+            validAt: data.validAt,
+            invalidAt: data.invalidAt,
+            content: data.content || {}
+        };
+    }
+
+    private deepCloneWithMaps<T>(obj: T): T {
+        if (obj === null || typeof obj !== 'object') {
+            return obj;
+        }
+
+        if (obj instanceof Map) {
+            return new Map(obj) as any;
+        }
+
+        if (obj instanceof Set) {
+            return new Set(obj) as any;
+        }
+
+        if (Array.isArray(obj)) {
+            return obj.map(item => this.deepCloneWithMaps(item)) as any;
+        }
+
+        const cloned: any = {};
+        for (const [key, value] of Object.entries(obj)) {
+            cloned[key] = this.deepCloneWithMaps(value);
+        }
+        return cloned;
     }
 }

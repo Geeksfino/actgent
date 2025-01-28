@@ -38,10 +38,19 @@ export interface IGraphEdge<T = any> extends IGraphUnit {
     sourceId: string;
     targetId: string;
     invalidAt?: Date;
-    weight?: number;
     content: T;
-    episodeIds?: string[];
-    memoryType?: GraphMemoryType;
+}
+
+/**
+ * Episode-specific filter options
+ */
+export interface EpisodeFilter {
+    entityIds?: string[];  // Find episodes referencing these entities
+    source?: string;       // Filter by episode source
+    timeRange?: {
+        start: Date;
+        end: Date;
+    };
 }
 
 /**
@@ -67,8 +76,13 @@ export interface GraphFilter {
         invalidAfter?: Date;
         invalidBefore?: Date;
         validAt?: Date;  // Point-in-time validity check
+        asOf?: Date;     // Current time reference
     };
     metadata?: Record<string, any>;
+    embedding?: number[];
+    similarityThreshold?: number;
+    limit?: number;
+    episode?: EpisodeFilter;  // Optional episode-specific filter
 }
 
 /**
@@ -174,4 +188,32 @@ export enum CoreTemporalMode {
     CURRENT = 'current',
     HISTORICAL = 'historical',
     ALL = 'all'
+}
+
+/**
+ * Node types in the graph
+ */
+export const GraphNodeType = {
+    EPISODE: 'episode',
+    ENTITY: 'entity',
+    SEMANTIC: 'semantic'
+} as const;
+
+export type GraphNodeTypeValues = typeof GraphNodeType[keyof typeof GraphNodeType];
+
+/**
+ * Content type for episode nodes
+ */
+export interface EpisodeContent {
+    body: string;
+    source: string;
+    sourceDescription: string;
+    timestamp: Date;  // When the episode occurred
+}
+
+/**
+ * Type guard for episode nodes
+ */
+export function isEpisodeNode(node: IGraphNode): node is IGraphNode<EpisodeContent> {
+    return node.type === GraphNodeType.EPISODE;
 }
