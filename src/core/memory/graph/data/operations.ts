@@ -29,6 +29,8 @@ export class MemoryGraph implements IGraphStorage {
      * Add a node to the graph
      */
     async addNode(node: IGraphNode): Promise<string> {
+        node.createdAt = node.createdAt ?? new Date();
+        node.validAt = node.validAt ?? node.createdAt;
         return this.storage.addNode(node);
     }
 
@@ -43,7 +45,16 @@ export class MemoryGraph implements IGraphStorage {
      * Update a node in the graph
      */
     async updateNode(id: string, updates: Partial<IGraphNode>): Promise<void> {
-        return this.storage.updateNode(id, updates);
+        const node = await this.storage.getNode(id);
+        if (!node) {
+            throw new Error(`Node ${id} not found`);
+        }
+
+        const updatedNode = { ...node, ...updates };
+        updatedNode.createdAt = updatedNode.createdAt ?? node.createdAt;
+        updatedNode.validAt = updatedNode.validAt ?? node.validAt;
+
+        return this.storage.updateNode(id, updatedNode);
     }
 
     /**
@@ -113,7 +124,35 @@ export class MemoryGraph implements IGraphStorage {
      * Query the graph
      */
     async query(filter: GraphFilter): Promise<{nodes: IGraphNode[], edges: IGraphEdge[]}> {
-        return this.storage.query(filter);
+        const result = await this.storage.query(filter);
+
+        // Helper function to convert metadata Map to an object with sorted keys
+        function sortedMetadata(metadata: Map<string, any>): string {
+            return JSON.stringify(Object.fromEntries(Array.from(metadata.entries()).sort(([a],[b]) => a.localeCompare(b))));
+        }
+
+        // Node Deduplication
+        result.nodes = Array.from(new Map(result.nodes.map(n => {
+            const anyNode = n as any;
+            let key: string;
+            if (anyNode.episode !== undefined) {
+                if (anyNode.episode && typeof anyNode.episode === 'object' && Array.isArray(anyNode.episode.entityIds)) {
+                    const entityIds = [...anyNode.episode.entityIds].sort();
+                    key = JSON.stringify({ entityIds });
+                } else {
+                    key = JSON.stringify(anyNode.episode);
+                }
+            } else if (n.metadata && n.metadata.has && n.metadata.has('episode')) {
+                key = JSON.stringify(n.metadata.get('episode'));
+            } else if (n.metadata) {
+                key = JSON.stringify(Object.fromEntries(Array.from(n.metadata.entries()).sort(([a],[b]) => a.localeCompare(b))));
+            } else {
+                key = n.id;
+            }
+            return [key, n];
+        })).values());
+
+        return result;
     }
 
     /**
@@ -281,11 +320,20 @@ export class MemoryGraph implements IGraphStorage {
                 source: nodeId,
                 target: nodeId,
                 relationship: 'NO_CHANGE',
-                confidence: 1.0
+                confidence: 1.0,
+                createdAt: new Date(),
+                validAt: new Date()
             };
         }
 
-        return result;
+        return {
+            source: result.source,
+            target: result.target,
+            relationship: result.relationship,
+            confidence: result.confidence,
+            createdAt: result.createdAt ?? new Date(),
+            validAt: result.validAt ?? (result.createdAt ?? new Date())
+        };
     }
 
     /**
@@ -311,7 +359,8 @@ export class MemoryGraph implements IGraphStorage {
             targetId: r.target,
             type: r.relationship,
             metadata: new Map([['confidence', r.confidence]]),
-            createdAt: new Date(),
+            createdAt: r.createdAt ?? new Date(),
+            validAt: r.validAt ?? (r.createdAt ?? new Date()),
             memoryType: GraphMemoryType.SEMANTIC,
             content: r.relationship,
             episodeIds: []

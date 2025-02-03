@@ -210,19 +210,59 @@ export class InMemoryGraphStorage implements IGraphStorage {
             return true;
         }
 
-        const { validAt } = temporal;
-        if (!validAt) {
-            return true;
+        const { validAt, validAfter, validBefore } = temporal;
+
+        // Check point-in-time validity
+        if (validAt) {
+            // Item must be valid at the given time
+            if (!item.validAt || validAt < item.validAt) {
+                return false;
+            }
+
+            // Item must not have expired
+            if (item.expiredAt && validAt >= item.expiredAt) {
+                return false;
+            }
+
+            // Check invalidAt only for edges
+            const edge = item as IGraphEdge;
+            if ('invalidAt' in edge && edge.invalidAt && validAt >= edge.invalidAt) {
+                return false;
+            }
         }
 
-        // Check if the item is valid at the given time
-        if (!item.validAt || validAt < item.validAt) {
-            return false;
-        }
+        // Check range validity
+        if (validAfter || validBefore) {
+            // Item must be valid at or before validBefore
+            if (validBefore && item.validAt && item.validAt >= validBefore) {
+                return false;
+            }
 
-        // Check if the item has expired
-        if (item.expiredAt && validAt >= item.expiredAt) {
-            return false;
+            // Item must be valid at or after validAfter
+            if (validAfter && item.validAt && item.validAt > validAfter) {
+                return false;
+            }
+
+            // Item must not expire during the range
+            if (item.expiredAt) {
+                if (validAfter && item.expiredAt <= validAfter) {
+                    return false;
+                }
+                if (validBefore && item.expiredAt <= validBefore) {
+                    return false;
+                }
+            }
+
+            // Check invalidAt only for edges
+            const edge = item as IGraphEdge;
+            if ('invalidAt' in edge && edge.invalidAt) {
+                if (validAfter && edge.invalidAt <= validAfter) {
+                    return false;
+                }
+                if (validBefore && edge.invalidAt <= validBefore) {
+                    return false;
+                }
+            }
         }
 
         return true;
@@ -253,8 +293,11 @@ export class InMemoryGraphStorage implements IGraphStorage {
         if (filter.entityIds?.length) {
             const connectedEdges = Array.from(this.edges.values())
                 .filter(edge => 
-                    edge.sourceId === episode.id && 
-                    filter.entityIds!.includes(edge.targetId)
+                    // Check both directions:
+                    // 1. Episode -> Entity (episode is source)
+                    // 2. Entity -> Episode (episode is target)
+                    (edge.sourceId === episode.id && filter.entityIds!.includes(edge.targetId)) ||
+                    (edge.targetId === episode.id && filter.entityIds!.includes(edge.sourceId))
                 );
             return connectedEdges.length > 0;  // Only include if connected to at least one requested entity
         }
@@ -282,7 +325,8 @@ export class InMemoryGraphStorage implements IGraphStorage {
 
         // Apply episode filter if present
         if (filter.episode) {
-            nodes = nodes.filter(node => this.applyEpisodeFilter(node, filter.episode));
+            // Only include episode nodes when using episode filters
+            nodes = nodes.filter(node => isEpisodeNode(node) && this.applyEpisodeFilter(node, filter.episode));
             // Get edges connected to filtered nodes
             const nodeIds = new Set(nodes.map(n => n.id));
             edges = edges.filter(edge => 

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ResultReranker } from '../reranking';
-import { MemoryGraph } from '../../data/operations';
-import { IGraphNode } from '../../data/types';
-import { DEFAULT_RERANKER_CONFIG } from '../../config/defaults';
+import { ResultReranker } from '../../src/core/memory/graph/query/reranking';
+import { MemoryGraph } from '../../src/core/memory/graph/data/operations';
+import { IGraphNode } from '../../src/core/memory/graph/data/types';
+import { DEFAULT_RERANKER_CONFIG } from '../../src/core/memory/graph/config/defaults';
 
 // Mock dependencies
 const mockGraphRankingOps = {

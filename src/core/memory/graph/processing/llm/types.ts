@@ -27,7 +27,9 @@ export const TemporalSchema = z.array(z.object({
     source: z.string(),
     target: z.string(),
     relationship: z.string(),
-    confidence: z.number()
+    confidence: z.number(),
+    createdAt: z.date(),
+    validAt: z.date()
 }));
 
 /**
@@ -54,6 +56,8 @@ export interface TemporalResult {
     target: string;
     relationship: string;
     confidence: number;
+    createdAt: Date;
+    validAt: Date;
 }
 
 export interface PathResult {

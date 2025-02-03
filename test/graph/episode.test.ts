@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { InMemoryGraphStorage } from '../InMemoryGraphStorage';
-import { IGraphNode, EpisodeContent, GraphNodeType } from '../types';
+import { InMemoryGraphStorage } from '../../src/core/memory/graph/data/InMemoryGraphStorage';
+import { IGraphNode, EpisodeContent, GraphNodeType } from '../../src/core/memory/graph/data/types';
 
 describe('Episode Node Operations', () => {
     it('should validate episode temporal consistency', async () => {

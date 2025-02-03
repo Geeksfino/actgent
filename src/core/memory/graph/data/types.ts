@@ -71,12 +71,12 @@ export interface GraphFilter {
         createdBefore?: Date;
         expiredAfter?: Date;
         expiredBefore?: Date;
-        validAfter?: Date;
+        validAfter?: Date;  // Point-in-time validity check
         validBefore?: Date;
+        validAt?: Date;
+        asOf?: Date;     // Current time reference
         invalidAfter?: Date;
         invalidBefore?: Date;
-        validAt?: Date;  // Point-in-time validity check
-        asOf?: Date;     // Current time reference
     };
     metadata?: Record<string, any>;
     embedding?: number[];

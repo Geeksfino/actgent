@@ -122,7 +122,7 @@ export class TemporalProcessor {
         const edge = await this.storage.getEdge(id);
         if (!edge) return null;
 
-        if (!edge.validAt || edge.validAt > validAt || (edge.invalidAt && edge.invalidAt <= validAt)) {
+        if (!edge.validAt || edge.validAt > validAt || (edge.invalidAt && edge.invalidAt <= validAt) || (edge.expiredAt && edge.expiredAt <= validAt)) {
             return null;
         }
 

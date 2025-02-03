@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { InMemoryGraphStorage } from '../InMemoryGraphStorage';
-import { IGraphNode, IGraphEdge } from '../types';
+import { InMemoryGraphStorage } from '../../src/core/memory/graph/data/InMemoryGraphStorage';
+import { IGraphNode, IGraphEdge } from '../../src/core/memory/graph/data/types';
 
 describe('Temporal Operations', () => {
     it('should validate temporal consistency', async () => {
@@ -109,7 +109,8 @@ describe('Temporal Operations', () => {
             metadata: new Map(),
             createdAt: new Date('2024-01-01'),
             validAt: new Date('2024-01-01'),
-            invalidAt: new Date('2024-01-03')
+            expiredAt: new Date('2024-01-03'),
+            invalidAt: new Date('2024-01-04')
         });
         
         // Test point-in-time query
