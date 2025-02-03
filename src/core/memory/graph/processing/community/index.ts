@@ -1,6 +1,6 @@
 import { IGraphNode, IGraphEdge } from '../../data/types';
-import { GraphLLMProcessor } from '../llm/processor';
-import { CommunityResult } from '../llm/types';
+import { GraphLLMProcessor } from '../episodic/processor';
+import { CommunityResult } from '../episodic/types';
 import { GraphTask } from '../../types';
 
 /**

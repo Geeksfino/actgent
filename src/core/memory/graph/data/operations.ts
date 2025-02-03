@@ -6,7 +6,7 @@ import {
     IGraphStorage,
     GraphMemoryType
 } from './types';
-import { GraphLLMProcessor } from '../processing/llm/processor';
+import { GraphLLMProcessor } from '../processing/episodic/processor';
 import { TimeMode } from '../processing/temporal/temporal';
 import { GraphTask } from '../types';
 import { 
@@ -14,7 +14,7 @@ import {
     CommunityResult,
     SearchResult,
     TemporalResult
-} from '../processing/llm/types';
+} from '../processing/episodic/types';
 
 /**
  * Core memory graph implementation using LLM for complex operations

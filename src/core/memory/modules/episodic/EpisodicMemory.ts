@@ -15,9 +15,9 @@ import {
 import { IMemoryStorage, IMemoryIndex } from '../../storage';
 import { IEpisodicMemoryUnit } from './types';
 import { MemoryGraph } from '../../graph/data/operations';
-import { GraphLLMProcessor } from '../../graph/processing/llm/processor';
+import { GraphLLMProcessor } from '../../graph/processing/episodic/processor';
 import { GraphTask } from '../../graph/types';
-import { SearchResult } from '../../graph/processing/llm/types';
+import { SearchResult } from '../../graph/processing/episodic/types';
 import {
     EpisodicNodeType,
     EpisodicEdgeType,

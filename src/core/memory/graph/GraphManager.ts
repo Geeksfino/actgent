@@ -10,7 +10,7 @@ import {
 import { GraphTask, GraphConfig, LLMConfig } from './types';
 import { InMemoryGraphStorage } from './data/InMemoryGraphStorage';
 import { MemoryGraph } from './data/operations';
-import { GraphLLMProcessor } from './processing/llm/processor';
+import { GraphLLMProcessor } from './processing/episodic/processor';
 import { HybridSearch } from './query/hybrid';
 import { ResultReranker } from './query/reranking';
 

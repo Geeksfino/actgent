@@ -18,7 +18,7 @@ import {
     ISemanticMemoryUnit 
 } from './types';
 import { DeclarativeMemory } from '../../DeclarativeMemory';
-import { GraphLLMProcessor } from '../../graph/processing/llm/processor';
+import { GraphLLMProcessor } from '../../graph/processing/episodic/processor';
 import { MemoryGraph } from '../../graph/data/operations';
 import { IMemoryStorage, IMemoryIndex } from '../../storage';
 import crypto from 'crypto';

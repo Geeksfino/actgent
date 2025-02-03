@@ -1,5 +1,4 @@
 import { IGraphNode } from '../data/types';
-import { SearchResult } from '../processing/entity/types';
 
 /**
  * Configuration for reranking

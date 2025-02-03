@@ -23,7 +23,7 @@ export { InMemoryGraphStorage } from './data/InMemoryGraphStorage';
 export { MemoryGraph } from './data/operations';
 
 // Processing
-export { GraphLLMProcessor } from './processing/llm/processor';
+export { GraphLLMProcessor } from './processing/episodic/processor';
 export { 
     PathResult,
     CommunityResult,
@@ -32,7 +32,7 @@ export {
     BatchEntityResolution,
     EdgeResolution,
     BatchEdgeResolution
-} from './processing/entity/types';
+} from './processing/semantic/types';
 
 // Query and Search
 export { 
