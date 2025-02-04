@@ -2,6 +2,7 @@ import { IGraphNode, IGraphEdge } from '../../data/types';
 import { GraphLLMProcessor } from '../episodic/processor';
 import { CommunityResult } from '../episodic/types';
 import { GraphTask } from '../../types';
+import { LabelPropagation } from './label_propagation';
 
 /**
  * Community detection options
@@ -33,50 +34,71 @@ export interface Community {
 }
 
 /**
+ * Community metadata
+ */
+export interface CommunityMeta {
+    summary: string;
+    lastUpdateTime: Date;
+    memberCount: number;
+    divergenceScore: number;
+}
+
+/**
  * Community detection processor
  */
 export class CommunityDetector {
+    private labelPropagation: LabelPropagation;
+    private communityMeta: Map<string, CommunityMeta>;
+
     constructor(
         private llm: GraphLLMProcessor,
         private options: CommunityOptions = DEFAULT_OPTIONS
-    ) {}
+    ) {
+        this.labelPropagation = new LabelPropagation();
+        this.communityMeta = new Map();
+    }
 
     /**
      * Detect communities in a set of nodes
      */
     async detectCommunities(nodes: IGraphNode[], edges: IGraphEdge[]): Promise<Community[]> {
-        // Convert nodes and edges to format for LLM
-        const nodeData = nodes.map(node => ({
-            id: node.id,
-            content: node.content,
-            metadata: Object.fromEntries(node.metadata)
-        }));
-
-        const edgeData = edges.map(edge => ({
-            sourceId: edge.sourceId,
-            targetId: edge.targetId,
-            type: edge.type,
-            metadata: Object.fromEntries(edge.metadata)
-        }));
-
-        // Get community assignments from LLM
-        const results = await this.llm.process<CommunityResult[]>(
-            GraphTask.REFINE_COMMUNITIES,
-            {
-                nodes: nodeData,
-                edges: edgeData,
-                options: this.options
-            }
+        // Use label propagation to find initial communities
+        const communityGroups = await this.labelPropagation.detectCommunities(
+            nodes,
+            edges,
+            10, // maxIterations
+            0.01 // convergenceThreshold
         );
 
-        // Convert results back to communities
-        return results.map(result => ({
-            nodes: result.nodes
-                .map(nodeId => nodes.find(n => n.id === nodeId))
-                .filter((n): n is IGraphNode => n !== undefined),
-            label: result.label,
-            confidence: result.confidence
-        }));
+        const communities: Community[] = [];
+
+        // Process each community group
+        for (const [_, communityNodes] of communityGroups) {
+            // Skip communities that don't meet size requirements
+            if (communityNodes.length < this.options.minSize! || 
+                communityNodes.length > this.options.maxSize!) {
+                continue;
+            }
+
+            // Generate community label using LLM
+            const result = await this.llm.process<CommunityResult>(
+                GraphTask.LABEL_COMMUNITY,
+                {
+                    nodes: communityNodes.map(node => ({
+                        id: node.id,
+                        content: node.content
+                    }))
+                }
+            );
+
+            communities.push({
+                nodes: communityNodes,
+                label: result.label,
+                confidence: result.confidence
+            });
+        }
+
+        return communities;
     }
 
     /**
@@ -138,6 +160,133 @@ export class CommunityDetector {
             label: c1.confidence > c2.confidence ? c1.label : c2.label,
             confidence: Math.min(c1.confidence, c2.confidence)
         };
+    }
+
+    /**
+     * Update community assignment for a new or existing node
+     */
+    async updateNodeCommunity(
+        node: IGraphNode,
+        edges: IGraphEdge[]
+    ): Promise<{
+        communityId: string;
+        divergenceScore: number;
+    }> {
+        const result = await this.labelPropagation.updateNodeCommunity(node, edges);
+        
+        // Update community metadata
+        const meta = this.communityMeta.get(result.communityId) || {
+            summary: '',
+            lastUpdateTime: new Date(),
+            memberCount: 0,
+            divergenceScore: 0
+        };
+        
+        meta.lastUpdateTime = new Date();
+        meta.memberCount++;
+        meta.divergenceScore = result.divergenceScore;
+        
+        this.communityMeta.set(result.communityId, meta);
+        
+        return result;
+    }
+
+    /**
+     * Refresh a specific community using label propagation
+     */
+    async refreshCommunity(communityId: string): Promise<void> {
+        const meta = this.communityMeta.get(communityId);
+        if (!meta) {
+            throw new Error(`Community ${communityId} not found`);
+        }
+
+        // Run label propagation on community subgraph
+        const newCommunities = await this.labelPropagation.detectCommunities(
+            // TODO: Get community nodes and edges from storage
+            [], [], // Placeholder until we implement storage access
+            10,    // maxIterations
+            0.01   // convergenceThreshold
+        );
+
+        // Update metadata
+        meta.lastUpdateTime = new Date();
+        meta.divergenceScore = 0; // Reset after refresh
+        this.communityMeta.set(communityId, meta);
+    }
+
+    /**
+     * Get metadata for a community
+     */
+    async getCommunityMeta(communityId: string): Promise<CommunityMeta> {
+        const meta = this.communityMeta.get(communityId);
+        if (!meta) {
+            throw new Error(`Community ${communityId} not found`);
+        }
+        return meta;
+    }
+
+    /**
+     * Get current divergence score for a community
+     */
+    async getCommunityDivergence(communityId: string): Promise<number> {
+        const meta = this.communityMeta.get(communityId);
+        if (!meta) {
+            throw new Error(`Community ${communityId} not found`);
+        }
+        return meta.divergenceScore;
+    }
+
+    /**
+     * Get all communities that need refresh
+     */
+    async getCommunitiesNeedingRefresh(threshold: number): Promise<string[]> {
+        const needRefresh: string[] = [];
+        
+        for (const [id, meta] of this.communityMeta.entries()) {
+            if (meta.divergenceScore > threshold) {
+                needRefresh.push(id);
+            }
+        }
+        
+        return needRefresh;
+    }
+
+    /**
+     * Generate or update community summary using map-reduce
+     */
+    private async updateCommunitySummary(
+        communityId: string,
+        nodes: IGraphNode[]
+    ): Promise<string> {
+        // 1. Map: Break nodes into chunks
+        const chunks = this.chunkNodes(nodes, 5); // 5 nodes per chunk
+
+        // 2. First reduce: Summarize chunks
+        const chunkSummaries = await Promise.all(
+            chunks.map(chunk => this.llm.process<{ summary: string }>(
+                GraphTask.SUMMARIZE_CHUNK,
+                { nodes: chunk }
+            ))
+        );
+
+        // 3. Final reduce: Combine summaries
+        const result = await this.llm.process<{ summary: string }>(
+            GraphTask.COMBINE_SUMMARIES,
+            { summaries: chunkSummaries.map(s => s.summary) }
+        );
+
+        return result.summary;
+    }
+
+    /**
+     * Helper to chunk nodes for parallel processing
+     */
+    private chunkNodes(nodes: IGraphNode[], size: number): IGraphNode[][] {
+        const chunks: IGraphNode[][] = [];
+        for (let i = 0; i < nodes.length; i += size) {
+            chunks.push(nodes.slice(i, i + size));
+        }
+        return chunks;
     }
 }
 

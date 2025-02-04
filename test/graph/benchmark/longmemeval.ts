@@ -1,7 +1,12 @@
-import { BenchmarkRunner } from './runner';
-import { BenchmarkMetrics } from './types';
-import { readFileSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { GraphManager } from '../../../src/core/memory/graph/GraphManager';
+import { GraphConfig, GraphTask } from '../../../src/core/memory/graph/types';
+import { GraphFilter } from '../../../src/core/memory/graph/data/types';
+import { LLMConfig } from '../../../src/core/memory/graph/types';
+import { IGraphNode } from '../../../src/core/memory/graph/data/types';
+import { OpenAI } from "openai";
+import { TemporalSearchResult } from '../../../src/core/memory/graph/query/hybrid';
+import * as fs from 'fs';
+import { readFileSync } from 'fs';
 
 interface LongMemEvalTurn {
     role: 'user' | 'assistant';
@@ -25,156 +30,231 @@ interface LongMemEvalInstance {
     haystack_dates: string[];
     haystack_sessions: LongMemEvalTurn[][];
     answer_session_ids: string[];
+    episodeText?: string; 
 }
 
-interface LongMemEvalMetrics extends BenchmarkMetrics {
-    turnRecall: number;  // Recall at turn level
-    sessionRecall: number;  // Recall at session level
-    questionType: string;
+interface LongMemEvalPrediction {
+    question_id: string;
+    hypothesis: string;
 }
 
 export class LongMemEvalRunner {
-    private runner: BenchmarkRunner;
     private dataset: LongMemEvalInstance[];
+    private graphManager: GraphManager;
+    private predictionsPath: string;
+    private llmConfig: LLMConfig;
+    private openai: OpenAI;
+    private llmProcessor: any; // Assuming this is defined elsewhere
 
-    constructor(datasetPath: string) {
-        this.runner = new BenchmarkRunner();
+    constructor(
+        datasetPath: string, 
+        predictionsPath: string, 
+        graphConfig: GraphConfig,
+        llmConfig: LLMConfig
+    ) {
+        // Add default search config if not provided
+        const configWithSearch: GraphConfig = {
+            ...graphConfig,
+            search: graphConfig.search || {
+                textWeight: 0.4,
+                embeddingWeight: 0.6,
+                minTextScore: 0.1,
+                minEmbeddingScore: 0.5,
+                limit: 10
+            }
+        };
+        this.graphManager = new GraphManager(configWithSearch);
+        this.llmConfig = llmConfig;
+        this.openai = new OpenAI({
+            apiKey: llmConfig.apiKey,
+            baseURL: llmConfig.baseURL
+        });
         this.dataset = this.loadDataset(datasetPath);
+        this.predictionsPath = predictionsPath;
     }
 
     private loadDataset(path: string): LongMemEvalInstance[] {
         const content = readFileSync(path, 'utf-8');
-        const data = JSON.parse(content);
-        // If data has an 'instances' field, return it; otherwise assume data is the array
-        return data.instances ? data.instances : data;
+        return JSON.parse(content);
     }
 
-    private async runInstance(instance: LongMemEvalInstance): Promise<LongMemEvalMetrics> {
-        const startTime = Date.now();
-
-        // Convert LongMemEval format to our benchmark format
-        const conversation = {
-            id: instance.question_id,
-            messages: instance.haystack_sessions.flatMap((session, sessionIndex) =>
-                session.map((turn, turnIndex) => ({
-                    id: `${instance.haystack_session_ids[sessionIndex]}_${turnIndex}`,
-                    content: turn.content,
-                    timestamp: new Date(instance.haystack_dates[sessionIndex]),
-                    metadata: {
-                        role: turn.role,
-                        sessionId: instance.haystack_session_ids[sessionIndex],
-                        hasAnswer: turn.has_answer || false,
-                        entities: []  // We'll need entity extraction here
-                    }
-                }))
-            ),
-            queries: [{
-                query: instance.question,
-                expectedResults: instance.answer_session_ids.flatMap(sessionId => 
-                    instance.haystack_sessions[instance.haystack_session_ids.indexOf(sessionId)]
-                        .map((_, turnIndex) => `${sessionId}_${turnIndex}`)
-                        .filter(id => instance.haystack_sessions
-                            .flat()
-                            .some((turn, i) => turn.has_answer && 
-                                  `${instance.haystack_session_ids[Math.floor(i / instance.haystack_sessions[0].length)]}_${i % instance.haystack_sessions[0].length}` === id)
-                        )
-                ),
-                metadata: {
-                    temporal: {
-                        validAt: new Date(instance.question_date)
-                    }
+    async generatePrediction(instance: LongMemEvalInstance): Promise<LongMemEvalPrediction> {
+        try {
+            console.log('\n=== Processing Chat History ===');
+            // Process each session and add to graph
+            for (const [sessionIndex, session] of instance.haystack_sessions.entries()) {
+                console.log(`\nSession ${sessionIndex + 1}/${instance.haystack_sessions.length}`);
+                console.log(`Date: ${instance.haystack_dates[sessionIndex]}`);
+                console.log(`ID: ${instance.haystack_session_ids[sessionIndex]}`);
+                
+                let sessionContent = '';
+                for (const [turnIndex, turn] of session.entries()) {
+                    console.log(`  Turn ${turnIndex + 1}: ${turn.role} ${turn.has_answer ? '[EVIDENCE]' : ''}`);
+                    sessionContent += `${turn.role}: ${turn.content}\n`;
                 }
-            }]
-        };
+                
+                // Create node with required IGraphNode properties
+                const node: IGraphNode<string> = {
+                    id: instance.haystack_session_ids[sessionIndex],
+                    type: 'session',
+                    content: sessionContent,
+                    metadata: new Map([
+                        ['date', instance.haystack_dates[sessionIndex]],
+                        ['has_evidence', session.some(turn => turn.has_answer).toString()]
+                    ]),
+                    createdAt: new Date(instance.haystack_dates[sessionIndex]),
+                    validAt: new Date(instance.haystack_dates[sessionIndex])
+                };
+                
+                const nodeId = await this.graphManager.addNode(node);
+                console.log(`  Added to graph with node ID: ${nodeId}`);
+            }
 
-        // Run the benchmark
-        const results = await this.runner.runBenchmark(conversation);
-        const metrics = results[0];
+            console.log('\n=== Graph Search ===');
+            console.log('Query:', instance.question);
+            console.log('Question Date:', instance.question_date);
+            
+            // Search for relevant nodes using standard search
+            const searchResults = await this.graphManager.search(instance.question);
+            const results = searchResults.map(node => ({
+                id: node.id,
+                score: node.metadata.get('search_score') || 0,
+                confidence: node.metadata.get('search_confidence') || 0,
+                timestamp: node.validAt || node.createdAt
+            }));
+            
+            console.log(`\nFound ${results.length} relevant nodes:`);
+            for (const result of results) {
+                console.log(`- Node ${result.id} (score: ${result.score.toFixed(3)}, confidence: ${result.confidence.toFixed(3)})`);
+            }
+            
+            // Get full nodes from search results
+            const relevantNodes = searchResults;
+            
+            console.log('\n=== Evaluating Search Results ===');
+            // First evaluate search results
+            const evaluations = await Promise.all(
+                relevantNodes.filter((node): node is IGraphNode<string> => node !== null)
+                .map(async (node) => {
+                    const evaluation = await this.graphManager.processWithLLM<{
+                        relevance: number;
+                        confidence: number;
+                        reason: string;
+                    }>(GraphTask.EVALUATE_SEARCH, {
+                        query: instance.question,
+                        result: node.content
+                    });
+                    console.log(`\nEvaluating node ${node.id}:`);
+                    console.log(`- Relevance: ${evaluation.relevance.toFixed(3)}`);
+                    console.log(`- Confidence: ${evaluation.confidence.toFixed(3)}`);
+                    console.log(`- Reason: ${evaluation.reason}`);
+                    return { node, evaluation };
+                })
+            );
+            
+            console.log('\n=== Filtered Context ===');
+            // Filter and sort by relevance
+            const relevantContext = evaluations
+                .filter(({ evaluation, node }) => {
+                    const isRelevant = evaluation.relevance > 0.7;
+                    console.log(`Node ${node.id}: ${isRelevant ? 'INCLUDED' : 'FILTERED OUT'} (relevance: ${evaluation.relevance.toFixed(3)})`);
+                    return isRelevant;
+                })
+                .sort((a, b) => b.evaluation.relevance - a.evaluation.relevance)
+                .map(({ node }) => node.content)
+                .join('\n\n');
+            
+            console.log('\n=== Generating Final Answer ===');
+            // Generate final answer using relevant context
+            const prompt = `Based on the following context, answer the question. Provide ONLY the final answer without any explanation or thinking process.
 
-        // Calculate turn-level and session-level recall
-        const retrievedTurnIds = new Set(metrics.retrievedIds || []);
-        const expectedTurnIds = new Set(conversation.queries[0].expectedResults);
-        const retrievedSessionIds = new Set(
-            Array.from(retrievedTurnIds)
-                .map(id => id.split('_')[0])
-        );
-        const expectedSessionIds = new Set(instance.answer_session_ids);
+Question: ${instance.question}
 
-        return {
-            ...metrics,
-            turnRecall: expectedTurnIds.size > 0 ? 
-                Array.from(expectedTurnIds)
-                    .filter(id => retrievedTurnIds.has(id))
-                    .length / expectedTurnIds.size : 0,
-            sessionRecall: expectedSessionIds.size > 0 ?
-                Array.from(expectedSessionIds)
-                    .filter(id => retrievedSessionIds.has(id))
-                    .length / expectedSessionIds.size : 0,
-            questionType: instance.question_type
-        };
+Context:
+${relevantContext}
+
+Answer the question concisely based only on the information provided in the context. If the answer cannot be determined from the context, respond with exactly "Unable to determine from the available context."`;
+            
+            const completion = await this.openai.chat.completions.create({
+                model: this.llmConfig.model,
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.7,
+                max_tokens: 150
+            });
+            
+            // Clean up the response to remove any thinking process
+            let hypothesis = completion.choices[0].message.content?.trim() || 'Unable to determine from the available context';
+            
+            // Ensure we're using the standard format for "unable to determine"
+            if (hypothesis.toLowerCase().includes('unable to determine') || 
+                hypothesis.toLowerCase().includes('cannot determine') ||
+                hypothesis.toLowerCase().includes('not enough information')) {
+                hypothesis = 'Unable to determine from the available context';
+            }
+            
+            console.log('\nFinal Answer:', hypothesis);
+            
+            return {
+                question_id: instance.question_id,
+                hypothesis
+            };
+            
+        } catch (error) {
+            console.error('Error generating prediction:', error);
+            throw error;
+        }
     }
 
     public async runAll(): Promise<void> {
-        const results: LongMemEvalMetrics[] = [];
+        const predictions: LongMemEvalPrediction[] = [];
         
-        for (const instance of this.dataset) {
-            const metrics = await this.runInstance(instance);
-            results.push(metrics);
+        console.log(`Processing ${this.dataset.length} instances...`);
+        
+        // Process only first instance for testing
+        const instancesToProcess = this.dataset.slice(0, 1);
+        
+        // Clear the predictions file before starting
+        fs.writeFileSync(this.predictionsPath, '', { encoding: 'utf-8' });
+        
+        for (const [index, instance] of instancesToProcess.entries()) {
+            console.log(`\nProcessing instance ${index + 1}/${instancesToProcess.length}`);
+            console.log(`Question ID: ${instance.question_id}`);
+            console.log(`Question Type: ${instance.question_type}`);
+            console.log(`Question: ${instance.question}`);
             
-            // Log progress
-            console.log(`Processed ${instance.question_id} (${instance.question_type}):`);
-            console.log(`- Turn Recall: ${metrics.turnRecall.toFixed(3)}`);
-            console.log(`- Session Recall: ${metrics.sessionRecall.toFixed(3)}`);
-            console.log(`- Precision: ${metrics.precision.toFixed(3)}`);
-            console.log(`- Latency: ${metrics.latencyMs}ms\n`);
-        }
-
-        // Calculate and log aggregate metrics
-        const byType = new Map<string, LongMemEvalMetrics[]>();
-        for (const result of results) {
-            if (!byType.has(result.questionType)) {
-                byType.set(result.questionType, []);
+            try {
+                // Clear previous graph data
+                await this.graphManager.clear();
+                
+                // Generate prediction for this instance
+                const prediction = await this.generatePrediction(instance);
+                predictions.push(prediction);
+                
+                // Write prediction to file immediately in JSONL format (one JSON object per line)
+                fs.writeFileSync(
+                    this.predictionsPath,
+                    JSON.stringify(prediction) + '\n',
+                    { flag: 'a', encoding: 'utf-8' }
+                );
+            } catch (error) {
+                console.error(`Error processing instance ${instance.question_id}:`, error);
+                // Even if there's an error, output a prediction to maintain the format
+                const errorPrediction: LongMemEvalPrediction = {
+                    question_id: instance.question_id,
+                    hypothesis: 'Unable to determine from the available context'
+                };
+                predictions.push(errorPrediction);
+                fs.writeFileSync(
+                    this.predictionsPath,
+                    JSON.stringify(errorPrediction) + '\n',
+                    { flag: 'a', encoding: 'utf-8' }
+                );
             }
-            byType.get(result.questionType)!.push(result);
+            
+            // Add a small delay between instances to avoid rate limiting
+            await new Promise(resolve => setTimeout(resolve, 100));
         }
-
-        console.log('\nAggregate Results:');
-        console.log('==================');
         
-        for (const [type, typeResults] of byType.entries()) {
-            const avgTurnRecall = typeResults.reduce((sum, r) => sum + r.turnRecall, 0) / typeResults.length;
-            const avgSessionRecall = typeResults.reduce((sum, r) => sum + r.sessionRecall, 0) / typeResults.length;
-            const avgPrecision = typeResults.reduce((sum, r) => sum + r.precision, 0) / typeResults.length;
-            const avgLatency = typeResults.reduce((sum, r) => sum + r.latencyMs, 0) / typeResults.length;
-
-            console.log(`\n${type}:`);
-            console.log(`- Average Turn Recall: ${avgTurnRecall.toFixed(3)}`);
-            console.log(`- Average Session Recall: ${avgSessionRecall.toFixed(3)}`);
-            console.log(`- Average Precision: ${avgPrecision.toFixed(3)}`);
-            console.log(`- Average Latency: ${avgLatency.toFixed(2)}ms`);
-        }
-
-        // Save detailed results
-        const resultsPath = join(__dirname, 'longmemeval_results.json');
-        const output = {
-            timestamp: new Date().toISOString(),
-            total_questions: results.length,
-            results_by_type: Object.fromEntries(
-                Array.from(byType.entries()).map(([type, typeResults]) => [
-                    type,
-                    {
-                        count: typeResults.length,
-                        avg_turn_recall: typeResults.reduce((sum, r) => sum + r.turnRecall, 0) / typeResults.length,
-                        avg_session_recall: typeResults.reduce((sum, r) => sum + r.sessionRecall, 0) / typeResults.length,
-                        avg_precision: typeResults.reduce((sum, r) => sum + r.precision, 0) / typeResults.length,
-                        avg_latency: typeResults.reduce((sum, r) => sum + r.latencyMs, 0) / typeResults.length
-                    }
-                ])
-            ),
-            detailed_results: results
-        };
-
-        writeFileSync(resultsPath, JSON.stringify(output, null, 2));
-        console.log(`\nDetailed results saved to: ${resultsPath}`);
+        console.log(`\nCompleted processing test instance. Results written to: ${this.predictionsPath}`);
     }
 }

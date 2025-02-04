@@ -1,18 +1,48 @@
-import { 
-    IGraphNode, 
-    IGraphEdge, 
-    GraphFilter,
-    TraversalOptions,
+import {
+    IGraphNode,
+    IGraphEdge,
     IGraphStorage,
     GraphMemoryType,
-    IGraphMemoryUnit
+    IGraphMemoryUnit,
+    isEpisodeNode,
+    EpisodeFilter,
+    GraphFilter,
+    TraversalOptions,
+    EpisodeContent
 } from './data/types';
-import { GraphTask, GraphConfig, LLMConfig } from './types';
+import { GraphTask, LLMConfig } from './types';
 import { InMemoryGraphStorage } from './data/InMemoryGraphStorage';
 import { MemoryGraph } from './data/operations';
 import { GraphLLMProcessor } from './processing/episodic/processor';
-import { HybridSearch } from './query/hybrid';
+import { TemporalHybridSearch } from './query/hybrid';
+import { EmbeddingSearch } from './query/embedding';
+import { BM25Search } from './query/bm25';
 import { ResultReranker } from './query/reranking';
+import { OpenAI } from 'openai';
+import { IEmbedder } from './embedder/types';
+import { EmbedderFactory, EmbedderType } from './embedder/factory';
+
+/**
+ * Configuration for graph operations
+ */
+export interface GraphConfig {
+    llm: LLMConfig;
+    storage?: {
+        type: 'memory' | 'neo4j';
+        config?: any;
+    };
+    embedder?: {
+        type: EmbedderType;
+        config?: any;
+    };
+    search?: {
+        textWeight: number;
+        embeddingWeight: number;
+        minTextScore: number;
+        minEmbeddingScore: number;
+        limit: number;
+    };
+}
 
 /**
  * GraphManager serves as the single access point for all graph operations.
@@ -23,19 +53,77 @@ export class GraphManager {
     private storage: IGraphStorage;
     private graph: MemoryGraph;
     private llmProcessor: GraphLLMProcessor;
+    private _hybridSearch: TemporalHybridSearch;
+    private communityDetector: any;
+    private embedder: IEmbedder;
 
     constructor(config: GraphConfig) {
-        // Initialize components with configurations
-        this.storage = new InMemoryGraphStorage();
-        this.llmProcessor = new GraphLLMProcessor(
-            config.llm.client,
-            config.llm.config || {
-                model: 'gpt-4',
-                temperature: 0.0,
-                maxTokens: 1000
+        if (!config.llm) {
+            throw new Error('LLM configuration is required');
+        }
+
+        // Initialize storage based on config
+        if (config.storage?.type === 'memory') {
+            this.storage = new InMemoryGraphStorage();
+        } else if (config.storage?.type === 'neo4j') {
+            // TODO: Add Neo4j storage support when needed
+            throw new Error('Neo4j storage not yet supported');
+        } else {
+            // Default to in-memory storage
+            this.storage = new InMemoryGraphStorage();
+        }
+
+        // Initialize OpenAI client
+        const openai = new OpenAI({
+            apiKey: config.llm.apiKey,
+            baseURL: config.llm.baseURL,
+        });
+
+        // Initialize LLM processor with OpenAI client and config
+        this.llmProcessor = new GraphLLMProcessor({
+            ...config.llm,
+            client: openai
+        });
+
+        // Initialize embedder based on config
+        this.embedder = config.embedder 
+            ? EmbedderFactory.create(config.embedder.type, config.embedder.config)
+            : EmbedderFactory.create('bge-m3-lite'); // Default to lite version
+
+        // Initialize graph
+        this.graph = new MemoryGraph(this.storage, this.llmProcessor);
+
+        // Initialize search components
+        const embeddingSearch = new EmbeddingSearch();
+        const textSearch = new BM25Search();
+        const reranker = new ResultReranker(
+            this.graph,
+            {  
+                generateText: async (prompt: string) => {
+                    const result = await this.llmProcessor.process<{ text: string }>(
+                        GraphTask.SUMMARIZE_NODE,  // Use an existing task
+                        { prompt }
+                    );
+                    return result.text;
+                }
             }
         );
-        this.graph = new MemoryGraph(this.storage, this.llmProcessor);
+        const searchConfig = config.search || {
+            textWeight: 0.4,
+            embeddingWeight: 0.6,
+            minTextScore: 0.1,
+            minEmbeddingScore: 0.5,
+            limit: 10
+        };
+
+        // Initialize hybrid search with embedding and text search
+        this._hybridSearch = new TemporalHybridSearch(
+            embeddingSearch,
+            textSearch,
+            reranker,
+            this.graph,
+            searchConfig
+        );
     }
 
     /**
@@ -155,6 +243,204 @@ export class GraphManager {
         };
     }
 
+    /**
+     * Get the hybrid search instance
+     */
+    get hybridSearch(): TemporalHybridSearch {
+        return this._hybridSearch;
+    }
+
+    /**
+     * Update community assignment for a node
+     */
+    async updateNodeCommunity(nodeId: string): Promise<{
+        communityId: string;
+        divergenceScore: number;
+    }> {
+        const node = await this.getNode(nodeId);
+        if (!node) {
+            throw new Error(`Node ${nodeId} not found`);
+        }
+
+        const edges = await this.getNodeEdges(nodeId);
+        return this.communityDetector.updateNodeCommunity(node, edges);
+    }
+
+    /**
+     * Refresh a specific community
+     */
+    async refreshCommunity(communityId: string): Promise<void> {
+        return this.communityDetector.refreshCommunity(communityId);
+    }
+
+    /**
+     * Get community summary using map-reduce style summarization
+     */
+    async getCommunityMeta(communityId: string): Promise<{
+        summary: string;
+        lastUpdateTime: Date;
+        memberCount: number;
+        divergenceScore: number;
+    }> {
+        return this.communityDetector.getCommunityMeta(communityId);
+    }
+
+    /**
+     * Get the current divergence score for a community
+     */
+    async getCommunityDivergence(communityId: string): Promise<number> {
+        return this.communityDetector.getCommunityDivergence(communityId);
+    }
+
+    /**
+     * Get all communities that need refresh based on divergence score
+     */
+    async getCommunitiesNeedingRefresh(threshold: number): Promise<string[]> {
+        return this.communityDetector.getCommunitiesNeedingRefresh(threshold);
+    }
+
+    /**
+     * Get all edges connected to a node
+     */
+    async getNodeEdges(nodeId: string): Promise<IGraphEdge[]> {
+        return this.graph.getEdges([nodeId]);
+    }
+
+    /**
+     * Summarizes a node by combining its context and history into a concise summary
+     * @param nodeName Name of the node to summarize
+     * @param context Additional context to consider
+     * @returns Summary object containing main summary, description, and key points
+     */
+    async summarizeNode(nodeName: string, context: string = ''): Promise<{
+        summary: string;
+        description: string;
+        key_points: string[];
+    }> {
+        // Get existing node data
+        const node = await this.storage.getNode(nodeName);
+        const previousSummary = node?.content?.summary;
+
+        // Get relevant episodes by finding edges between episodes and this node
+        const { nodes: allNodes, edges } = await this.storage.query({
+            nodeTypes: ['episode']
+        });
+
+        // Find episodes connected to this node
+        const episodeNodes = allNodes
+            .filter(isEpisodeNode)
+            .filter(episode => edges.some(edge => 
+                (edge.sourceId === episode.id && edge.targetId === nodeName) ||
+                (edge.sourceId === nodeName && edge.targetId === episode.id)
+            ))
+            .sort((a, b) => a.validAt!.getTime() - b.validAt!.getTime());
+
+        // Process summarization
+        const result = await this.llmProcessor.process<{
+            summary: string;
+            description: string;
+            key_points: string[];
+        }>(GraphTask.SUMMARIZE_NODE, {
+            nodeName,
+            previousSummary,
+            context,
+            episodes: episodeNodes
+        });
+
+        // Update node with new summary if it exists
+        if (node) {
+            await this.storage.updateNode(node.id, {
+                content: {
+                    ...node.content,
+                    summary: result.summary
+                }
+            });
+        }
+
+        return result;
+    }
+
+    /**
+     * Invalidates edges that are superseded by new information
+     * @param newEdge The new edge that potentially invalidates existing edges
+     * @param existingEdges Existing edges to check for invalidation
+     * @param timestamp When the invalidation occurs
+     * @returns Updated existing edges with invalidation timestamps set
+     */
+    async invalidateEdges<T>(
+        newEdge: IGraphEdge<T>,
+        existingEdges: IGraphEdge<T>[],
+        timestamp: Date
+    ): Promise<IGraphEdge<T>[]> {
+        // Process edge invalidation using LLM
+        const result = await this.llmProcessor.process<{
+            invalidatedEdges: string[];  // IDs of edges that should be invalidated
+            reason: string;  // Reason for invalidation
+        }>(GraphTask.INVALIDATE_EDGES, {
+            newEdge,
+            existingEdges,
+            timestamp
+        });
+
+        // Update invalidated edges
+        const updatedEdges = await Promise.all(
+            existingEdges.map(async edge => {
+                if (result.invalidatedEdges.includes(edge.id)) {
+                    await this.storage.updateEdge(edge.id, {
+                        ...edge,
+                        invalidAt: timestamp
+                    });
+                    return { ...edge, invalidAt: timestamp };
+                }
+                return edge;
+            })
+        );
+
+        return updatedEdges;
+    }
+
+    /**
+     * Expands a search query with related terms and context
+     * @param query Original search query
+     * @param context Additional context to consider
+     * @returns Expanded query with related terms
+     */
+    async expandQuery(query: string, context: string = ''): Promise<{
+        expandedQuery: string;
+        relatedTerms: string[];
+        expansionReason: string;
+    }> {
+        // Process query expansion using LLM
+        const result = await this.llmProcessor.process<{
+            expandedQuery: string;
+            relatedTerms: string[];
+            expansionReason: string;
+        }>(GraphTask.EXPAND_QUERY, {
+            query,
+            context,
+            // Get some recent episodes for context
+            recentEpisodes: await this.getRecentEpisodes(5)
+        });
+
+        return result;
+    }
+
+    /**
+     * Helper method to get recent episodes
+     * @param limit Number of episodes to retrieve
+     * @returns Recent episodes sorted by timestamp
+     */
+    private async getRecentEpisodes(limit: number = 5): Promise<IGraphNode<EpisodeContent>[]> {
+        const { nodes } = await this.storage.query({
+            nodeTypes: ['episode']
+        });
+
+        return nodes
+            .filter(isEpisodeNode)
+            .sort((a, b) => b.validAt!.getTime() - a.validAt!.getTime())
+            .slice(0, limit);
+    }
+
     private getNodeTypeDistribution(nodes: IGraphNode[]) {
         const distribution: Record<string, number> = {};
         
@@ -176,5 +462,50 @@ export class GraphManager {
         }
         
         return distribution;
+    }
+
+    /**
+     * Extract searchable text content from a node
+     */
+    private extractSearchableText(node: IGraphNode): string {
+        if (isEpisodeNode(node)) {
+            return node.content.body;  // Use body instead of text
+        }
+        return node.content?.toString() || '';
+    }
+
+    /**
+     * Index a node for search
+     */
+    async indexNode(node: IGraphNode): Promise<void> {
+        const text = this.extractSearchableText(node);
+        const embedding = await this.embedder.generateEmbeddings(text);
+        await this._hybridSearch.indexNode(node, embedding[0]);
+    }
+
+    /**
+     * Search for nodes using hybrid search
+     */
+    async search(query: string, filter?: GraphFilter): Promise<IGraphNode[]> {
+        const embedding = await this.embedder.generateEmbeddings(query);
+        const results = await this._hybridSearch.search(query, embedding[0], filter);
+        const nodes = await Promise.all(results.map(r => this.storage.getNode(r.id)));
+        return nodes.filter((node): node is IGraphNode => node !== null);
+    }
+
+    /**
+     * Clear all data from the graph
+     */
+    public async clear(): Promise<void> {
+        // Clear graph storage
+        const nodes = await this.storage.query({ nodeTypes: ['entity'] });
+        for (const node of nodes.nodes) {
+            await this.storage.deleteNode(node.id);
+        }
+        
+        // Clear embeddings if embedder exists
+        if (this.embedder) {
+            await this.embedder.clear();
+        }
     }
 }

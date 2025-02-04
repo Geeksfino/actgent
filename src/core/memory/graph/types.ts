@@ -1,12 +1,20 @@
+import { OpenAI } from 'openai';
+import { EmbedderType } from './embedder/factory';
+
 /**
  * Configuration for graph operations
  */
 export interface GraphConfig {
     // Storage configuration
-    storage: {
+    storage?: {
         type: 'memory' | 'neo4j';  // Extensible for future storage types
-        maxCapacity?: number;      // Maximum nodes in memory
-        options?: Record<string, any>;  // Storage-specific options
+        config?: any;  // Storage-specific options
+    };
+
+    // Embedder configuration
+    embedder?: {
+        type: EmbedderType;
+        config?: any;
     };
 
     // Episode configuration
@@ -24,11 +32,19 @@ export interface GraphConfig {
         };
     };
 
+    // Search configuration
+    search?: {
+        textWeight: number;      // Weight for BM25 scores
+        embeddingWeight: number; // Weight for embedding similarity scores
+        minTextScore: number;    // Minimum BM25 score threshold
+        minEmbeddingScore: number; // Minimum embedding similarity threshold
+        limit: number;           // Maximum number of results to return
+    };
+
     // LLM configuration
-    llm: {
-        client: any; // OpenAI-compatible client
-        config?: LLMConfig;
-    }
+    llm: LLMConfig & {
+        client: OpenAI;  // The instantiated OpenAI client
+    };
 }
 
 /**
@@ -36,6 +52,9 @@ export interface GraphConfig {
  */
 export interface LLMConfig {
     model: string;
+    apiKey: string;
+    baseURL?: string;
+    streamMode?: boolean;
     temperature: number;
     maxTokens: number;
 }
@@ -51,14 +70,20 @@ export enum GraphTask {
     EXTRACT_TEMPORAL = 'extract_temporal',
     PREPARE_FOR_EMBEDDING = 'prepare_for_embedding',
     CONSOLIDATE_EPISODES = 'consolidate_episodes',
+    LABEL_COMMUNITY = 'label_community',
+    SUMMARIZE_CHUNK = 'summarize_chunk',
+    COMBINE_SUMMARIES = 'combine_summaries',
+    SUMMARIZE_NODE = 'summarize_node',  
 
     // Entity resolution tasks
     DEDUPE_NODE = 'dedupe_node',
     DEDUPE_EDGE = 'dedupe_edge',
     DEDUPE_BATCH = 'dedupe_batch',
     DEDUPE_BATCH_EDGES = 'dedupe_batch_edges',
+    INVALIDATE_EDGES = 'invalidate_edges',
 
     // Evaluation tasks
     EVALUATE_COMMUNITY = 'evaluate_community',
-    EVALUATE_SEARCH = 'evaluate_search'
+    EVALUATE_SEARCH = 'evaluate_search',
+    EXPAND_QUERY = 'expand_query'
 }
