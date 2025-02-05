@@ -182,3 +182,17 @@ dist-test/
 dist-agents/
 *.log
 generated-agents/
+
+# Model files
+*.onnx
+*.bin
+*.pt
+*.pth
+*.h5
+*.hdf5
+*.pb
+*.tflite
+*.mlmodel
+model_cache/
+models/bge/
+**/onnx/
