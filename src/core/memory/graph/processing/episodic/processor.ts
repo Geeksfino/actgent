@@ -266,35 +266,32 @@ ${input.text}`;
     }
 
     private buildTemporalExtractionPrompt(input: { text: string, context: string, referenceTimestamp: string }): string {
-        return `You are tasked with extracting entities and their temporal relationships from a conversation. Follow these guidelines:
+        return `Given the text, extract entities that are explicitly or implicitly mentioned:
 
-1. Entity Extraction:
-   - ALWAYS extract the speaker/actor as the first node
-   - Extract significant entities ONLY from the current text
-   - Include full, explicit names
-   - Add a brief summary for context
-   - Assign appropriate types (PERSON, LOCATION, CONCEPT, etc.)
-   - DO NOT create nodes for relationships or actions
-   - DO NOT create nodes for temporal information
-   - Generate unique IDs for each entity
+Guidelines:
+1. ALWAYS extract the speaker/actor as the first node
+2. Extract significant entities that are:
+   - Physical objects or items
+   - People, organizations, or groups
+   - Concepts, topics, or subjects
+   - Locations or places
+3. For each entity:
+   - Use full, explicit names
+   - Include a brief summary for context
+   - Assign a general type (PERSON, OBJECT, CONCEPT, LOCATION, ORGANIZATION)
+4. DO NOT create nodes for:
+   - Actions or verbs
+   - Temporal information (dates, times)
+   - Attributes or properties
+   - Relationships between entities
 
-2. Relationship Extraction:
-   - Identify relationships ONLY between extracted entities
-   - Use ALL_CAPS for relation types (e.g., WORKS_FOR, LIVES_IN)
-   - Each relationship must connect two DISTINCT entities
-   - Include detailed descriptions with context
-   - Note if relationships are temporary
-   - Generate unique IDs for relationships
+For relationships between entities:
+1. Only connect DISTINCT entities
+2. Use generic, descriptive ALL_CAPS types (HAS, USES, NEEDS, PART_OF, etc.)
+3. Include detailed descriptions with context
+4. Note if relationships are temporary based on the reference timestamp (${input.referenceTimestamp})
 
-3. Temporal Guidelines:
-   - Use ISO 8601 format (YYYY-MM-DDTHH:MM:SS.SSSSSSZ)
-   - Use reference timestamp (${input.referenceTimestamp}) for present tense
-   - Calculate actual datetime for relative times
-   - Use 00:00:00 for date-only mentions
-   - Use January 1st 00:00:00 for year-only mentions
-   - Include timezone offset (Z for UTC if unspecified)
-
-Previous Context for Reference (DO NOT extract from this):
+Previous Context (DO NOT extract from this):
 ${input.context}
 
 Current Text to Process:
@@ -302,7 +299,7 @@ ${input.text}
 
 Return a JSON object with:
 1. entities: Array of {id, name, type, summary}
-2. relationships: Array of {id, sourceId, targetId, description, isTemporary}`;
+2. relationships: Array of {id, sourceId, targetId, type, description, isTemporary}`;
     }
 
     private buildPrompt(input: string): string {
