@@ -70,8 +70,9 @@ export class LongMemEvalRunner {
     private openai: OpenAI;
     private dataset: LongMemEvalInstance[];
     private predictionsPath: string;
-    private llmProcessor: any; // Assuming this is defined elsewhere
+    private llmProcessor: any; 
     private debug: boolean;
+    private contextSize: number;
 
     constructor(
         datasetPath: string, 
@@ -81,13 +82,14 @@ export class LongMemEvalRunner {
         baseURL?: string,
         model: string = 'gpt-4',
         temperature: number = 0,
-        maxTokens: number = 500
+        maxTokens: number = 500,
+        contextSize: number = 4  // Default to 4 messages (2 complete turns) as per Zep paper
     ) {
         this.debug = debug;
+        this.contextSize = contextSize;
         this.dataset = this.loadDataset(datasetPath);
         this.predictionsPath = predictionsPath;
 
-        // Initialize OpenAI client
         this.llmConfig = {
             apiKey: apiKey || process.env.OPENAI_API_KEY || '',
             baseURL,
@@ -106,7 +108,6 @@ export class LongMemEvalRunner {
             baseURL: this.llmConfig.baseURL
         });
 
-        // Initialize graph manager with available model
         const graphConfig: GraphConfig = {
             llm: {
                 ...this.llmConfig,
@@ -115,17 +116,17 @@ export class LongMemEvalRunner {
             embedder: {
                 provider: EmbedderProvider.BGE,
                 config: {
-                    modelName: 'Xenova/all-MiniLM-L6-v2',  // Specify model name
-                    maxTokens: 512,  // Match tokenizer max length
+                    modelName: 'Xenova/all-MiniLM-L6-v2',  
+                    maxTokens: 512,  
                     batchSize: 32,
-                    quantized: true  // Use quantized for better performance
+                    quantized: true  
                 }
             },
             search: {
-                textWeight: 0.3,        // Lower weight for text similarity
-                embeddingWeight: 0.7,   // Higher weight for semantic similarity
-                minTextScore: 0.05,     // Much lower text threshold
-                minEmbeddingScore: 0.1, // Much lower embedding threshold
+                textWeight: 0.3,       
+                embeddingWeight: 0.7,   
+                minTextScore: 0.05,     
+                minEmbeddingScore: 0.1, 
                 limit: 50
             }
         };
@@ -145,7 +146,6 @@ export class LongMemEvalRunner {
     }
 
     private async getLayerStats() {
-        // Get nodes by type
         const episodeResult = await this.graphManager.query({ metadata: { type: 'episode' } });
         const entityResult = await this.graphManager.query({ metadata: { type: 'entity' } });
         const communityResult = await this.graphManager.query({ metadata: { type: 'community' } });
@@ -154,16 +154,26 @@ export class LongMemEvalRunner {
         const entityNodes = entityResult.nodes;
         const communityNodes = communityResult.nodes;
 
-        // Get edges between entities
         const entityEdges = entityResult.edges;
 
-        // Create a detailed graph structure representation
         const graphStructure = {
             episodes: episodeNodes.map(n => ({
                 id: n.id,
-                date: n.metadata.get('date'),
-                role: n.metadata.get('role'),
-                content: (n.content as EpisodeContent).body.substring(0, 100) + '...',
+                type: n.type,
+                content: {
+                    body: (n.content as EpisodeContent).body,
+                    source: (n.content as EpisodeContent).source,
+                    sourceDescription: (n.content as EpisodeContent).sourceDescription,
+                    timestamp: (n.content as EpisodeContent).timestamp.toISOString()  
+                },
+                metadata: {
+                    role: n.metadata.get('role'),
+                    type: n.metadata.get('type'),
+                    date: n.metadata.get('date'),
+                    turn_id: n.metadata.get('turn_id'),
+                    source: n.metadata.get('source')
+                },
+                createdAt: n.createdAt?.toISOString(),
                 validAt: n.validAt?.toISOString()
             })),
             entities: entityNodes.map(n => ({
@@ -198,8 +208,22 @@ export class LongMemEvalRunner {
             communities: communityNodes.length,
             episodeDetails: episodeNodes.map((n: IGraphNode) => ({ 
                 id: n.id, 
-                date: n.metadata.get('date'),
-                role: n.metadata.get('role')
+                type: n.type,
+                content: {
+                    body: (n.content as EpisodeContent).body,
+                    source: (n.content as EpisodeContent).source,
+                    sourceDescription: (n.content as EpisodeContent).sourceDescription,
+                    timestamp: (n.content as EpisodeContent).timestamp.toISOString()  
+                },
+                metadata: {
+                    role: n.metadata.get('role'),
+                    type: n.metadata.get('type'),
+                    date: n.metadata.get('date'),
+                    turn_id: n.metadata.get('turn_id'),
+                    source: n.metadata.get('source')
+                },
+                createdAt: n.createdAt?.toISOString(),
+                validAt: n.validAt?.toISOString()
             })),
             entityDetails: entityNodes.map((n: IGraphNode) => ({
                 id: n.id,
@@ -214,21 +238,159 @@ export class LongMemEvalRunner {
         };
     }
 
-    /**
-     * Graph Memory Processing Pipeline
-     * 
-     * This implementation follows a specific order and batching strategy:
-     * 1. Process turns in batches of 4 for efficiency
-     * 2. For each batch:
-     *    a) Create episode nodes with temporal metadata
-     *    b) Extract and create entity nodes
-     *    c) Add relationship edges
-     *    d) Run community detection
-     * 3. Maintain proper timestamps throughout
-     * 4. Use layered search with weighted scoring
-     */
+    private createEpisodeNode(turn: { role: string; content: string; turn_id: string; date?: string }): IGraphNode<EpisodeContent> {
+        // Parse date string into Date object if provided
+        let timestamp: Date;
+        if (turn.date) {
+            const parsedDate = new Date(turn.date.replace(/\([^)]*\)/g, '').trim());
+            timestamp = !isNaN(parsedDate.getTime()) ? parsedDate : new Date();
+        } else {
+            timestamp = new Date();
+        }
+
+        // Create episode content
+        const episodeContent: EpisodeContent = {
+            body: turn.content,
+            source: 'conversation',
+            sourceDescription: `${turn.role} message in camera discussion`,
+            timestamp  // Store as Date object
+        };
+
+        // Create and return episode node
+        return {
+            id: crypto.randomUUID(),
+            type: 'episode',
+            content: episodeContent,
+            metadata: new Map([
+                ['role', turn.role],
+                ['type', 'episode'],
+                ['date', timestamp.toISOString()],  // Store as ISO string in metadata
+                ['turn_id', turn.turn_id],
+                ['source', 'conversation']
+            ]),
+            createdAt: timestamp,
+            validAt: timestamp
+        } as IGraphNode<EpisodeContent>;
+    }
+
+    private async processTurnBatch(
+        turns: { role: string; content: string; turn_id: string }[],
+        processor: any,
+        previousTurns: { role: string; content: string; turn_id: string }[]
+    ): Promise<{ nodes: IGraphNode<any>[]; edges: IGraphEdge<any>[] }> {
+        const batchNodes: IGraphNode<any>[] = [];
+        const batchEdges: IGraphEdge<any>[] = [];
+
+        // Get last N messages for context (default 4 as per Zep paper)
+        const contextTurns = [...previousTurns.slice(-this.contextSize), ...turns];
+        const context = contextTurns.map(t => `${t.role}: ${t.content}`).join('\n');
+        const currentContent = turns.map(t => `${t.role}: ${t.content}`).join('\n');
+
+        if (this.debug) {
+            this.log('\nProcessing batch of', turns.length, 'turns');
+            this.log('\n=== Context (Last', this.contextSize, 'messages) ===');
+            this.log(context || '(No previous context)');
+            this.log('\n=== Current Content ===');
+            this.log(currentContent);
+        }
+
+        // Create episode nodes for current turns
+        for (const turn of turns) {
+            const episodeNode = this.createEpisodeNode(turn);
+            batchNodes.push(episodeNode);
+        }
+
+        try {
+            const startTime = Date.now();
+
+            if (this.debug) {
+                const { prompt, functionSchema } = processor.prepareRequest(
+                    GraphTask.EXTRACT_TEMPORAL,
+                    {
+                        text: currentContent,
+                        context,  // Pass last N messages as context
+                        referenceTimestamp: new Date().toISOString()
+                    }
+                );
+                this.log('\n=== Entity Extraction Prompt ===');
+                this.log(prompt);
+                this.log('\n=== Function Schema ===');
+                this.log(JSON.stringify(functionSchema.shape, null, 2));
+                this.log('Starting LLM call at:', new Date().toISOString());
+            }
+
+            // Entity extraction for current content with context
+            const entityResult = await this.graphManager.processWithLLM<EntityExtractionResult>(
+                GraphTask.EXTRACT_TEMPORAL,
+                {
+                    text: currentContent,
+                    context,  // Pass last N messages as context
+                    referenceTimestamp: new Date().toISOString()
+                }
+            );
+
+            if (this.debug) {
+                const duration = Date.now() - startTime;
+                this.log('Entity Extraction completed in:', duration, 'ms');
+                this.log('=== Entity Extraction Result ===');
+                this.log(JSON.stringify(entityResult, null, 2));
+            }
+
+            // Process entity results
+            if (!entityResult || !entityResult.entities || !Array.isArray(entityResult.entities)) {
+                console.warn('Invalid entity extraction result:', entityResult);
+                return { nodes: batchNodes, edges: batchEdges };
+            }
+
+            // Add entity nodes
+            const entityNodes = entityResult.entities.map((entity: Entity) => ({
+                id: crypto.randomUUID(),
+                type: 'entity' as const,
+                content: entity.name,
+                metadata: new Map(Object.entries({
+                    type: 'entity',
+                    category: entity.category,
+                    confidence: entity.confidence,
+                    firstMention: turns[0].turn_id  // Track first mention
+                })),
+                createdAt: new Date()
+            } as IGraphNode<string>));
+
+            batchNodes.push(...entityNodes);
+
+            // Add relationship edges
+            if (entityResult.relationships && Array.isArray(entityResult.relationships)) {
+                for (const rel of entityResult.relationships) {
+                    const sourceNode = entityNodes.find(n => n.content === rel.source);
+                    const targetNode = entityNodes.find(n => n.content === rel.target);
+                    
+                    if (sourceNode && targetNode) {
+                        const edge = {
+                            id: crypto.randomUUID(),
+                            type: rel.type,
+                            sourceId: sourceNode.id,
+                            targetId: targetNode.id,
+                            content: rel.description,
+                            metadata: new Map(Object.entries({
+                                type: 'relationship',
+                                confidence: rel.confidence,
+                                firstMention: turns[0].turn_id  // Track first mention
+                            }))
+                        } as IGraphEdge<string>;
+
+                        batchEdges.push(edge);
+                    }
+                }
+            }
+
+        } catch (error) {
+            console.error('Error in entity extraction:', error);
+        }
+
+        return { nodes: batchNodes, edges: batchEdges };
+    }
+
     async generatePrediction(instance: LongMemEvalInstance): Promise<LongMemEvalPrediction> {
-        // Process evidence turns from haystack sessions
         const evidenceTurns = instance.haystack_sessions
             .flat()
             .map((turn, index) => ({
@@ -241,7 +403,6 @@ export class LongMemEvalRunner {
         this.log('\nProcessing Evidence:', evidenceTurns.length, 'turns');
         if (this.debug) {
             for (const turn of evidenceTurns) {
-                // Print truncated content to reduce noise
                 const truncatedContent = turn.content.length > 50 ? 
                     turn.content.substring(0, 50) + '...' : 
                     turn.content;
@@ -249,212 +410,54 @@ export class LongMemEvalRunner {
             }
         }
 
-        const BATCH_SIZE = 4;
-        let turnCount = 0;
-        let batchNodes: IGraphNode[] = [];
-        let batchEdges: IGraphEdge[] = [];
+        const processor = (this.graphManager as any).llmProcessor as any;
 
-        // Step 1: Build Episodic Layer - Index all evidence turns with temporal metadata
-        for (const turn of evidenceTurns) {
-            turnCount++;
-            
-            // Parse date string into Date object
-            const parsedDate = new Date(turn.date.replace(/\([^)]*\)/g, '').trim());
-            
-            // Ensure we have a valid date, default to question date if not
-            const timestamp = !isNaN(parsedDate.getTime()) ? 
-                parsedDate : 
-                new Date(instance.question_date.replace(/\([^)]*\)/g, '').trim());
+        // Process evidence turns
+        let currentBatch: typeof evidenceTurns = [];
+        let previousTurns: typeof evidenceTurns = [];
+        let allNodes: IGraphNode<any>[] = [];
+        let allEdges: IGraphEdge<any>[] = [];
 
-            // Final fallback to current time if still invalid
-            if (isNaN(timestamp.getTime())) {
-                console.warn(`Invalid date for turn ${turn.turn_id}, using current time`);
-                timestamp.setTime(Date.now());
+        for (let i = 0; i < evidenceTurns.length; i++) {
+            currentBatch.push(evidenceTurns[i]);
+
+            // Process batch if we have a complete turn (user + assistant) or at the end
+            if (currentBatch.length === 2 || i === evidenceTurns.length - 1) {
+                const { nodes, edges } = await this.processTurnBatch(currentBatch, processor, previousTurns);
+                
+                allNodes.push(...nodes);
+                allEdges.push(...edges);
+
+                // Update previous turns
+                previousTurns.push(...currentBatch);
+                
+                // Run community detection after processing complete turns
+                if (nodes.length > 0 || edges.length > 0) {
+                    try {
+                        await this.graphManager.processWithLLM(
+                            GraphTask.REFINE_COMMUNITIES,
+                            {
+                                nodes: allNodes,
+                                edges: allEdges,
+                                timestamp: new Date()
+                            }
+                        );
+                    } catch (error) {
+                        console.error('Error in community refinement:', error);
+                    }
+                }
+
+                // Reset batch
+                currentBatch = [];
             }
+        }
 
-            const episodeContent = {
-                body: turn.content,
-                source: 'conversation',
-                sourceDescription: `${turn.role} message`,
-                timestamp: timestamp
-            };
-
-            const episodeNode = {
-                id: crypto.randomUUID(),
-                type: 'episode',
-                content: episodeContent,
-                metadata: new Map([
-                    ['role', turn.role],
-                    ['type', 'episode'],
-                    ['date', timestamp.toISOString()],
-                    ['turn_id', turn.turn_id]
-                ]),
-                createdAt: timestamp,
-                validAt: timestamp // Must match content timestamp
-            } as IGraphNode;
-
-            batchNodes.push(episodeNode);
-
-            // Step 2: Extract entities and relationships
-            try {
-                const entityResult = await this.graphManager.processWithLLM<EntityExtractionResult>(
-                    GraphTask.EXTRACT_TEMPORAL,
-                    {
-                        content: turn.content,
-                        extractEntities: true,
-                        includeRelationships: true
-                    }
-                );
-
-                if (!entityResult || !entityResult.entities || !Array.isArray(entityResult.entities)) {
-                    console.warn('Invalid entity extraction result:', entityResult);
-                    continue;
-                }
-
-                // Add entity nodes
-                const entityNodes = entityResult.entities.map((entity: Entity) => ({
-                    id: crypto.randomUUID(),
-                    type: 'entity' as const,
-                    content: entity.name,
-                    metadata: new Map(Object.entries({
-                        type: 'entity',
-                        category: entity.category,
-                        confidence: entity.confidence
-                    })),
-                    createdAt: new Date()
-                } as IGraphNode<string>));
-
-                batchNodes.push(...entityNodes);
-
-                // Add relationship edges if present
-                if (entityResult.relationships && Array.isArray(entityResult.relationships)) {
-                    for (const rel of entityResult.relationships) {
-                        const sourceNode = entityNodes.find(n => n.content === rel.source);
-                        const targetNode = entityNodes.find(n => n.content === rel.target);
-                        
-                        if (sourceNode && targetNode) {
-                            const edge = {
-                                id: crypto.randomUUID(),
-                                type: rel.type,
-                                sourceId: sourceNode.id,
-                                targetId: targetNode.id,
-                                content: rel.description,
-                                metadata: new Map(Object.entries({
-                                    type: 'relationship',
-                                    confidence: rel.confidence
-                                })),
-                                createdAt: new Date()
-                            } as IGraphEdge<string>;
-                            
-                            batchEdges.push(edge);
-                        }
-                    }
-                }
-            } catch (error) {
-                console.warn('Error during entity extraction:', error);
-                continue;
-            }
-
-            // Process batch if we've reached BATCH_SIZE or this is the last turn
-            if (turnCount % BATCH_SIZE === 0 || turnCount === evidenceTurns.length) {
-                let totalTurns = 0;
-                let totalBatches = 0;
-                let totalLLMCalls = 0;
-                let totalEntitiesExtracted = 0;
-
-                totalBatches++;
-                this.log('\nProcessing batch', totalBatches, 'at turn', turnCount, ':', {
-                    nodes: batchNodes.length,
-                    edges: batchEdges.length
-                });
-
-                // Print layer stats before processing with more details
-                const beforeStats = await this.getLayerStats();
-                this.log('\nGraph layers before processing:', {
-                    episodes: beforeStats.episodes,
-                    episodeDetails: beforeStats.episodeDetails,
-                    entities: beforeStats.entities,
-                    entityDetails: beforeStats.entityDetails,
-                    communities: beforeStats.communities
-                });
-
-                // Step 1: Process Episodic Layer
-                try {
-                    this.log('\nProcessing episodic layer for batch...');
-                    for (const node of batchNodes) {
-                        // Node already has the correct structure with EpisodeContent
-                        const episodeNode = await this.graphManager.addNode(node);
-                        
-                        this.log('Created episode node:', {
-                            id: episodeNode,
-                            content: (node.content as EpisodeContent).body.substring(0, 100) + '...',
-                            metadata: Object.fromEntries(node.metadata.entries()),
-                            timestamp: (node.content as EpisodeContent).timestamp.toISOString()
-                        });
-                    }
-                } catch (error) {
-                    this.log('Error during episodic layer processing:', error);
-                    // Continue processing as episodic layer is critical
-                }
-
-                // Step 2: Process Entity Layer
-                try {
-                    this.log('\nProcessing entity layer for batch...');
-                    totalLLMCalls++; // Count entity extraction call
-                    const result = await this.graphManager.processWithLLM(
-                        GraphTask.EXTRACT_TEMPORAL,
-                        { nodes: batchNodes }
-                    ) as { nodes: IGraphNode[] };
-
-                    if (result?.nodes?.length) {
-                        totalEntitiesExtracted += result.nodes.length;
-                        this.log('Entity extraction result:', {
-                            nodeCount: result.nodes.length,
-                            batchAverage: (totalEntitiesExtracted / totalBatches).toFixed(2),
-                            nodes: result.nodes.map(node => ({
-                                id: node.id,
-                                content: typeof node.content === 'object' && 'body' in node.content ? 
-                                    node.content.body.substring(0, 100) + '...' : 
-                                    JSON.stringify(node.content).substring(0, 100) + '...',
-                                metadata: Object.fromEntries(node.metadata.entries()),
-                                validAt: node.validAt?.toISOString()
-                            }))
-                        });
-                    } else {
-                        this.log('Warning: No entities extracted from batch');
-                    }
-                } catch (error) {
-                    this.log('Error during entity layer processing:', error);
-                    // Continue processing as we want to see if other batches work
-                }
-
-                // Print processing statistics
-                this.log('\nProcessing Statistics:', {
-                    totalTurns,
-                    totalBatches,
-                    totalLLMCalls,
-                    totalEntitiesExtracted,
-                    averageEntitiesPerBatch: (totalEntitiesExtracted / totalBatches).toFixed(2),
-                    averageLLMCallsPerBatch: (totalLLMCalls / totalBatches).toFixed(2)
-                });
-
-                const afterStats = await this.getLayerStats();
-                this.log('\nGraph layers after processing:', {
-                    episodes: afterStats.episodes,
-                    episodeDetails: afterStats.episodeDetails,
-                    entities: afterStats.entities,
-                    entityDetails: afterStats.entityDetails,
-                    communities: afterStats.communities
-                });
-
-                // Add all nodes and edges in batch
-                await Promise.all(batchNodes.map(node => this.graphManager.addNode(node)));
-                await Promise.all(batchEdges.map(edge => this.graphManager.addEdge(edge)));
-
-                // Clear batch arrays
-                batchNodes = [];
-                batchEdges = [];
-            }
+        // Add all nodes and edges to graph
+        for (const node of allNodes) {
+            await this.graphManager.addNode(node);
+        }
+        for (const edge of allEdges) {
+            await this.graphManager.addEdge(edge);
         }
 
         // Print final layer stats before search
@@ -468,7 +471,7 @@ export class LongMemEvalRunner {
             communityDetails: finalStats.communityDetails
         });
 
-        // Step 4: Search across all layers with temporal awareness
+        // Search across all layers with temporal awareness
         const questionDate = new Date(instance.question_date);
         const searchResults = await this.graphManager.search(instance.question, {
             temporal: {
@@ -482,13 +485,13 @@ export class LongMemEvalRunner {
         });
 
         // Score results by layer type
-        type LayerType = 'episode' | 'entity' | 'community';
-        
-        const layerWeights: Record<LayerType, number> = {
+        const layerWeights: Record<'episode' | 'entity' | 'community', number> = {
             episode: 1.0,
             entity: 0.8,
             community: 0.6
         };
+
+        type LayerType = 'episode' | 'entity' | 'community';
         
         function isLayerType(type: string): type is LayerType {
             return ['episode', 'entity', 'community'].includes(type);
@@ -500,9 +503,8 @@ export class LongMemEvalRunner {
 
         const scoredResults = searchResults.map(result => {
             const rawType = result.metadata.get('type') || 'episode';
-            const nodeType: LayerType = isLayerType(rawType) ? rawType : 'episode';
-            // Type assertion to ensure TypeScript knows nodeType is a valid key
-            const layerWeight = layerWeights[nodeType as keyof typeof layerWeights];
+            const nodeType = isLayerType(rawType) ? rawType : 'episode';
+            const layerWeight = layerWeights[nodeType];
             const searchScore = parseFloat(result.metadata.get('search_score') || '0');
             return {
                 ...result,
@@ -520,20 +522,15 @@ export class LongMemEvalRunner {
             }
         }
 
-        // Extract answer from relevant evidence across all layers
         let answer = 'Unable to determine from the available context';
         if (scoredResults.length > 0) {
-            // Use all results with reasonable scores
             const relevantResults = scoredResults.filter(result => result.searchScore > 0.3);
 
             if (relevantResults.length > 0) {
-                // Combine evidence if we have multiple relevant results
                 if (relevantResults.length === 1) {
                     answer = relevantResults[0].content;
                 } else {
-                    // Sort by layer priority: episodic > semantic > community
                     const sortedResults = relevantResults.sort((a, b) => {
-                        type LayerType = 'episode' | 'entity' | 'community';
                         const layerPriority: Record<LayerType, number> = {
                             'episode': 3,
                             'entity': 2,
@@ -541,17 +538,15 @@ export class LongMemEvalRunner {
                         };
                         const aType = a.metadata.get('type') || 'episode';
                         const bType = b.metadata.get('type') || 'episode';
-                        const aLayer = (aType as LayerType in layerPriority) ? aType as LayerType : 'episode';
-                        const bLayer = (bType as LayerType in layerPriority) ? bType as LayerType : 'episode';
+                        const aLayer = isLayerType(aType) ? aType : 'episode';
+                        const bLayer = isLayerType(bType) ? bType : 'episode';
                         return layerPriority[bLayer] - layerPriority[aLayer];
                     });
                     
-                    const contents = sortedResults.map(r => r.content).join('\n');
-                    answer = contents;
+                    answer = sortedResults.map(r => r.content).join('\n');
                 }
             }
         } else if (instance.question.toLowerCase().includes('graduation')) {
-            // No direct evidence found about graduation or degree
             const prediction: LongMemEvalPrediction = {
                 question_id: instance.question_id,
                 hypothesis: "Based on the available conversation history, I cannot determine what degree you graduated with. There is no explicit mention of your graduation or degree in any of the provided conversations."
@@ -559,7 +554,6 @@ export class LongMemEvalRunner {
             return prediction;
         }
 
-        // Clear graph for next instance
         await this.graphManager.clear();
 
         return {
@@ -568,29 +562,22 @@ export class LongMemEvalRunner {
         };
     }
 
-    /**
-     * Run specific instances by their indices or IDs
-     */
     public async runSpecific(specifier: string): Promise<void> {
-        // Parse the specifier: can be index (e.g., "5"), range (e.g., "1-5"), or ID (e.g., "e47becba")
         let instancesToProcess: LongMemEvalInstance[] = [];
         
         if (specifier.includes('-')) {
-            // Process range of indices
             const [start, end] = specifier.split('-').map(n => parseInt(n, 10));
             if (isNaN(start) || isNaN(end)) {
                 throw new Error('Invalid range format. Use format: "start-end" (e.g., "0-5")');
             }
             instancesToProcess = this.dataset.slice(start, end + 1);
         } else if (/^\d+$/.test(specifier)) {
-            // Process single index
             const index = parseInt(specifier, 10);
             if (index >= this.dataset.length) {
                 throw new Error(`Index ${index} out of bounds. Dataset has ${this.dataset.length} instances`);
             }
             instancesToProcess = [this.dataset[index]];
         } else {
-            // Treat as question_id
             const instance = this.dataset.find(i => i.question_id === specifier);
             if (!instance) {
                 throw new Error(`No instance found with ID: ${specifier}`);
@@ -602,17 +589,11 @@ export class LongMemEvalRunner {
         await this.processInstances(instancesToProcess);
     }
 
-    /**
-     * Run all instances in the dataset
-     */
     public async runAll(): Promise<void> {
         console.log(`Processing all ${this.dataset.length} instances...`);
         await this.processInstances(this.dataset);
     }
 
-    /**
-     * Process a list of instances
-     */
     private async processInstances(instances: LongMemEvalInstance[]): Promise<void> {
         let totalTurns = 0;
         let totalBatches = 0;
@@ -627,25 +608,20 @@ export class LongMemEvalRunner {
                 .length;
             
             totalTurns += evidenceTurns;
-            totalBatches += Math.ceil(evidenceTurns / 4);
-            
-            // Display progress line
-            const avgSessionsPerInstance = (sessionCount / (index + 1)).toFixed(1);
-            const avgEvidencePerInstance = (totalTurns / (index + 1)).toFixed(1);
+            totalBatches += Math.ceil(evidenceTurns / 2);
             
             console.log(
                 `[${index + 1}/${instances.length}] ` +
                 `ID: ${instance.question_id} | ` +
                 `Type: ${instance.question_type} | ` +
-                `Sessions: ${sessionCount} (avg: ${avgSessionsPerInstance}) | ` +
-                `Evidence: ${evidenceTurns} (avg: ${avgEvidencePerInstance})`
+                `Sessions: ${sessionCount} (avg: ${(sessionCount / (index + 1)).toFixed(1)}) | ` +
+                `Evidence: ${evidenceTurns} (avg: ${(totalTurns / (index + 1)).toFixed(1)})`
             );
             
             try {
                 await this.graphManager.clear();
                 const prediction = await this.generatePrediction(instance);
                 
-                // Append prediction to file
                 const line = JSON.stringify(prediction);
                 fs.appendFileSync(this.predictionsPath, line + '\n', { encoding: 'utf-8' });
                 
@@ -659,7 +635,6 @@ export class LongMemEvalRunner {
             await new Promise(resolve => setTimeout(resolve, 100));
         }
         
-        // Show final statistics
         console.log('\nProcessing Complete:');
         console.log(`Processed Instances: ${instances.length}`);
         console.log(`Total Sessions: ${instances.reduce((acc, instance) => acc + instance.haystack_sessions.length, 0)} (avg: ${(instances.reduce((acc, instance) => acc + instance.haystack_sessions.length, 0) / instances.length).toFixed(1)} per instance)`);
