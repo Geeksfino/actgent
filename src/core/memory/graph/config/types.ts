@@ -171,18 +171,40 @@ export interface LLMSearchConfig {
  * Main search configuration
  */
 export interface SearchConfig extends GraphBaseConfig {
-    /** Vector search configuration */
+    textWeight: number;      // Weight for BM25 scores
+    embeddingWeight: number; // Weight for embedding similarity scores
+    minTextScore: number;    // Minimum BM25 score threshold
+    minEmbeddingScore: number; // Minimum embedding similarity threshold
+    limit: number;           // Maximum number of results to return
+    explain?: boolean;       // Whether to explain search decisions
+    useCache?: boolean;      // Whether to use caching
+    cacheTTL?: number;       // Cache TTL in seconds
+    llm?: LLMSearchConfig;   // LLM-specific search config
+    reranking?: {
+        enabled?: boolean;   // Whether to use reranking
+        maxResults?: number; // Maximum results after reranking
+        weights?: {
+            relevance?: number;    // Weight for base relevance score
+            crossEncoder?: number; // Weight for cross-encoder score
+            recency?: number;      // Weight for temporal recency
+            connectivity?: number; // Weight for node connectivity
+            importance?: number;   // Weight for node importance
+        };
+        rrf?: {
+            useRankFusion?: boolean; // Whether to use RRF
+            k?: number;             // RRF constant (default: 60)
+        };
+        mmr?: {
+            lambda?: number;        // MMR trade-off parameter (default: 0.5)
+        };
+        graphFeatures?: {
+            centerNodeId?: string;  // Central node for graph-based features
+            queryNodeIds?: string[]; // Additional nodes for context
+            maxPathLength?: number; // Max path length for graph features
+            edgeTypes?: string[];  // Edge types to consider
+        };
+    };
     vector?: VectorSearchConfig;
-    /** Text search configuration */
     text?: TextSearchConfig;
-    /** Hybrid search configuration */
     hybrid?: HybridSearchConfig;
-    /** LLM search configuration */
-    llm?: LLMSearchConfig;
-    /** Whether to cache search results */
-    useCache?: boolean;
-    /** Cache TTL in seconds */
-    cacheTTL?: number;
-    /** Whether to return explanations */
-    explain?: boolean;
 }

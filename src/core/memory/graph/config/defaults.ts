@@ -125,13 +125,35 @@ export const DEFAULT_LLM_SEARCH_CONFIG: LLMSearchConfig = {
  * Default search configuration
  */
 export const DEFAULT_SEARCH_CONFIG: SearchConfig = {
-    enabled: true,
-    maxResults: 10,
-    vector: DEFAULT_VECTOR_SEARCH_CONFIG,
-    text: DEFAULT_TEXT_SEARCH_CONFIG,
-    hybrid: DEFAULT_HYBRID_SEARCH_CONFIG,
-    llm: DEFAULT_LLM_SEARCH_CONFIG,
-    useCache: true,
-    cacheTTL: 3600,
-    explain: false
+    enabled: true,         // Enable search by default
+    textWeight: 0.3,        // Lower weight for text similarity
+    embeddingWeight: 0.7,   // Higher weight for semantic similarity
+    minTextScore: 0.05,     // Much lower text threshold
+    minEmbeddingScore: 0.1, // Much lower embedding threshold
+    limit: 50,              // Default limit
+    explain: false,         // Don't explain by default
+    useCache: true,         // Use caching by default
+    cacheTTL: 3600,        // 1 hour cache TTL
+    reranking: {
+        enabled: true,      // Enable reranking by default
+        maxResults: 20,     // Return top 20 results after reranking
+        weights: {
+            relevance: 0.4,     // Base relevance score
+            crossEncoder: 0.3,  // Cross-encoder refinement
+            recency: 0.1,      // Temporal recency
+            connectivity: 0.1,  // Graph connectivity
+            importance: 0.1     // Node importance
+        },
+        rrf: {
+            useRankFusion: true,  // Use RRF by default
+            k: 60                 // Default RRF constant
+        },
+        mmr: {
+            lambda: 0.5           // Balance between relevance and diversity
+        },
+        graphFeatures: {
+            maxPathLength: 3,     // Consider paths up to length 3
+            edgeTypes: ['next', 'related', 'reference']  // Default edge types
+        }
+    }
 };

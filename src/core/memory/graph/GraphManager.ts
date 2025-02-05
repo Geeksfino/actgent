@@ -19,8 +19,8 @@ import { EmbeddingSearch } from './query/embedding';
 import { BM25Search } from './query/bm25';
 import { ResultReranker } from './query/reranking';
 import { OpenAI } from 'openai';
-import { IEmbedder } from './embedder/types';
-import { EmbedderFactory, EmbedderType } from './embedder/factory';
+import { IEmbedder, EmbedderProvider } from './embedder/types';
+import { EmbedderFactory } from './embedder/factory';
 
 /**
  * Configuration for graph operations
@@ -32,7 +32,7 @@ export interface GraphConfig {
         config?: any;
     };
     embedder?: {
-        type: EmbedderType;
+        provider: EmbedderProvider;
         config?: any;
     };
     search?: {
@@ -87,8 +87,8 @@ export class GraphManager {
 
         // Initialize embedder based on config
         this.embedder = config.embedder 
-            ? EmbedderFactory.create(config.embedder.type, config.embedder.config)
-            : EmbedderFactory.create('bge-m3-lite'); // Default to lite version
+            ? EmbedderFactory.create(config.embedder.provider, config.embedder.config)
+            : EmbedderFactory.create(EmbedderProvider.BGE); // Default to BGE
 
         // Initialize graph
         this.graph = new MemoryGraph(this.storage, this.llmProcessor);
@@ -487,10 +487,40 @@ export class GraphManager {
      * Search for nodes using hybrid search
      */
     async search(query: string, filter?: GraphFilter): Promise<IGraphNode[]> {
-        const embedding = await this.embedder.generateEmbeddings(query);
-        const results = await this._hybridSearch.search(query, embedding[0], filter);
-        const nodes = await Promise.all(results.map(r => this.storage.getNode(r.id)));
-        return nodes.filter((node): node is IGraphNode => node !== null);
+        // Get embedding for query
+        const embeddings = await this.embedder.generateEmbeddings(query);
+        
+        // Perform hybrid search with temporal awareness
+        const searchResults = await this._hybridSearch.searchWithTemporal(
+            query,
+            embeddings[0],
+            filter
+        );
+        
+        // Map search results back to nodes with scores
+        const nodes = await Promise.all(
+            searchResults.map(async result => {
+                const node = await this.getNode(result.id);
+                if (node) {
+                    // Add search score and confidence to metadata
+                    node.metadata.set('search_score', result.score.toString());
+                    node.metadata.set('search_confidence', result.confidence.toString());
+                    if (result.source) {
+                        node.metadata.set('search_source', result.source);
+                    }
+                }
+                return node;
+            })
+        );
+        
+        // Filter out null results and sort by score
+        return nodes
+            .filter((node): node is IGraphNode => node !== null)
+            .sort((a, b) => {
+                const scoreA = parseFloat(a.metadata.get('search_score') || '0');
+                const scoreB = parseFloat(b.metadata.get('search_score') || '0');
+                return scoreB - scoreA;
+            });
     }
 
     /**

@@ -135,16 +135,32 @@ Return only the numeric score.`;
      * Apply MMR for diversity
      */
     private applyMMR(features: Array<{ node: IGraphNode; features: RankingFeatures }>): Array<{ node: IGraphNode; score: number }> {
-        const maxResults = this.config.maxResults ?? features.length;
+        // Handle empty input
+        if (!features || features.length === 0) {
+            return [];
+        }
+
+        const maxResults = Math.min(this.config.maxResults ?? features.length, features.length);
         const lambda = this.config.mmr?.lambda ?? 0.5;
         const selected: IGraphNode[] = [];
         const candidates = [...features];
         const result: Array<{ node: IGraphNode; score: number }> = [];
 
-        // First, select the highest scoring document
-        const firstIndex = candidates.findIndex(c => 
-            c.features.relevanceScore === Math.max(...candidates.map(d => d.features.relevanceScore))
-        );
+        // Find highest scoring document
+        const scores = candidates.map(c => c.features.relevanceScore);
+        const maxScore = Math.max(...scores);
+        const firstIndex = scores.findIndex(score => score === maxScore);
+
+        // Safety check for invalid scores
+        if (firstIndex === -1 || !candidates[firstIndex]) {
+            // If we can't find a valid first document, just return all documents with their relevance scores
+            return features.map(f => ({
+                node: f.node,
+                score: f.features.relevanceScore
+            }));
+        }
+
+        // Add first document
         const [firstDoc] = candidates.splice(firstIndex, 1);
         selected.push(firstDoc.node);
         result.push({
@@ -160,12 +176,16 @@ Return only the numeric score.`;
             // Find the best candidate considering both relevance and diversity
             for (let i = 0; i < candidates.length; i++) {
                 const candidate = candidates[i];
+                if (!candidate?.node || !candidate?.features?.relevanceScore) continue;
+
                 const relevanceScore = candidate.features.relevanceScore;
                 
                 // Calculate diversity score as 1 minus maximum similarity to selected docs
-                const maxSimilarity = Math.max(...selected.map(node => 
+                const similarities = selected.map(node => 
                     this.calculateSimilarity(candidate.node, node)
-                ));
+                ).filter(score => !isNaN(score));
+
+                const maxSimilarity = similarities.length > 0 ? Math.max(...similarities) : 0;
                 const diversityScore = 1 - maxSimilarity;
 
                 // MMR score combines relevance and diversity
@@ -181,11 +201,13 @@ Return only the numeric score.`;
 
             // Add best candidate to results
             const [bestCandidate] = candidates.splice(bestIndex, 1);
-            selected.push(bestCandidate.node);
-            result.push({
-                node: bestCandidate.node,
-                score: bestScore
-            });
+            if (bestCandidate?.node) {
+                selected.push(bestCandidate.node);
+                result.push({
+                    node: bestCandidate.node,
+                    score: bestScore
+                });
+            }
         }
 
         return result;

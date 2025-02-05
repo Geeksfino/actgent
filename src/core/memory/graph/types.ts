@@ -1,5 +1,6 @@
 import { OpenAI } from 'openai';
-import { EmbedderType } from './embedder/factory';
+import { EmbedderProvider } from './embedder';
+import { IGraphNode } from './data/types';
 
 /**
  * Configuration for graph operations
@@ -13,7 +14,7 @@ export interface GraphConfig {
 
     // Embedder configuration
     embedder?: {
-        type: EmbedderType;
+        provider: EmbedderProvider;
         config?: any;
     };
 

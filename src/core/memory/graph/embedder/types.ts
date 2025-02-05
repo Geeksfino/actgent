@@ -1,16 +1,48 @@
 /**
+ * Available embedding providers
+ */
+export enum EmbedderProvider {
+    BGE = 'bge',
+    OpenAI = 'openai',
+    VoyageAI = 'voyage'
+}
+
+/**
  * Configuration for embedding providers
  */
 export interface EmbedderConfig {
     // Base configuration
+    provider: EmbedderProvider;
     modelName: string;
     maxTokens: number;
     batchSize: number;
+    
+    // Caching configuration
+    cache?: {
+        enabled: boolean;
+        maxSize?: number;  // Maximum number of entries
+        ttl?: number;     // Time-to-live in milliseconds
+    };
     
     // Optional provider-specific settings
     apiKey?: string;
     baseURL?: string;
     customOptions?: Record<string, any>;
+}
+
+/**
+ * Interface for embedding cache
+ */
+export interface IEmbeddingCache {
+    get(key: string): Promise<number[] | undefined>;
+    set(key: string, embedding: number[]): Promise<void>;
+    has(key: string): Promise<boolean>;
+    clear(): Promise<void>;
+    stats(): Promise<{
+        size: number;
+        hits: number;
+        misses: number;
+    }>;
 }
 
 /**
@@ -33,6 +65,15 @@ export interface IEmbedder {
      * Get the maximum number of tokens this provider can handle
      */
     getMaxTokens(): number;
+    
+    /**
+     * Get cache statistics if caching is enabled
+     */
+    getCacheStats(): Promise<{
+        size: number;
+        hits: number;
+        misses: number;
+    } | undefined>;
     
     /**
      * Clear any cached data and resources

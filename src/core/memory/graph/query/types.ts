@@ -114,3 +114,43 @@ export interface EmbeddingSearchResult {
     node: IGraphNode;
     score: number;
 }
+
+export interface SearchConfig {
+    textWeight: number;      // Weight for BM25 scores
+    embeddingWeight: number; // Weight for embedding similarity scores
+    minTextScore: number;    // Minimum BM25 score threshold
+    minEmbeddingScore: number; // Minimum embedding similarity threshold
+    limit: number;           // Maximum number of results to return
+    temporal?: {
+        asOf?: Date;         // Point-in-time query
+        timeWindow?: {       // Time range query
+            start: Date;
+            end: Date;
+        };
+        decayRate?: number;  // Time decay factor for scoring (0-1)
+    };
+    reranking?: {
+        enabled?: boolean;   // Whether to use reranking
+        maxResults?: number; // Maximum results after reranking
+        weights?: {
+            relevance?: number;    // Weight for base relevance score
+            crossEncoder?: number; // Weight for cross-encoder score
+            recency?: number;      // Weight for temporal recency
+            connectivity?: number; // Weight for node connectivity
+            importance?: number;   // Weight for node importance
+        };
+        rrf?: {
+            useRankFusion?: boolean; // Whether to use RRF
+            k?: number;             // RRF constant (default: 60)
+        };
+        mmr?: {
+            lambda?: number;        // MMR trade-off parameter (default: 0.5)
+        };
+        graphFeatures?: {
+            centerNodeId?: string;  // Central node for graph-based features
+            queryNodeIds?: string[]; // Additional nodes for context
+            maxPathLength?: number; // Max path length for graph features
+            edgeTypes?: string[];  // Edge types to consider
+        };
+    };
+}

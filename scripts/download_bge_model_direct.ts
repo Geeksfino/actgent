@@ -30,7 +30,8 @@ async function downloadModel(model: string, revision: string = 'main') {
     const baseUrl = `https://huggingface.co/${model}/resolve/${revision}`;
     const files = [
         'config.json',
-        'model.safetensors',
+        'onnx/model.onnx',
+        'onnx/model_quantized.onnx',
         'tokenizer.json',
         'tokenizer_config.json',
         'special_tokens_map.json'
@@ -38,6 +39,7 @@ async function downloadModel(model: string, revision: string = 'main') {
 
     const modelDir = path.join(process.cwd(), 'models', 'bge', model.replace('/', '/'));
     await fs.promises.mkdir(modelDir, { recursive: true });
+    await fs.promises.mkdir(path.join(modelDir, 'onnx'), { recursive: true });
 
     for (const file of files) {
         const url = `${baseUrl}/${file}`;
@@ -52,20 +54,8 @@ async function downloadModel(model: string, revision: string = 'main') {
 }
 
 async function main() {
-    // Download BGE-M3-lite (smaller model) first
-    console.log('\nDownloading BGE-M3-lite (main)...');
-    await downloadModel('BAAI/bge-m3-lite');
-    
-    console.log('\nDownloading BGE-M3-lite (quantized)...');
-    await downloadModel('BAAI/bge-m3-lite', 'quantized');
-    
-    // Then download BGE-M3 if needed
     console.log('\nDownloading BGE-M3 (main)...');
     await downloadModel('BAAI/bge-m3');
-    
-    console.log('\nDownloading BGE-M3 (quantized)...');
-    await downloadModel('BAAI/bge-m3', 'quantized');
-    
     console.log('\nAll downloads completed!');
 }
 

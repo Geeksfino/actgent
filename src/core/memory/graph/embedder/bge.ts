@@ -1,112 +1,129 @@
+import * as path from 'path';
 import { pipeline, env } from '@xenova/transformers';
-import { IEmbedder, EmbedderConfig } from './types';
+import { IEmbedder, EmbedderConfig, EmbedderProvider, IEmbeddingCache } from './types';
+import { EmbeddingCache } from './cache';
 
 /**
  * Configuration for BGE embedder
  */
 export interface BGEConfig extends EmbedderConfig {
-    modelName: 'BAAI/bge-m3' | 'BAAI/bge-m3-lite';
+    modelName: string;  // Allow any model name
+    maxTokens: number;
+    batchSize: number;
     quantized?: boolean;  // Use quantized model for smaller memory footprint
-    cacheDir?: string;    // Custom cache directory for model files
+    cache?: {
+        enabled: boolean;
+        maxSize: number;
+        ttl: number;
+    };
 }
-
-interface PipelineOptions {
-    quantized?: boolean;
-    revision?: string;
-    pooling?: 'mean' | 'cls';
-    normalize?: boolean;
-}
-
-interface TransformerOutput {
-    data: Float32Array;
-}
-
-type FeatureExtractionPipeline = {
-    (text: string, options?: PipelineOptions): Promise<TransformerOutput>;
-};
 
 /**
- * BGE-M3 embedding provider using transformers.js
+ * BGE embedder using transformers.js
  */
 export class BGEEmbedder implements IEmbedder {
-    private model: FeatureExtractionPipeline | null = null;
-    private readonly embeddingDim: number;
-    
-    constructor(private config: BGEConfig) {
-        // Set embedding dimension based on model
-        this.embeddingDim = config.modelName === 'BAAI/bge-m3' ? 1024 : 512;
+    private pipe: any;
+    private readonly embeddingDim: number = 384;  // MiniLM-L6-v2 dimension
+    private readonly config: BGEConfig;
+    private cache?: IEmbeddingCache;
+
+    constructor(config: BGEConfig = {
+        provider: EmbedderProvider.BGE,
+        modelName: 'Xenova/all-MiniLM-L6-v2',
+        maxTokens: 8192,
+        batchSize: 32,
+        quantized: false
+    }) {
+        env.allowLocalModels = true;
+        this.config = config;
         
-        // Set custom cache directory if provided
-        if (config.cacheDir) {
-            env.cacheDir = config.cacheDir;
+        // Initialize cache if enabled
+        if (config.cache?.enabled) {
+            this.cache = new EmbeddingCache(
+                config.cache.maxSize,
+                config.cache.ttl
+            );
         }
     }
-    
-    private async ensureModel(): Promise<FeatureExtractionPipeline> {
-        if (!this.model) {
-            console.log(`Loading BGE model: ${this.config.modelName}${this.config.quantized ? ' (quantized)' : ''}`);
-            console.log('First time usage will download the model files (~1GB for full model, ~500MB for lite)');
-            
+
+    private async ensurePipeline(): Promise<any> {
+        if (!this.pipe) {
+            console.log(`Loading BGE model: ${this.config.modelName}`);
             try {
-                const model = await pipeline('feature-extraction', this.config.modelName, {
-                    quantized: this.config.quantized,
-                    revision: this.config.quantized ? 'quantized' : 'main',
-                    progress_callback: (progress: { status: string; file: string; progress: number }) => {
-                        if (progress.status === 'downloading') {
-                            console.log(`Downloading ${progress.file}: ${Math.round(progress.progress * 100)}%`);
-                        } else if (progress.status === 'loading') {
-                            console.log(`Loading ${progress.file} into memory...`);
-                        }
-                    }
+                this.pipe = await pipeline('feature-extraction', this.config.modelName, {
+                    quantized: this.config.quantized
                 });
-                
-                // Wrap the model to ensure consistent typing
-                this.model = async (text: string, options?: PipelineOptions) => {
-                    const result = await model(text, options);
-                    return result as TransformerOutput;
-                };
-                
                 console.log('BGE model loaded successfully');
             } catch (error) {
-                console.error('Failed to load BGE model:', error);
-                throw new Error(`Failed to load BGE model: ${error instanceof Error ? error.message : String(error)}`);
+                console.error('Error loading BGE model:', error);
+                throw error;
             }
         }
-        return this.model;
+        return this.pipe;
     }
-    
+
+    private async embedSingle(text: string): Promise<number[]> {
+        // Check cache first
+        if (this.cache) {
+            const cached = await this.cache.get(text);
+            if (cached) {
+                return cached;
+            }
+        }
+
+        const pipe = await this.ensurePipeline();
+        const output = await pipe(text, {
+            pooling: 'mean',
+            normalize: true
+        });
+        const embedding = Array.from(output.data as Float32Array);
+
+        // Cache the result
+        if (this.cache) {
+            await this.cache.set(text, embedding);
+        }
+
+        return embedding;
+    }
+
     async generateEmbeddings(texts: string | string[]): Promise<number[][]> {
-        const model = await this.ensureModel();
-        const inputTexts = Array.isArray(texts) ? texts : [texts];
-        
-        // Process in batches to avoid memory issues
-        const embeddings: number[][] = [];
-        for (let i = 0; i < inputTexts.length; i += this.config.batchSize) {
-            const batch = inputTexts.slice(i, i + this.config.batchSize);
-            const batchResults = await Promise.all(
-                batch.map(text => model(text, { 
-                    pooling: 'mean', 
-                    normalize: true 
-                }))
-            );
-            embeddings.push(...batchResults.map(result => Array.from(result.data)));
+        const textArray = Array.isArray(texts) ? texts : [texts];
+        if (textArray.length === 0) return [];
+
+        // Process in batches
+        const batchSize = this.config.batchSize || 32;
+        const batches = [];
+        for (let i = 0; i < textArray.length; i += batchSize) {
+            const batch = textArray.slice(i, i + batchSize);
+            batches.push(batch);
         }
         
-        return embeddings;
+        // Process each batch
+        const allEmbeddings: number[][] = [];
+        for (const batch of batches) {
+            const embeddings = await Promise.all(
+                batch.map(text => this.embedSingle(text))
+            );
+            allEmbeddings.push(...embeddings);
+        }
+        
+        return allEmbeddings;
     }
-    
+
     getEmbeddingDimension(): number {
         return this.embeddingDim;
     }
-    
+
     getMaxTokens(): number {
         return this.config.maxTokens;
     }
-    
-    /**
-     * Clear any cached data
-     */
-    public async clear(): Promise<void> {
-        this.model = null;
+
+    async getCacheStats(): Promise<{ size: number; hits: number; misses: number; } | undefined> {
+        return this.cache?.stats();
+    }
+
+    async clear(): Promise<void> {
+        this.pipe = undefined;
+        await this.cache?.clear();
     }
 }
