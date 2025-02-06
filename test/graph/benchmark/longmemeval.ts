@@ -458,67 +458,75 @@ export class LongMemEvalRunner {
     }
 
     async generatePrediction(instance: LongMemEvalInstance): Promise<LongMemEvalPrediction> {
-        const evidenceTurns = instance.haystack_sessions
-            .flat()
-            .map((turn, index) => ({
-                turn_id: `turn_${index}`,
-                content: turn.content,
-                role: turn.role,
-                date: instance.haystack_dates[Math.floor(index / instance.haystack_sessions[0].length)] || instance.question_date
-            }));
-
-        this.log('\nProcessing Evidence:', evidenceTurns.length, 'turns');
-        if (this.debug) {
-            for (const turn of evidenceTurns) {
-                const truncatedContent = turn.content.length > 50 ? 
-                    turn.content.substring(0, 50) + '...' : 
-                    turn.content;
-                this.log(`  [${turn.turn_id}] Date: ${turn.date} | Role: ${turn.role} | Content: ${truncatedContent}`);
-            }
-        }
-
+        const allNodes: IGraphNode<any>[] = [];
+        const allEdges: IGraphEdge<any>[] = [];
         const processor = (this.graphManager as any).llmProcessor as any;
 
-        // Process evidence turns
-        let currentBatch: typeof evidenceTurns = [];
-        let previousTurns: typeof evidenceTurns = [];
-        let allNodes: IGraphNode<any>[] = [];
-        let allEdges: IGraphEdge<any>[] = [];
+        // Process each session separately
+        for (let sessionIndex = 0; sessionIndex < instance.haystack_sessions.length; sessionIndex++) {
+            const session = instance.haystack_sessions[sessionIndex];
+            const sessionDate = instance.haystack_dates[sessionIndex] || instance.question_date;
+            
+            // Map turns in this session
+            const sessionTurns = session.map((turn, index) => ({
+                turn_id: `turn_${sessionIndex}_${index}`,
+                content: turn.content,
+                role: turn.role,
+                date: sessionDate
+            }));
 
-        for (let i = 0; i < evidenceTurns.length; i++) {
-            currentBatch.push(evidenceTurns[i]);
-
-            // Process batch if we have batchSize turns (4 turns) or at the end
-            if (currentBatch.length === this.batchSize || i === evidenceTurns.length - 1) {
-                // Use last 4 messages from previousTurns as context
-                const contextTurns = previousTurns.slice(-this.contextSize);
-                const { nodes, edges } = await this.processTurnBatch(currentBatch, processor, contextTurns);
-                
-                allNodes.push(...nodes);
-                allEdges.push(...edges);
-
-                // Update previous turns
-                previousTurns.push(...currentBatch);
-                
-                // Run community detection after processing complete turns
-                if (nodes.length > 0 || edges.length > 0) {
-                    try {
-                        await this.graphManager.processWithLLM(
-                            GraphTask.REFINE_COMMUNITIES,
-                            {
-                                nodes: allNodes,
-                                edges: allEdges,
-                                timestamp: new Date().toISOString()
-                            }
-                        );
-                    } catch (error) {
-                        console.error('Error in community refinement:', error);
-                    }
+            this.log(`\nProcessing Session ${sessionIndex}:`, sessionTurns.length, 'turns');
+            if (this.debug) {
+                for (const turn of sessionTurns) {
+                    const truncatedContent = turn.content.length > 50 ? 
+                        turn.content.substring(0, 50) + '...' : 
+                        turn.content;
+                    this.log(`  [${turn.turn_id}] Date: ${turn.date} | Role: ${turn.role} | Content: ${truncatedContent}`);
                 }
-
-                // Reset batch
-                currentBatch = [];
             }
+
+            // Process evidence turns within this session
+            let currentBatch: typeof sessionTurns = [];
+            let previousTurns: typeof sessionTurns = [];
+
+            for (let i = 0; i < sessionTurns.length; i++) {
+                currentBatch.push(sessionTurns[i]);
+
+                // Process batch if we have batchSize turns or at the end of the session
+                if (currentBatch.length === this.batchSize || i === sessionTurns.length - 1) {
+                    // Use last N messages from previousTurns as context
+                    const contextTurns = previousTurns.slice(-this.contextSize);
+                    const { nodes, edges } = await this.processTurnBatch(currentBatch, processor, contextTurns);
+                    
+                    allNodes.push(...nodes);
+                    allEdges.push(...edges);
+
+                    // Update previous turns
+                    previousTurns.push(...currentBatch);
+                    
+                    // Run community detection after processing complete turns
+                    if (nodes.length > 0 || edges.length > 0) {
+                        try {
+                            await this.graphManager.processWithLLM(
+                                GraphTask.REFINE_COMMUNITIES,
+                                {
+                                    nodes: allNodes,
+                                    edges: allEdges,
+                                    timestamp: new Date().toISOString()
+                                }
+                            );
+                        } catch (error) {
+                            console.error('Error in community refinement:', error);
+                        }
+                    }
+
+                    // Reset batch
+                    currentBatch = [];
+                }
+            }
+
+            // Clear previous turns before next session
+            previousTurns = [];
         }
 
         // Add all nodes and edges to graph
@@ -633,29 +641,114 @@ export class LongMemEvalRunner {
 
     public async runSpecific(specifier: string): Promise<void> {
         let instancesToProcess: LongMemEvalInstance[] = [];
-        
-        if (specifier.includes('-')) {
-            const [start, end] = specifier.split('-').map(n => parseInt(n, 10));
-            if (isNaN(start) || isNaN(end)) {
-                throw new Error('Invalid range format. Use format: "start-end" (e.g., "0-5")');
-            }
-            instancesToProcess = this.dataset.slice(start, end + 1);
-        } else if (/^\d+$/.test(specifier)) {
-            const index = parseInt(specifier, 10);
-            if (index >= this.dataset.length) {
-                throw new Error(`Index ${index} out of bounds. Dataset has ${this.dataset.length} instances`);
-            }
-            instancesToProcess = [this.dataset[index]];
-        } else {
-            const instance = this.dataset.find(i => i.question_id === specifier);
-            if (!instance) {
-                throw new Error(`No instance found with ID: ${specifier}`);
-            }
-            instancesToProcess = [instance];
-        }
 
-        console.log(`Processing ${instancesToProcess.length} instance(s)...`);
-        await this.processInstances(instancesToProcess);
+        try {
+            // 1. Handle Number (Instance ID)
+            if (!isNaN(Number(specifier))) {
+                const instanceId = Number(specifier);
+                const instance = this.dataset.find(i => this.dataset.indexOf(i) === instanceId);
+                if (instance) {
+                    instancesToProcess.push(instance);
+                } else {
+                    throw new Error(`Instance with ID ${instanceId} not found.`);
+                }
+            } // 2. Handle Question ID
+            else if (this.dataset.find(i => i.question_id === specifier)) {
+                const instance = this.dataset.find(i => i.question_id === specifier);
+                if (instance) {
+                    instancesToProcess.push(instance);
+                } else {
+                    throw new Error(`Instance with question_id ${specifier} not found.`);
+                }
+            } // 3. Handle Range (e.g., 0-4)
+            else if (specifier.includes('-') && !specifier.startsWith('{')) {
+                const [startStr, endStr] = specifier.split('-');
+                const start = Number(startStr);
+                const end = Number(endStr);
+
+                if (isNaN(start) || isNaN(end) || start > end) {
+                    throw new Error('Invalid range format. Use start-end, e.g., 0-4.');
+                }
+
+                for (let i = start; i <= end; i++) {
+                    const instance = this.dataset.find(instance => this.dataset.indexOf(instance) === i);
+                    if (instance) {
+                        instancesToProcess.push(instance);
+                    }
+                }
+            } // 4. Handle JSON Object
+            else if (specifier.startsWith('{') && specifier.endsWith('}')) {
+                try {
+                    const spec = JSON.parse(specifier);
+                    const instanceId = spec.id;
+                    const sessionsRange = spec.sessions;
+                    let turns = spec.turns;
+
+                    const instance = this.dataset.find(i => this.dataset.indexOf(i) === instanceId);
+
+                    if (!instance) {
+                        throw new Error(`Instance with ID ${instanceId} not found.`);
+                    }
+
+                    // Process specific sessions within the instance
+                    if (sessionsRange) {
+                        const [startSessionStr, endSessionStr] = sessionsRange.split('-');
+                        const startSession = Number(startSessionStr);
+                        const endSession = Number(endSessionStr);
+
+                        if (isNaN(startSession) || isNaN(endSession) || startSession > endSession) {
+                            throw new Error('Invalid sessions range format. Use start-end, e.g., 2-4.');
+                        }
+
+                        if (startSession < 0 || endSession >= instance.haystack_sessions.length) {
+                            console.warn('Session range exceeds available sessions. Processing all sessions.');
+                            instancesToProcess.push(instance);
+                        } else {
+                            // Create a new instance with only the specified sessions
+                            const newInstance: LongMemEvalInstance = {
+                                ...instance,
+                                haystack_sessions: instance.haystack_sessions.slice(startSession, endSession + 1)
+                            };
+                            instancesToProcess.push(newInstance);
+                        }
+                    } else {
+                        instancesToProcess.push(instance);
+                    }
+
+                    if (turns === undefined) {
+                        turns = 2; // Default value
+                    }
+
+                    // Limit the number of turns to process
+                    instancesToProcess = instancesToProcess.map(instance => ({
+                        ...instance,
+                        haystack_sessions: instance.haystack_sessions.map(session => {
+                            const startIndex = Math.max(0, session.length - turns);
+                            return session.slice(startIndex);
+                        })
+                    }));
+                } catch (error) {
+                    throw new Error(`Invalid JSON format: ${error}`);
+                }
+            } else {
+                throw new Error('Invalid instance specifier format.');
+            }
+
+            if (instancesToProcess.length === 0) {
+                console.warn('No instances to process.');
+                return;
+            }
+
+            this.log(`Processing ${instancesToProcess.length} instances:`);
+            for (const instance of instancesToProcess) {
+                this.log(`  - ${instance.question_id}`);
+            }
+
+            await this.processInstances(instancesToProcess);
+
+        } catch (error: any) {
+            console.error('Error in runSpecific:', error.message);
+        }
     }
 
     public async runAll(): Promise<void> {
@@ -689,7 +782,7 @@ export class LongMemEvalRunner {
             
             try {
                 await this.graphManager.clear();
-                const prediction = await this.generatePrediction(instance);
+                const prediction = await this.generatePrediction(instance); // Only process 4 turns
                 
                 const line = JSON.stringify(prediction);
                 fs.appendFileSync(this.predictionsPath, line + '\n', { encoding: 'utf-8' });
@@ -711,5 +804,6 @@ export class LongMemEvalRunner {
         console.log(`Total Sessions: ${instances.reduce((acc, instance) => acc + instance.haystack_sessions.length, 0)} (avg: ${(instances.reduce((acc, instance) => acc + instance.haystack_sessions.length, 0) / instances.length).toFixed(1)} per instance)`);
         console.log(`Total Evidence Turns: ${totalTurns} (avg: ${(totalTurns / instances.length).toFixed(1)} per instance)`);
         console.log(`Results written to: ${this.predictionsPath}`);
+        process.exit(0); // Exit after processing the specified instances
     }
 }

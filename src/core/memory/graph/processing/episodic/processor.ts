@@ -132,6 +132,7 @@ export class GraphLLMProcessor {
                 };
 
             case GraphTask.EXTRACT_TEMPORAL:
+                console.log("Generated Prompt:", this.buildTemporalExtractionPrompt({ text: data.text, context: data.context, referenceTimestamp: data.referenceTimestamp }));
                 return {
                     prompt: this.buildTemporalExtractionPrompt({ text: data.text, context: data.context, referenceTimestamp: data.referenceTimestamp }),
                     functionSchema: z.object({
@@ -282,7 +283,7 @@ ${input.text}`;
     }
 
     private buildTemporalExtractionPrompt(input: { text: string, context: string, referenceTimestamp: string }): string {
-        return `Given the text, extract entities and relationships that are explicitly or implicitly mentioned:
+        return `Given the text, extract entities and relationships that are explicitly or implicitly mentioned. **Pay close attention to identifying relationships between entities, both within the current text and between the current text and the previous context.**
 
 Guidelines:
 1. ALWAYS extract the speaker/actor as the first node
@@ -300,14 +301,15 @@ Guidelines:
    - Temporal information (dates, times)
    - Attributes or properties
 
+**Emphasize the importance of identifying relationships between entities:**
 For relationships between entities:
 1. Only connect DISTINCT entities
-2. Use generic, descriptive ALL_CAPS types (HAS, USES, NEEDS, PART_OF, etc.)
+2. Use descriptive ALL_CAPS types from the following list, or create a new one if none fit (HAS_FEATURE, USES, NEEDS, PART_OF, WORKS_FOR, COLLABORATES_WITH, RECOMMENDS, SUPPORTS, EXTENDS, SIMILAR_TO, OPPOSITE_OF, DEPENDS_ON, INCLUDES, IS_A):
 3. Include detailed descriptions with context, explaining the relationship
 4. Note if relationships are temporary based on the reference timestamp (${input.referenceTimestamp})
-5. Ensure each relationship has a clear source and target entity.
+5. Ensure each relationship has a clear source and target entity. **Identify relationships between entities in the current text and entities in the context. When identifying relationships, consider if an entity in the current text is the same as an entity in the context (entity linking).**
 
-Previous Context (DO NOT extract from this):
+Previous Context (Use this to identify relationships with the current text):
 ${input.context}
 
 Current Text to Process:
@@ -579,6 +581,77 @@ Result: "In yesterday's team meeting, we discussed Q4 goals and project timeline
                 return 'refineCommunities';
             default:
                 throw new Error(`Unknown task: ${task}`);
+        }
+    }
+
+    async processWithLLM(task: GraphTask, data: any): Promise<any> {
+        const request = this.prepareRequest(task, data);
+
+        // Use retry logic with exponential backoff
+        const llmCall = async () => {
+            const baseConfig: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
+                model: this.config.model,
+                messages: [
+                    { role: 'system', content: 'You are a helpful assistant that processes graph operations. Always use the provided function to return your response.' },
+                    { role: 'user', content: request.prompt }
+                ],
+                tools: [{
+                    type: 'function',
+                    function: {
+                        name: this.getFunctionName(task),
+                        parameters: this.convertZodToJsonSchema(request.functionSchema)
+                    }
+                }],
+                tool_choice: { type: 'function', function: { name: this.getFunctionName(task) } },
+                stream: false
+            };
+
+            const response = await this.llm.chat.completions.create(baseConfig);
+            const message = response.choices[0].message;
+            const finishReason = response.choices[0].finish_reason;
+            const isToolCalls = finishReason === 'tool_calls';
+
+            if (!isToolCalls || !message.tool_calls) {
+                throw new Error('No tool calls in response');
+            }
+
+            const toolCall = message.tool_calls[0];
+            return JSON.parse(toolCall.function.arguments);
+        };
+
+        try {
+            const result = await retry(llmCall, 3, 1000);
+            return result;
+        } catch (error) {
+            console.error("LLM call failed after multiple retries:", error);
+            throw error;
+        }
+    }
+
+    async extractTemporal(data: any): Promise<{ entities: any[], relationships: any[] }> {
+        try {
+            const { entities, relationships } = await this.processWithLLM(
+                GraphTask.EXTRACT_TEMPORAL,
+                { text: data.text, context: data.context, referenceTimestamp: data.referenceTimestamp }
+            );
+
+            console.log("Extracted entities:", entities);
+            console.log("Extracted relationships:", relationships);
+
+            if (!entities || !Array.isArray(entities)) {
+                console.warn("Invalid entities data received from LLM.", entities);
+                return { entities: [], relationships: [] };
+            }
+
+            if (relationships && !Array.isArray(relationships)) {
+                console.warn("Invalid relationships data received from LLM.", relationships);
+                return { entities: [], relationships: [] };
+            }
+
+            return { entities, relationships };
+        } catch (error) {
+            console.error("Error in extractTemporal:", error);
+            return { entities: [], relationships: [] };
         }
     }
 }

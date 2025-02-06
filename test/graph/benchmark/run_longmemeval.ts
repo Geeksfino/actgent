@@ -27,10 +27,14 @@ program
     .option('--max-tokens <n>', 'Maximum tokens for completions', '500')
     .option('--hf-token <token>', 'Hugging Face token for model access')
     .option('--debug', 'Enable debug mode')
-    .option('--instance <specifier>', 'Process specific instance(s). Can be:\n' +
-        '  - Single index (e.g., "5")\n' +
-        '  - Range (e.g., "1-5")\n' +
-        '  - Question ID (e.g., "e47becba")')
+    .option(
+        '--instance <specifier>',
+        `Specify instance(s) to process.  Examples:
+        - A number (e.g., '0'):  process the dataset instance of that id
+        - A question ID (e.g., 'camera_eval_001'): process the dataset instance matching that question id
+        - A range (e.g., '0-4'): process instances 0 through 4
+        - A JSON object (e.g., '{"id": 0, "sessions": "2-4", "turns": 2}'): fetch session 2 to 4 of instance 0. The processing (such as triggering LLM call) is every 2 turns (which is 4 messages). If \"sessions\" contains numbers of -1 or a number larger than the current instance has, we just treat it as loading up the entire instance data`
+    )
     .parse(process.argv);
 
 const options = program.opts();
@@ -108,8 +112,9 @@ async function main() {
     );
     
     try {
-        if (options.instance) {
+        if (options.instance !== undefined) {
             await runner.runSpecific(options.instance);
+            process.exit(0); // Exit after processing the specified instance(s)
         } else {
             await runner.runAll();
         }
