@@ -310,6 +310,9 @@ export class LongMemEvalRunner {
         processor: any,
         previousTurns: Turn[]
     ): Promise<{ nodes: IGraphNode<any>[]; edges: IGraphEdge<any>[] }> {
+        const batchStartTime = Date.now();
+        console.log(`Starting processTurnBatch for ${turns.length} turns`);
+
         this.stats.batchesProcessed++;
         const startTime = Date.now();
         
@@ -341,6 +344,8 @@ export class LongMemEvalRunner {
         try {
             // Entity extraction with context
             const extractionStartTime = Date.now();
+            console.log("Starting entity extraction");
+            console.time("LLM Entity Extraction");
             const entityResult = await this.graphManager.processWithLLM<EntityExtractionResult>(
                 GraphTask.EXTRACT_TEMPORAL,
                 {
@@ -349,119 +354,86 @@ export class LongMemEvalRunner {
                     referenceTimestamp: batchTimestamp.toISOString()
                 }
             );
+            console.timeEnd("LLM Entity Extraction");
+            const extractionEndTime = Date.now();
+            console.log(`Entity extraction completed in ${extractionEndTime - extractionStartTime}ms`);
+
             this.stats.entityExtractionCalls++;
             this.stats.entityExtractionTime += Date.now() - extractionStartTime;
 
-            if (this.debug) {
-                const duration = Date.now() - startTime;
-                this.log('Entity Extraction completed in:', duration, 'ms');
-                this.log('=== Entity Extraction Result ===');
-                this.log(JSON.stringify(entityResult, null, 2));
-            }
-
-            // Process entity results
-            if (!entityResult || !entityResult.entities || !Array.isArray(entityResult.entities)) {
-                console.warn('Invalid entity extraction result:', entityResult);
+            if (!entityResult || !entityResult.entities) {
+                console.warn('No entities extracted in this turn.');
                 return { nodes: batchNodes, edges: batchEdges };
             }
 
             this.stats.totalEntitiesExtracted += entityResult.entities.length;
-            this.stats.totalRelationshipsExtracted += entityResult.relationships?.length || 0;
 
-            // Create entity nodes with full metadata
-            const entityNodes = entityResult.entities.map(entity => ({
-                id: crypto.randomUUID(),
-                type: 'entity' as const,
-                content: entity.name,
-                metadata: new Map(Object.entries({
-                    type: 'entity',
-                    entityType: entity.type,
-                    category: entity.category,
-                    summary: entity.summary,
-                    confidence: entity.confidence || 0.8,
-                    firstMention: turns[0].turn_id,
-                    firstMentionDate: batchTimestamp.toISOString()
-                })),
-                createdAt: batchTimestamp,
-                validAt: batchTimestamp
-            } as IGraphNode<string>));
-
-            batchNodes.push(...entityNodes);
-
-            // Create relationship edges with temporal awareness
+            // Process relationships extracted by the LLM
             if (entityResult.relationships && Array.isArray(entityResult.relationships)) {
                 for (const rel of entityResult.relationships) {
-                    const sourceNode = entityNodes.find(n => 
-                        n.content === rel.source || 
-                        n.metadata.get('aliases')?.includes(rel.source)
-                    );
-                    const targetNode = entityNodes.find(n => 
-                        n.content === rel.target ||
-                        n.metadata.get('aliases')?.includes(rel.target)
-                    );
-                    
-                    if (sourceNode && targetNode) {
-                        const edge = {
-                            id: crypto.randomUUID(),
-                            type: rel.type,
-                            sourceId: sourceNode.id,
-                            targetId: targetNode.id,
-                            content: rel.description,
-                            metadata: new Map(Object.entries({
-                                type: 'relationship',
-                                confidence: rel.confidence || 0.8,
-                                isTemporary: rel.isTemporary || false,
-                                firstMention: turns[0].turn_id,
-                                firstMentionDate: batchTimestamp.toISOString()
-                            })),
-                            createdAt: batchTimestamp,
-                            validAt: batchTimestamp
-                        } as IGraphEdge<string>;
+                    const sourceNode = batchNodes.find(n => n.id === rel.source);
+                    const targetNode = batchNodes.find(n => n.id === rel.target);
 
-                        batchEdges.push(edge);
-
-                        // For permanent relationships, create inverse relationships
-                        if (!rel.isTemporary && rel.type === 'COMPATIBLE_WITH') {
-                            const inverseEdge = {
-                                ...edge,
-                                id: crypto.randomUUID(),
-                                sourceId: targetNode.id,
-                                targetId: sourceNode.id
-                            };
-                            batchEdges.push(inverseEdge);
-                        }
+                    if (!sourceNode || !targetNode) {
+                        console.warn(`Skipping relationship ${rel.type} from ${rel.source} to ${rel.target} due to missing entities`);
+                        continue;
                     }
+
+                    const edgeId = `rel_${rel.source}_${rel.target}`;
+                    const relationshipEdge: IGraphEdge<any> = {
+                        id: edgeId,
+                        sourceId: rel.source,
+                        targetId: rel.target,
+                        type: rel.type,
+                        content: rel.description || `Relationship of type ${rel.type} between ${sourceNode.content} and ${targetNode.content}`,
+                        metadata: new Map<string, any>([
+                            ['confidence', rel.confidence || 0.8],
+                            ['isTemporary', rel.isTemporary || false]
+                        ]),
+                        createdAt: batchTimestamp,
+                        validAt: batchTimestamp
+                    };
+
+                    batchEdges.push(relationshipEdge);
+                    this.stats.totalRelationshipsExtracted++;
                 }
+            }
+
+            if (this.debug) {
+                this.log('Extracted Entities:', entityResult.entities);
             }
 
             // Run community detection after processing entities
-            if (entityNodes.length > 0 || batchEdges.length > 0) {
+            if (batchNodes.length > 0 || batchEdges.length > 0) {
                 try {
-                    const communityStartTime = Date.now();
-                    const allNodes = [...batchNodes, ...entityNodes];
-                    const communityResult = await this.graphManager.processWithLLM(
+                    const communityRefinementStartTime = Date.now();
+                    console.log("Starting community refinement");
+                    await this.graphManager.processWithLLM(
                         GraphTask.REFINE_COMMUNITIES,
                         {
-                            nodes: allNodes,
-                            edges: batchEdges,
-                            timestamp: batchTimestamp.toISOString()
+                            nodes: batchNodes.filter(node => node.type === 'entity'),
+                            metadata: {
+                                type: 'community',
+                                lastUpdateTime: batchTimestamp.toISOString()
+                            }
                         }
                     );
-                    this.stats.communityRefinementCalls++;
-                    this.stats.communityRefinementTime += Date.now() - communityStartTime;
+                    const communityRefinementEndTime = Date.now();
+                    console.log(`Community refinement completed in ${communityRefinementEndTime - communityRefinementStartTime}ms`);
 
-                    if (this.debug && communityResult) {
-                        this.log('\n=== Community Detection Result ===');
-                        this.log(JSON.stringify(communityResult, null, 2));
-                    }
-                } catch (error) {
-                    console.error('Error in community refinement:', error);
+                    this.stats.communityRefinementCalls++;
+                    this.stats.communityRefinementTime += Date.now() - communityRefinementStartTime;
+                } catch (communityError: any) {
+                    console.error('Error in community refinement:', communityError);
                 }
             }
-
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error in entity extraction:', error);
         }
+
+        const batchEndTime = Date.now();
+        console.log(`Finished processTurnBatch for ${turns.length} turns in ${batchEndTime - batchStartTime}ms`);
+        console.log(`Total time spent in processTurnBatch: ${batchEndTime - startTime}ms`);
 
         return { nodes: batchNodes, edges: batchEdges };
     }

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { GraphTask, LLMConfig } from '../../types';
 import { IGraphNode, IGraphEdge, EpisodeContent } from '../../data/types';
 import OpenAI from 'openai';
+import { retry } from "/Users/cliang/repos/clipforge/actgent/src/core/utils/retry";
 
 /**
  * LLM processor for graph operations
@@ -19,44 +20,59 @@ export class GraphLLMProcessor {
      * Process a graph task using LLM
      */
     async process<T>(task: GraphTask, data: any): Promise<T> {
-        const { prompt, functionSchema } = this.prepareRequest(task, data);
-        
-        const baseConfig: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
-            model: this.config.model,
-            messages: [
-                { role: 'system', content: 'You are a helpful assistant that processes graph operations. Always use the provided function to return your response.' },
-                { role: 'user', content: prompt }
-            ],
-            tools: [{
-                type: 'function',
-                function: {
-                    name: this.getFunctionName(task),
-                    parameters: this.convertZodToJsonSchema(functionSchema)
-                }
-            }],
-            tool_choice: { type: 'function', function: { name: this.getFunctionName(task) } },
-            stream: false
+        const request = this.prepareRequest(task, data);
+
+        // Use retry logic with exponential backoff
+        const llmCall = async () => {
+            const baseConfig: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
+                model: this.config.model,
+                messages: [
+                    { role: 'system', content: 'You are a helpful assistant that processes graph operations. Always use the provided function to return your response.' },
+                    { role: 'user', content: request.prompt }
+                ],
+                tools: [{
+                    type: 'function',
+                    function: {
+                        name: this.getFunctionName(task),
+                        parameters: this.convertZodToJsonSchema(request.functionSchema)
+                    }
+                }],
+                tool_choice: { type: 'function', function: { name: this.getFunctionName(task) } },
+                stream: false
+            };
+
+            const response = await this.llm.chat.completions.create(baseConfig);
+            const message = response.choices[0].message;
+            const finishReason = response.choices[0].finish_reason;
+            const isToolCalls = finishReason === 'tool_calls';
+
+            if (!isToolCalls || !message.tool_calls) {
+                throw new Error('No tool calls in response');
+            }
+
+            const toolCall = message.tool_calls[0];
+            return JSON.parse(toolCall.function.arguments);
         };
 
-        const response = await this.llm.chat.completions.create(baseConfig);
-        const message = response.choices[0].message;
-        const finishReason = response.choices[0].finish_reason;
-        const isToolCalls = finishReason === 'tool_calls';
-
-        if (!isToolCalls || !message.tool_calls) {
-            throw new Error('No tool calls in response');
+        try {
+            const result = await retry(llmCall, 3, 1000);
+            return result as T;
+        } catch (error) {
+            console.error("LLM call failed after multiple retries:", error);
+            throw error;
         }
-
-        const toolCall = message.tool_calls[0];
-        return JSON.parse(toolCall.function.arguments);
     }
 
     private prepareRequest(task: GraphTask, data: any): { prompt: string; functionSchema: z.ZodType<any> } {
         switch (task) {
             case GraphTask.REFINE_COMMUNITIES:
                 return {
-                    prompt: this.buildEntityExtractionPrompt(`Refine the following graph communities:\n${JSON.stringify(data)}`),
-                    functionSchema: z.object({ name: z.string(), type: z.string(), summary: z.string() })
+                    prompt: `Refine the following graph community (ID: ${data.community_id}) with members: ${JSON.stringify(data.nodes)}`,
+                    functionSchema: z.object({
+                        community_id: z.string(),
+                        updated_members: z.array(z.string()),
+                        reason: z.string().optional()
+                    })
                 };
             
             case GraphTask.LABEL_COMMUNITY:
@@ -266,7 +282,7 @@ ${input.text}`;
     }
 
     private buildTemporalExtractionPrompt(input: { text: string, context: string, referenceTimestamp: string }): string {
-        return `Given the text, extract entities that are explicitly or implicitly mentioned:
+        return `Given the text, extract entities and relationships that are explicitly or implicitly mentioned:
 
 Guidelines:
 1. ALWAYS extract the speaker/actor as the first node
@@ -283,13 +299,13 @@ Guidelines:
    - Actions or verbs
    - Temporal information (dates, times)
    - Attributes or properties
-   - Relationships between entities
 
 For relationships between entities:
 1. Only connect DISTINCT entities
 2. Use generic, descriptive ALL_CAPS types (HAS, USES, NEEDS, PART_OF, etc.)
-3. Include detailed descriptions with context
+3. Include detailed descriptions with context, explaining the relationship
 4. Note if relationships are temporary based on the reference timestamp (${input.referenceTimestamp})
+5. Ensure each relationship has a clear source and target entity.
 
 Previous Context (DO NOT extract from this):
 ${input.context}
@@ -559,6 +575,8 @@ Result: "In yesterday's team meeting, we discussed Q4 goals and project timeline
                 return 'expandQuery';
             case GraphTask.EVALUATE_SEARCH:
                 return 'evaluateSearch';
+            case GraphTask.REFINE_COMMUNITIES:
+                return 'refineCommunities';
             default:
                 throw new Error(`Unknown task: ${task}`);
         }
