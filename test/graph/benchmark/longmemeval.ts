@@ -46,22 +46,34 @@ interface LongMemEvalPrediction {
 }
 
 interface Entity {
+    id: string;
     name: string;
     category: string;
-    confidence: number;
+    confidence?: number;
+    type: 'PERSON' | 'OBJECT' | 'CONCEPT';
+    summary: string;
 }
 
 interface Relationship {
+    id: string;
     source: string;
     target: string;
     type: string;
     description: string;
-    confidence: number;
+    confidence?: number;
+    isTemporary?: boolean;
 }
 
 interface EntityExtractionResult {
     entities: Entity[];
     relationships: Relationship[];
+}
+
+interface Turn {
+    role: string;
+    content: string;
+    turn_id: string;
+    date?: string;
 }
 
 export class LongMemEvalRunner {
@@ -73,6 +85,16 @@ export class LongMemEvalRunner {
     private llmProcessor: any; 
     private debug: boolean;
     private contextSize: number;
+    private batchSize: number;
+    private stats: {
+        batchesProcessed: number;
+        entityExtractionCalls: number;
+        communityRefinementCalls: number;
+        entityExtractionTime: number;
+        communityRefinementTime: number;
+        totalEntitiesExtracted: number;
+        totalRelationshipsExtracted: number;
+    };
 
     constructor(
         datasetPath: string, 
@@ -83,10 +105,20 @@ export class LongMemEvalRunner {
         model: string = 'gpt-4',
         temperature: number = 0,
         maxTokens: number = 500,
-        contextSize: number = 4  // Default to 4 messages (2 complete turns) as per Zep paper
+        contextSize: number = 4  // Default to 4 messages (2 complete turns) for context as per Zep paper
     ) {
         this.debug = debug;
-        this.contextSize = contextSize;
+        this.contextSize = contextSize;  // How many previous messages to use as context
+        this.batchSize = 4;   // Process 4 turns at a time for efficiency
+        this.stats = {
+            batchesProcessed: 0,
+            entityExtractionCalls: 0,
+            communityRefinementCalls: 0,
+            entityExtractionTime: 0,
+            communityRefinementTime: 0,
+            totalEntitiesExtracted: 0,
+            totalRelationshipsExtracted: 0
+        };
         this.dataset = this.loadDataset(datasetPath);
         this.predictionsPath = predictionsPath;
 
@@ -238,7 +270,7 @@ export class LongMemEvalRunner {
         };
     }
 
-    private createEpisodeNode(turn: { role: string; content: string; turn_id: string; date?: string }): IGraphNode<EpisodeContent> {
+    private createEpisodeNode(turn: Turn): IGraphNode<EpisodeContent> {
         // Parse date string into Date object if provided
         let timestamp: Date;
         if (turn.date) {
@@ -274,10 +306,13 @@ export class LongMemEvalRunner {
     }
 
     private async processTurnBatch(
-        turns: { role: string; content: string; turn_id: string }[],
+        turns: Turn[],
         processor: any,
-        previousTurns: { role: string; content: string; turn_id: string }[]
+        previousTurns: Turn[]
     ): Promise<{ nodes: IGraphNode<any>[]; edges: IGraphEdge<any>[] }> {
+        this.stats.batchesProcessed++;
+        const startTime = Date.now();
+        
         const batchNodes: IGraphNode<any>[] = [];
         const batchEdges: IGraphEdge<any>[] = [];
 
@@ -285,6 +320,9 @@ export class LongMemEvalRunner {
         const contextTurns = [...previousTurns.slice(-this.contextSize), ...turns];
         const context = contextTurns.map(t => `${t.role}: ${t.content}`).join('\n');
         const currentContent = turns.map(t => `${t.role}: ${t.content}`).join('\n');
+
+        // Get timestamp for this batch
+        const batchTimestamp = new Date(turns[0]?.date || new Date().toISOString());
 
         if (this.debug) {
             this.log('\nProcessing batch of', turns.length, 'turns');
@@ -301,33 +339,18 @@ export class LongMemEvalRunner {
         }
 
         try {
-            const startTime = Date.now();
-
-            if (this.debug) {
-                const { prompt, functionSchema } = processor.prepareRequest(
-                    GraphTask.EXTRACT_TEMPORAL,
-                    {
-                        text: currentContent,
-                        context,  // Pass last N messages as context
-                        referenceTimestamp: new Date().toISOString()
-                    }
-                );
-                this.log('\n=== Entity Extraction Prompt ===');
-                this.log(prompt);
-                this.log('\n=== Function Schema ===');
-                this.log(JSON.stringify(functionSchema.shape, null, 2));
-                this.log('Starting LLM call at:', new Date().toISOString());
-            }
-
-            // Entity extraction for current content with context
+            // Entity extraction with context
+            const extractionStartTime = Date.now();
             const entityResult = await this.graphManager.processWithLLM<EntityExtractionResult>(
                 GraphTask.EXTRACT_TEMPORAL,
                 {
                     text: currentContent,
-                    context,  // Pass last N messages as context
-                    referenceTimestamp: new Date().toISOString()
+                    context,
+                    referenceTimestamp: batchTimestamp.toISOString()
                 }
             );
+            this.stats.entityExtractionCalls++;
+            this.stats.entityExtractionTime += Date.now() - extractionStartTime;
 
             if (this.debug) {
                 const duration = Date.now() - startTime;
@@ -342,27 +365,40 @@ export class LongMemEvalRunner {
                 return { nodes: batchNodes, edges: batchEdges };
             }
 
-            // Add entity nodes
-            const entityNodes = entityResult.entities.map((entity: Entity) => ({
+            this.stats.totalEntitiesExtracted += entityResult.entities.length;
+            this.stats.totalRelationshipsExtracted += entityResult.relationships?.length || 0;
+
+            // Create entity nodes with full metadata
+            const entityNodes = entityResult.entities.map(entity => ({
                 id: crypto.randomUUID(),
                 type: 'entity' as const,
                 content: entity.name,
                 metadata: new Map(Object.entries({
                     type: 'entity',
+                    entityType: entity.type,
                     category: entity.category,
-                    confidence: entity.confidence,
-                    firstMention: turns[0].turn_id  // Track first mention
+                    summary: entity.summary,
+                    confidence: entity.confidence || 0.8,
+                    firstMention: turns[0].turn_id,
+                    firstMentionDate: batchTimestamp.toISOString()
                 })),
-                createdAt: new Date()
+                createdAt: batchTimestamp,
+                validAt: batchTimestamp
             } as IGraphNode<string>));
 
             batchNodes.push(...entityNodes);
 
-            // Add relationship edges
+            // Create relationship edges with temporal awareness
             if (entityResult.relationships && Array.isArray(entityResult.relationships)) {
                 for (const rel of entityResult.relationships) {
-                    const sourceNode = entityNodes.find(n => n.content === rel.source);
-                    const targetNode = entityNodes.find(n => n.content === rel.target);
+                    const sourceNode = entityNodes.find(n => 
+                        n.content === rel.source || 
+                        n.metadata.get('aliases')?.includes(rel.source)
+                    );
+                    const targetNode = entityNodes.find(n => 
+                        n.content === rel.target ||
+                        n.metadata.get('aliases')?.includes(rel.target)
+                    );
                     
                     if (sourceNode && targetNode) {
                         const edge = {
@@ -373,13 +409,53 @@ export class LongMemEvalRunner {
                             content: rel.description,
                             metadata: new Map(Object.entries({
                                 type: 'relationship',
-                                confidence: rel.confidence,
-                                firstMention: turns[0].turn_id  // Track first mention
-                            }))
+                                confidence: rel.confidence || 0.8,
+                                isTemporary: rel.isTemporary || false,
+                                firstMention: turns[0].turn_id,
+                                firstMentionDate: batchTimestamp.toISOString()
+                            })),
+                            createdAt: batchTimestamp,
+                            validAt: batchTimestamp
                         } as IGraphEdge<string>;
 
                         batchEdges.push(edge);
+
+                        // For permanent relationships, create inverse relationships
+                        if (!rel.isTemporary && rel.type === 'COMPATIBLE_WITH') {
+                            const inverseEdge = {
+                                ...edge,
+                                id: crypto.randomUUID(),
+                                sourceId: targetNode.id,
+                                targetId: sourceNode.id
+                            };
+                            batchEdges.push(inverseEdge);
+                        }
                     }
+                }
+            }
+
+            // Run community detection after processing entities
+            if (entityNodes.length > 0 || batchEdges.length > 0) {
+                try {
+                    const communityStartTime = Date.now();
+                    const allNodes = [...batchNodes, ...entityNodes];
+                    const communityResult = await this.graphManager.processWithLLM(
+                        GraphTask.REFINE_COMMUNITIES,
+                        {
+                            nodes: allNodes,
+                            edges: batchEdges,
+                            timestamp: batchTimestamp.toISOString()
+                        }
+                    );
+                    this.stats.communityRefinementCalls++;
+                    this.stats.communityRefinementTime += Date.now() - communityStartTime;
+
+                    if (this.debug && communityResult) {
+                        this.log('\n=== Community Detection Result ===');
+                        this.log(JSON.stringify(communityResult, null, 2));
+                    }
+                } catch (error) {
+                    console.error('Error in community refinement:', error);
                 }
             }
 
@@ -388,6 +464,25 @@ export class LongMemEvalRunner {
         }
 
         return { nodes: batchNodes, edges: batchEdges };
+    }
+
+    private logProcessingStats() {
+        console.log('\nProcessing Statistics:');
+        console.log('====================');
+        console.log(`Total Batches Processed: ${this.stats.batchesProcessed}`);
+        console.log('\nLLM Calls:');
+        console.log(`- Entity Extraction: ${this.stats.entityExtractionCalls} calls`);
+        console.log(`- Community Refinement: ${this.stats.communityRefinementCalls} calls`);
+        console.log(`- Total LLM Calls: ${this.stats.entityExtractionCalls + this.stats.communityRefinementCalls} calls`);
+        console.log('\nPerformance:');
+        console.log(`- Entity Extraction Time: ${(this.stats.entityExtractionTime / 1000).toFixed(2)}s`);
+        console.log(`- Community Refinement Time: ${(this.stats.communityRefinementTime / 1000).toFixed(2)}s`);
+        console.log(`- Average Time per Entity Extraction: ${(this.stats.entityExtractionTime / this.stats.entityExtractionCalls / 1000).toFixed(2)}s`);
+        console.log('\nExtraction Results:');
+        console.log(`- Total Entities Extracted: ${this.stats.totalEntitiesExtracted}`);
+        console.log(`- Total Relationships Extracted: ${this.stats.totalRelationshipsExtracted}`);
+        console.log(`- Avg Entities per Batch: ${(this.stats.totalEntitiesExtracted / this.stats.batchesProcessed).toFixed(2)}`);
+        console.log(`- Avg Relationships per Batch: ${(this.stats.totalRelationshipsExtracted / this.stats.batchesProcessed).toFixed(2)}`);
     }
 
     async generatePrediction(instance: LongMemEvalInstance): Promise<LongMemEvalPrediction> {
@@ -421,9 +516,11 @@ export class LongMemEvalRunner {
         for (let i = 0; i < evidenceTurns.length; i++) {
             currentBatch.push(evidenceTurns[i]);
 
-            // Process batch if we have a complete turn (user + assistant) or at the end
-            if (currentBatch.length === 2 || i === evidenceTurns.length - 1) {
-                const { nodes, edges } = await this.processTurnBatch(currentBatch, processor, previousTurns);
+            // Process batch if we have batchSize turns (4 turns) or at the end
+            if (currentBatch.length === this.batchSize || i === evidenceTurns.length - 1) {
+                // Use last 4 messages from previousTurns as context
+                const contextTurns = previousTurns.slice(-this.contextSize);
+                const { nodes, edges } = await this.processTurnBatch(currentBatch, processor, contextTurns);
                 
                 allNodes.push(...nodes);
                 allEdges.push(...edges);
@@ -439,7 +536,7 @@ export class LongMemEvalRunner {
                             {
                                 nodes: allNodes,
                                 edges: allEdges,
-                                timestamp: new Date()
+                                timestamp: new Date().toISOString()
                             }
                         );
                     } catch (error) {
@@ -634,6 +731,8 @@ export class LongMemEvalRunner {
             
             await new Promise(resolve => setTimeout(resolve, 100));
         }
+        
+        this.logProcessingStats();
         
         console.log('\nProcessing Complete:');
         console.log(`Processed Instances: ${instances.length}`);
