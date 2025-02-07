@@ -36,8 +36,8 @@ export class LLMReranker implements IReranker {
 
         // Convert to RerankResult format
         return results
-            .sort((a, b) => b.score - a.score)
-            .map(result => ({
+            .sort((a: { score: number }, b: { score: number }) => b.score - a.score)
+            .map((result: { nodeId: string; score: number; explanation: string }) => ({
                 id: result.nodeId,
                 score: result.score,
                 explanation: result.explanation

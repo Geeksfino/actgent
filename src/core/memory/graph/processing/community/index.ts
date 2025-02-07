@@ -254,25 +254,27 @@ export class CommunityDetector {
     /**
      * Generate or update community summary using map-reduce
      */
-    private async updateCommunitySummary(
+    async updateCommunitySummary(
         communityId: string,
         nodes: IGraphNode[]
     ): Promise<string> {
-        // 1. Map: Break nodes into chunks
-        const chunks = this.chunkNodes(nodes, 5); // 5 nodes per chunk
+        // 1. Split nodes into chunks for parallel processing
+        const chunks = this.chunkNodes(nodes, 10);
 
-        // 2. First reduce: Summarize chunks
+        // 2. Map: Process each chunk in parallel
         const chunkSummaries = await Promise.all(
-            chunks.map(chunk => this.llm.process<{ summary: string }>(
-                GraphTask.SUMMARIZE_CHUNK,
-                { nodes: chunk }
-            ))
+            chunks.map(async (chunk) => {
+                return this.llm.process<{ summary: string }>(
+                    GraphTask.SUMMARIZE_NODE,
+                    { nodes: chunk }
+                );
+            })
         );
 
         // 3. Final reduce: Combine summaries
         const result = await this.llm.process<{ summary: string }>(
             GraphTask.COMBINE_SUMMARIES,
-            { summaries: chunkSummaries.map(s => s.summary) }
+            { summaries: chunkSummaries.map((s: { summary: string }) => s.summary) }
         );
 
         return result.summary;

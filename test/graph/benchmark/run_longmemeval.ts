@@ -100,6 +100,21 @@ const graphConfig: GraphConfig = {
 
 async function main() {
     const debug = options.debug;
+    let turns = 2;  // Default to 2 turns (4 messages)
+
+    // If instance is provided as a JSON object, extract the turns parameter
+    if (options.instance) {
+        try {
+            const instanceConfig = JSON.parse(options.instance);
+            if (instanceConfig.turns) {
+                turns = instanceConfig.turns;
+            }
+        } catch (e) {
+            // If parsing fails, use default value
+            console.log('Failed to parse instance JSON, using default turns value:', e);
+        }
+    }
+
     const runner = new LongMemEvalRunner(
         expandPath(options.dataset),
         expandPath(options.predictions),
@@ -108,7 +123,9 @@ async function main() {
         options.baseUrl,
         options.model,
         parseFloat(options.temperature || '0'),
-        parseInt(options.maxTokens || '500')
+        parseInt(options.maxTokens || '500'),
+        4,  // Default context size
+        turns
     );
     
     try {

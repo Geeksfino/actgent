@@ -1,4 +1,4 @@
-import { GraphManager } from '../../../src/core/memory/graph/GraphManager';
+import { GraphManager, SearchOptions, SearchResult } from '../../../src/core/memory/graph/GraphManager';
 import { GraphConfig, GraphTask } from '../../../src/core/memory/graph/types';
 import { GraphFilter } from '../../../src/core/memory/graph/data/types';
 import { LLMConfig } from '../../../src/core/memory/graph/types';
@@ -45,30 +45,6 @@ interface LongMemEvalPrediction {
     hypothesis: string;
 }
 
-interface Entity {
-    id: string;
-    name: string;
-    category: string;
-    confidence?: number;
-    type: 'PERSON' | 'OBJECT' | 'CONCEPT';
-    summary: string;
-}
-
-interface Relationship {
-    id: string;
-    source: string;
-    target: string;
-    type: string;
-    description: string;
-    confidence?: number;
-    isTemporary?: boolean;
-}
-
-interface EntityExtractionResult {
-    entities: Entity[];
-    relationships: Relationship[];
-}
-
 interface Turn {
     role: string;
     content: string;
@@ -82,7 +58,6 @@ export class LongMemEvalRunner {
     private openai: OpenAI;
     private dataset: LongMemEvalInstance[];
     private predictionsPath: string;
-    private llmProcessor: any; 
     private debug: boolean;
     private contextSize: number;
     private batchSize: number;
@@ -105,11 +80,12 @@ export class LongMemEvalRunner {
         model: string = 'gpt-4',
         temperature: number = 0,
         maxTokens: number = 500,
-        contextSize: number = 4  // Default to 4 messages (2 complete turns) for context as per Zep paper
+        contextSize: number = 4,  // Default to 4 messages (2 complete turns) for context as per Zep paper
+        turns: number = 2  // Default to process 2 turns (4 messages) at a time
     ) {
         this.debug = debug;
-        this.contextSize = contextSize;  // How many previous messages to use as context
-        this.batchSize = 4;   // Process 4 turns at a time for efficiency
+        this.contextSize = 2;  // How many previous messages to use as context
+        this.batchSize = turns * 2;   // Each turn consists of 2 messages (user + assistant)
         this.stats = {
             batchesProcessed: 0,
             entityExtractionCalls: 0,
@@ -178,266 +154,84 @@ export class LongMemEvalRunner {
     }
 
     private async getLayerStats() {
-        const episodeResult = await this.graphManager.query({ metadata: { type: 'episode' } });
-        const entityResult = await this.graphManager.query({ metadata: { type: 'entity' } });
-        const communityResult = await this.graphManager.query({ metadata: { type: 'community' } });
+        const result = await this.graphManager.search('', {
+            filters: { nodeTypes: ['episode', 'entity', 'community'] }
+        });
 
-        const episodeNodes = episodeResult.nodes;
-        const entityNodes = entityResult.nodes;
-        const communityNodes = communityResult.nodes;
-
-        const entityEdges = entityResult.edges;
-
-        const graphStructure = {
-            episodes: episodeNodes.map(n => ({
-                id: n.id,
-                type: n.type,
-                content: {
-                    body: (n.content as EpisodeContent).body,
-                    source: (n.content as EpisodeContent).source,
-                    sourceDescription: (n.content as EpisodeContent).sourceDescription,
-                    timestamp: (n.content as EpisodeContent).timestamp.toISOString()  
-                },
-                metadata: {
-                    role: n.metadata.get('role'),
-                    type: n.metadata.get('type'),
-                    date: n.metadata.get('date'),
-                    turn_id: n.metadata.get('turn_id'),
-                    source: n.metadata.get('source')
-                },
-                createdAt: n.createdAt?.toISOString(),
-                validAt: n.validAt?.toISOString()
-            })),
-            entities: entityNodes.map(n => ({
-                id: n.id,
-                content: n.content,
-                category: n.metadata.get('category'),
-                confidence: n.metadata.get('confidence'),
-                validAt: n.validAt?.toISOString()
-            })),
-            relationships: entityEdges.map((e: IGraphEdge) => ({
-                source: e.sourceId,
-                target: e.targetId,
-                type: e.metadata.get('type'),
-                description: e.content,
-                confidence: e.metadata.get('confidence')
-            })),
-            communities: communityNodes.map(n => ({
-                id: n.id,
-                size: n.metadata.get('memberCount'),
-                lastUpdate: n.metadata.get('lastUpdateTime'),
-                members: n.metadata.get('members')
-            }))
+        const stats = {
+            episodes: 0,
+            entities: 0,
+            communities: 0
         };
 
-        if (this.debug) {
-            this.log('\nDetailed Graph Structure:', JSON.stringify(graphStructure, null, 2));
+        for (const { node } of result) {
+            const type = node.type;
+            if (type === 'episode') stats.episodes++;
+            else if (type === 'entity') stats.entities++;
+            else if (type === 'community') stats.communities++;
         }
 
-        return {
-            episodes: episodeNodes.length,
-            entities: entityNodes.length,
-            communities: communityNodes.length,
-            episodeDetails: episodeNodes.map((n: IGraphNode) => ({ 
-                id: n.id, 
-                type: n.type,
-                content: {
-                    body: (n.content as EpisodeContent).body,
-                    source: (n.content as EpisodeContent).source,
-                    sourceDescription: (n.content as EpisodeContent).sourceDescription,
-                    timestamp: (n.content as EpisodeContent).timestamp.toISOString()  
-                },
-                metadata: {
-                    role: n.metadata.get('role'),
-                    type: n.metadata.get('type'),
-                    date: n.metadata.get('date'),
-                    turn_id: n.metadata.get('turn_id'),
-                    source: n.metadata.get('source')
-                },
-                createdAt: n.createdAt?.toISOString(),
-                validAt: n.validAt?.toISOString()
-            })),
-            entityDetails: entityNodes.map((n: IGraphNode) => ({
-                id: n.id,
-                content: n.content,
-                category: n.metadata.get('category')
-            })),
-            communityDetails: communityNodes.map((n: IGraphNode) => ({
-                id: n.id,
-                size: n.metadata.get('memberCount'),
-                lastUpdate: n.metadata.get('lastUpdateTime')
-            }))
-        };
+        return stats;
     }
 
-    private createEpisodeNode(turn: Turn): IGraphNode<EpisodeContent> {
-        // Parse date string into Date object if provided
-        let timestamp: Date;
-        if (turn.date) {
-            const parsedDate = new Date(turn.date.replace(/\([^)]*\)/g, '').trim());
-            timestamp = !isNaN(parsedDate.getTime()) ? parsedDate : new Date();
-        } else {
-            timestamp = new Date();
-        }
-
-        // Create episode content
-        const episodeContent: EpisodeContent = {
-            body: turn.content,
-            source: 'conversation',
-            sourceDescription: `${turn.role} message in camera discussion`,
-            timestamp  // Store as Date object
-        };
-
-        // Create and return episode node
-        return {
-            id: crypto.randomUUID(),
-            type: 'episode',
-            content: episodeContent,
-            metadata: new Map([
-                ['role', turn.role],
-                ['type', 'episode'],
-                ['date', timestamp.toISOString()],  // Store as ISO string in metadata
-                ['turn_id', turn.turn_id],
-                ['source', 'conversation']
-            ]),
-            createdAt: timestamp,
-            validAt: timestamp
-        } as IGraphNode<EpisodeContent>;
-    }
-
+    /**
+     * Process a batch of turns
+     */
     private async processTurnBatch(
-        turns: Turn[],
-        processor: any,
-        previousTurns: Turn[]
-    ): Promise<{ nodes: IGraphNode<any>[]; edges: IGraphEdge<any>[] }> {
+        batch: Turn[],
+        batchTimestamp: Date,
+        sessionId: string
+    ): Promise<void> {
         const batchStartTime = Date.now();
-        console.log(`Starting processTurnBatch for ${turns.length} turns`);
-
         this.stats.batchesProcessed++;
-        const startTime = Date.now();
         
-        const batchNodes: IGraphNode<any>[] = [];
-        const batchEdges: IGraphEdge<any>[] = [];
-
-        // Get last N messages for context (default 4 as per Zep paper)
-        const contextTurns = [...previousTurns.slice(-this.contextSize), ...turns];
-        const context = contextTurns.map(t => `${t.role}: ${t.content}`).join('\n');
-        const currentContent = turns.map(t => `${t.role}: ${t.content}`).join('\n');
-
-        // Get timestamp for this batch
-        const batchTimestamp = new Date(turns[0]?.date || new Date().toISOString());
-
         if (this.debug) {
-            this.log('\nProcessing batch of', turns.length, 'turns');
-            this.log('\n=== Context (Last', this.contextSize, 'messages) ===');
-            this.log(context || '(No previous context)');
+            this.log(`\nProcessing batch of ${batch.length} turns at ${batchTimestamp.toISOString()}`);
             this.log('\n=== Current Content ===');
-            this.log(currentContent);
+            this.log(batch.map(t => `${t.role}: ${t.content}`).join('\n'));
         }
 
-        // Create episode nodes for current turns
-        for (const turn of turns) {
-            const episodeNode = this.createEpisodeNode(turn);
-            batchNodes.push(episodeNode);
-        }
+        const messages = batch.map(turn => ({
+            id: turn.turn_id,
+            body: turn.content,
+            role: turn.role,
+            timestamp: turn.date ? new Date(turn.date) : batchTimestamp,
+            sessionId: sessionId
+        }));
 
-        try {
-            // Entity extraction with context
-            const extractionStartTime = Date.now();
-            console.log("Starting entity extraction");
-            console.time("LLM Entity Extraction");
-            const entityResult = await this.graphManager.processWithLLM<EntityExtractionResult>(
-                GraphTask.EXTRACT_TEMPORAL,
-                {
-                    text: currentContent,
-                    context,
-                    referenceTimestamp: batchTimestamp.toISOString()
-                }
-            );
-            console.timeEnd("LLM Entity Extraction");
-            const extractionEndTime = Date.now();
-            console.log(`Entity extraction completed in ${extractionEndTime - extractionStartTime}ms`);
+        await this.graphManager.ingest(messages);
 
-            this.stats.entityExtractionCalls++;
-            this.stats.entityExtractionTime += Date.now() - extractionStartTime;
-
-            if (!entityResult || !entityResult.entities) {
-                console.warn('No entities extracted in this turn.');
-                return { nodes: batchNodes, edges: batchEdges };
-            }
-
-            this.stats.totalEntitiesExtracted += entityResult.entities.length;
-
-            // Process relationships extracted by the LLM
-            if (entityResult.relationships && Array.isArray(entityResult.relationships)) {
-                for (const rel of entityResult.relationships) {
-                    const sourceNode = batchNodes.find(n => n.id === rel.source);
-                    const targetNode = batchNodes.find(n => n.id === rel.target);
-
-                    if (!sourceNode || !targetNode) {
-                        console.warn(`Skipping relationship ${rel.type} from ${rel.source} to ${rel.target} due to missing entities`);
-                        continue;
-                    }
-
-                    const edgeId = `rel_${rel.source}_${rel.target}`;
-                    const relationshipEdge: IGraphEdge<any> = {
-                        id: edgeId,
-                        sourceId: rel.source,
-                        targetId: rel.target,
-                        type: rel.type,
-                        content: rel.description || `Relationship of type ${rel.type} between ${sourceNode.content} and ${targetNode.content}`,
-                        metadata: new Map<string, any>([
-                            ['confidence', rel.confidence || 0.8],
-                            ['isTemporary', rel.isTemporary || false]
-                        ]),
-                        createdAt: batchTimestamp,
-                        validAt: batchTimestamp
-                    };
-
-                    batchEdges.push(relationshipEdge);
-                    this.stats.totalRelationshipsExtracted++;
-                }
-            }
-
-            if (this.debug) {
-                this.log('Extracted Entities:', entityResult.entities);
-            }
-
-            // Run community detection after processing entities
-            if (batchNodes.length > 0 || batchEdges.length > 0) {
-                try {
-                    const communityRefinementStartTime = Date.now();
-                    console.log("Starting community refinement");
-                    await this.graphManager.processWithLLM(
-                        GraphTask.REFINE_COMMUNITIES,
-                        {
-                            nodes: batchNodes.filter(node => node.type === 'entity'),
-                            metadata: {
-                                type: 'community',
-                                lastUpdateTime: batchTimestamp.toISOString()
-                            }
-                        }
-                    );
-                    const communityRefinementEndTime = Date.now();
-                    console.log(`Community refinement completed in ${communityRefinementEndTime - communityRefinementStartTime}ms`);
-
-                    this.stats.communityRefinementCalls++;
-                    this.stats.communityRefinementTime += Date.now() - communityRefinementStartTime;
-                } catch (communityError: any) {
-                    console.error('Error in community refinement:', communityError);
-                }
-            }
-        } catch (error: any) {
-            console.error('Error in entity extraction:', error);
+        // Show all episode nodes after ingestion
+        if (this.debug) {
+            const { nodes: episodeNodes } = await this.graphManager.getSnapshot({ nodeTypes: ['episode'], sessionId: sessionId });
+            this.log('\n=== All Episode Nodes ===');
+            episodeNodes.forEach((node: IGraphNode) => {
+                this.log(`Episode Node ${node.id}:`, node);
+            });
         }
 
         const batchEndTime = Date.now();
-        console.log(`Finished processTurnBatch for ${turns.length} turns in ${batchEndTime - batchStartTime}ms`);
-        console.log(`Total time spent in processTurnBatch: ${batchEndTime - startTime}ms`);
-
-        return { nodes: batchNodes, edges: batchEdges };
+        if (this.debug) {
+            this.log(`\nBatch processing complete in ${batchEndTime - batchStartTime}ms`);
+        }
     }
 
+    /**
+     * Search for relevant turns
+     */
+    async searchTurns(query: string, options?: SearchOptions): Promise<SearchResult[]> {
+        return this.graphManager.search(query, {
+            ...options,
+            filters: {
+                ...options?.filters,
+                nodeTypes: ['episode']
+            }
+        });
+    }
+
+    /**
+     * Log processing statistics
+     */
     private logProcessingStats() {
         console.log('\nProcessing Statistics:');
         console.log('====================');
@@ -457,353 +251,220 @@ export class LongMemEvalRunner {
         console.log(`- Avg Relationships per Batch: ${(this.stats.totalRelationshipsExtracted / this.stats.batchesProcessed).toFixed(2)}`);
     }
 
-    async generatePrediction(instance: LongMemEvalInstance): Promise<LongMemEvalPrediction> {
-        const allNodes: IGraphNode<any>[] = [];
-        const allEdges: IGraphEdge<any>[] = [];
-        const processor = (this.graphManager as any).llmProcessor as any;
+    public async runSpecific(instance: string): Promise<void> {
+        const jsonInstance = JSON.parse(instance);
+        const question_id = jsonInstance.question_id;
+        const sessions = jsonInstance.sessions;
+        const turns = jsonInstance.turns;
+        const target = this.dataset.find(i => i.question_id === question_id);
+        if (!target) {
+            throw new Error(`Instance with question_id ${question_id} not found`);
+        }
+        
+        // Extract session range from the sessions string
+        const [startSession, endSession] = sessions.split('-').map(Number);
 
-        // Process each session separately
-        for (let sessionIndex = 0; sessionIndex < instance.haystack_sessions.length; sessionIndex++) {
-            const session = instance.haystack_sessions[sessionIndex];
-            const sessionDate = instance.haystack_dates[sessionIndex] || instance.question_date;
-            
-            // Map turns in this session
-            const sessionTurns = session.map((turn, index) => ({
-                turn_id: `turn_${sessionIndex}_${index}`,
-                content: turn.content,
-                role: turn.role,
-                date: sessionDate
-            }));
-
-            this.log(`\nProcessing Session ${sessionIndex}:`, sessionTurns.length, 'turns');
-            if (this.debug) {
-                for (const turn of sessionTurns) {
-                    const truncatedContent = turn.content.length > 50 ? 
-                        turn.content.substring(0, 50) + '...' : 
-                        turn.content;
-                    this.log(`  [${turn.turn_id}] Date: ${turn.date} | Role: ${turn.role} | Content: ${truncatedContent}`);
-                }
+        // Iterate through the specified session range
+        for (let sessionIndex = startSession; sessionIndex <= endSession; sessionIndex++) {
+            const session = target.haystack_sessions[sessionIndex];
+            if (!session) {
+                this.log(`Session ${sessionIndex} not found`);
+                continue;
             }
 
-            // Process evidence turns within this session
-            let currentBatch: typeof sessionTurns = [];
-            let previousTurns: typeof sessionTurns = [];
+            this.log(`Processing Session ${sessionIndex}: ${session.length} turns`);
 
-            for (let i = 0; i < sessionTurns.length; i++) {
-                currentBatch.push(sessionTurns[i]);
+            let turnIndex = 0;
+            let currentBatch: Turn[] = [];
+            let batchTimestamp: Date = new Date(target.question_date);
 
-                // Process batch if we have batchSize turns or at the end of the session
-                if (currentBatch.length === this.batchSize || i === sessionTurns.length - 1) {
-                    // Use last N messages from previousTurns as context
-                    const contextTurns = previousTurns.slice(-this.contextSize);
-                    const { nodes, edges } = await this.processTurnBatch(currentBatch, processor, contextTurns);
-                    
-                    allNodes.push(...nodes);
-                    allEdges.push(...edges);
+            for (const turn of session) {
+                const turn_id = `turn_${sessionIndex}_${turnIndex}`;  // Create a unique turn_id
+                const turnDate = target.haystack_dates[sessionIndex] || target.question_date;  // Use session date or question date
 
-                    // Update previous turns
-                    previousTurns.push(...currentBatch);
-                    
-                    // Run community detection after processing complete turns
-                    if (nodes.length > 0 || edges.length > 0) {
-                        try {
-                            await this.graphManager.processWithLLM(
-                                GraphTask.REFINE_COMMUNITIES,
-                                {
-                                    nodes: allNodes,
-                                    edges: allEdges,
-                                    timestamp: new Date().toISOString()
-                                }
-                            );
-                        } catch (error) {
-                            console.error('Error in community refinement:', error);
-                        }
+                currentBatch.push({
+                    role: turn.role,
+                    content: turn.content,
+                    turn_id: turn_id,
+                    date: turnDate
+                });
+
+                turnIndex++;
+
+                // Process batch when it reaches the batch size or the end of the session
+                if (currentBatch.length >= this.batchSize || turnIndex === session.length) {
+                    if (currentBatch.length > 0) {
+                        await this.processTurnBatch(
+                            currentBatch,
+                            batchTimestamp,
+                            `session_${sessionIndex}`
+                        );
+                        this.log(`Processed batch of ${currentBatch.length} turns`);
                     }
-
-                    // Reset batch
-                    currentBatch = [];
+                    currentBatch = [];  // Reset batch after processing
                 }
             }
-
-            // Clear previous turns before next session
-            previousTurns = [];
         }
-
-        // Add all nodes and edges to graph
-        for (const node of allNodes) {
-            await this.graphManager.addNode(node);
-        }
-        for (const edge of allEdges) {
-            await this.graphManager.addEdge(edge);
-        }
-
-        // Print final layer stats before search
-        const finalStats = await this.getLayerStats();
-        this.log('\nFinal graph state before search:', {
-            episodes: finalStats.episodes,
-            entities: finalStats.entities,
-            communities: finalStats.communities,
-            episodeDetails: finalStats.episodeDetails,
-            entityDetails: finalStats.entityDetails,
-            communityDetails: finalStats.communityDetails
-        });
 
         // Search across all layers with temporal awareness
-        const questionDate = new Date(instance.question_date);
-        const searchResults = await this.graphManager.search(instance.question, {
-            temporal: {
-                validAt: questionDate,
-                asOf: questionDate
-            },
-            metadata: {
-                type: ['episode', 'entity', 'community']
-            },
-            limit: 50
-        });
-
-        // Score results by layer type
-        const layerWeights: Record<'episode' | 'entity' | 'community', number> = {
-            episode: 1.0,
-            entity: 0.8,
-            community: 0.6
-        };
-
-        type LayerType = 'episode' | 'entity' | 'community';
-        
-        function isLayerType(type: string): type is LayerType {
-            return ['episode', 'entity', 'community'].includes(type);
-        }
-
-        interface ScoredResult extends IGraphNode {
-            searchScore: number;
-        }
-
-        const scoredResults = searchResults.map(result => {
-            const rawType = result.metadata.get('type') || 'episode';
-            const nodeType = isLayerType(rawType) ? rawType : 'episode';
-            const layerWeight = layerWeights[nodeType];
-            const searchScore = parseFloat(result.metadata.get('search_score') || '0');
-            return {
-                ...result,
-                searchScore: searchScore * layerWeight
-            } as ScoredResult;
-        });
-
-        if (this.debug) {
-            console.log('\nSearch results:');
-            for (const result of scoredResults) {
-                const score = result.searchScore.toFixed(3);
-                const date = result.metadata.get('date');
-                const layer = result.metadata.get('type');
-                console.log(`  Layer: ${layer} | Score: ${score} | Date: ${date} | Content: ${result.content}`);
+        const questionDate = new Date(target.question_date);
+        const searchResults = await this.searchTurns(target.question, {
+            timestamp: questionDate,
+            filters: {
+                timeRange: [new Date(0), questionDate]
             }
-        }
+        });
 
+        // Format results for evaluation
         let answer = 'Unable to determine from the available context';
-        if (scoredResults.length > 0) {
-            const relevantResults = scoredResults.filter(result => result.searchScore > 0.3);
+        
+        if (searchResults.length > 0) {
+            // Sort by score and confidence
+            const relevantResults = searchResults
+                .filter(r => r.score > 0.3)
+                .sort((a, b) => b.score * b.confidence - a.score * a.confidence);
 
             if (relevantResults.length > 0) {
-                if (relevantResults.length === 1) {
-                    answer = relevantResults[0].content;
-                } else {
-                    const sortedResults = relevantResults.sort((a, b) => {
-                        const layerPriority: Record<LayerType, number> = {
-                            'episode': 3,
-                            'entity': 2,
-                            'community': 1
-                        };
-                        const aType = a.metadata.get('type') || 'episode';
-                        const bType = b.metadata.get('type') || 'episode';
-                        const aLayer = isLayerType(aType) ? aType : 'episode';
-                        const bLayer = isLayerType(bType) ? bType : 'episode';
-                        return layerPriority[bLayer] - layerPriority[aLayer];
-                    });
-                    
-                    answer = sortedResults.map(r => r.content).join('\n');
-                }
+                const metadata = Object.fromEntries(relevantResults[0].node.metadata);
+                answer = relevantResults[0].node.content as string;
             }
-        } else if (instance.question.toLowerCase().includes('graduation')) {
-            const prediction: LongMemEvalPrediction = {
-                question_id: instance.question_id,
-                hypothesis: "Based on the available conversation history, I cannot determine what degree you graduated with. There is no explicit mention of your graduation or degree in any of the provided conversations."
-            };
-            return prediction;
         }
 
         await this.graphManager.clear();
 
-        return {
-            question_id: instance.question_id,
+        // Write prediction to file
+        const predictions = [{
+            question_id: target.question_id,
             hypothesis: answer
-        };
-    }
+        }];
 
-    public async runSpecific(specifier: string): Promise<void> {
-        let instancesToProcess: LongMemEvalInstance[] = [];
+        fs.writeFileSync(this.predictionsPath, JSON.stringify(predictions, null, 2));
 
-        try {
-            // 1. Handle Number (Instance ID)
-            if (!isNaN(Number(specifier))) {
-                const instanceId = Number(specifier);
-                const instance = this.dataset.find(i => this.dataset.indexOf(i) === instanceId);
-                if (instance) {
-                    instancesToProcess.push(instance);
-                } else {
-                    throw new Error(`Instance with ID ${instanceId} not found.`);
-                }
-            } // 2. Handle Question ID
-            else if (this.dataset.find(i => i.question_id === specifier)) {
-                const instance = this.dataset.find(i => i.question_id === specifier);
-                if (instance) {
-                    instancesToProcess.push(instance);
-                } else {
-                    throw new Error(`Instance with question_id ${specifier} not found.`);
-                }
-            } // 3. Handle Range (e.g., 0-4)
-            else if (specifier.includes('-') && !specifier.startsWith('{')) {
-                const [startStr, endStr] = specifier.split('-');
-                const start = Number(startStr);
-                const end = Number(endStr);
+        // Output results in a format similar to test/graph-eval.txt
+        console.log('Question ID:', target.question_id);
+        console.log('Question:', target.question);
+        console.log('Answer:', target.answer);
+        console.log('Hypothesis:', answer);
+        console.log('Correct:', target.answer === answer);
+        console.log('---');
 
-                if (isNaN(start) || isNaN(end) || start > end) {
-                    throw new Error('Invalid range format. Use start-end, e.g., 0-4.');
-                }
-
-                for (let i = start; i <= end; i++) {
-                    const instance = this.dataset.find(instance => this.dataset.indexOf(instance) === i);
-                    if (instance) {
-                        instancesToProcess.push(instance);
-                    }
-                }
-            } // 4. Handle JSON Object
-            else if (specifier.startsWith('{') && specifier.endsWith('}')) {
-                try {
-                    const spec = JSON.parse(specifier);
-                    const instanceId = spec.id;
-                    const sessionsRange = spec.sessions;
-                    let turns = spec.turns;
-
-                    const instance = this.dataset.find(i => this.dataset.indexOf(i) === instanceId);
-
-                    if (!instance) {
-                        throw new Error(`Instance with ID ${instanceId} not found.`);
-                    }
-
-                    // Process specific sessions within the instance
-                    if (sessionsRange) {
-                        const [startSessionStr, endSessionStr] = sessionsRange.split('-');
-                        const startSession = Number(startSessionStr);
-                        const endSession = Number(endSessionStr);
-
-                        if (isNaN(startSession) || isNaN(endSession) || startSession > endSession) {
-                            throw new Error('Invalid sessions range format. Use start-end, e.g., 2-4.');
-                        }
-
-                        if (startSession < 0 || endSession >= instance.haystack_sessions.length) {
-                            console.warn('Session range exceeds available sessions. Processing all sessions.');
-                            instancesToProcess.push(instance);
-                        } else {
-                            // Create a new instance with only the specified sessions
-                            const newInstance: LongMemEvalInstance = {
-                                ...instance,
-                                haystack_sessions: instance.haystack_sessions.slice(startSession, endSession + 1)
-                            };
-                            instancesToProcess.push(newInstance);
-                        }
-                    } else {
-                        instancesToProcess.push(instance);
-                    }
-
-                    if (turns === undefined) {
-                        turns = 2; // Default value
-                    }
-
-                    // Limit the number of turns to process
-                    instancesToProcess = instancesToProcess.map(instance => ({
-                        ...instance,
-                        haystack_sessions: instance.haystack_sessions.map(session => {
-                            const startIndex = Math.max(0, session.length - turns);
-                            return session.slice(startIndex);
-                        })
-                    }));
-                } catch (error) {
-                    throw new Error(`Invalid JSON format: ${error}`);
-                }
-            } else {
-                throw new Error('Invalid instance specifier format.');
-            }
-
-            if (instancesToProcess.length === 0) {
-                console.warn('No instances to process.');
-                return;
-            }
-
-            this.log(`Processing ${instancesToProcess.length} instances:`);
-            for (const instance of instancesToProcess) {
-                this.log(`  - ${instance.question_id}`);
-            }
-
-            await this.processInstances(instancesToProcess);
-
-        } catch (error: any) {
-            console.error('Error in runSpecific:', error.message);
+        if (this.debug) {
+            // Print graph snapshot
+            const { nodes, edges } = await this.graphManager.getSnapshot({});
+            this.log('\n=== Final Graph Snapshot ===');
+            this.log('\nNodes:');
+            nodes.forEach(node => {
+                this.log(`[${node.type}] ${node.id}:`, {
+                    content: node.content,
+                    metadata: Object.fromEntries(node.metadata),
+                    validAt: node.validAt
+                });
+            });
+            this.log('\nEdges:');
+            edges.forEach(edge => {
+                this.log(`[${edge.type}] ${edge.sourceId} -> ${edge.targetId}:`, {
+                    metadata: Object.fromEntries(edge.metadata),
+                    validAt: edge.validAt
+                });
+            });
         }
     }
 
+    public async generatePrediction(haystack_sessions: LongMemEvalTurn[][]): Promise<LongMemEvalPrediction> {
+        throw new Error("Not implemented");
+    }
+
     public async runAll(): Promise<void> {
-        console.log(`Processing all ${this.dataset.length} instances...`);
         await this.processInstances(this.dataset);
     }
 
     private async processInstances(instances: LongMemEvalInstance[]): Promise<void> {
-        let totalTurns = 0;
-        let totalBatches = 0;
-        let totalLLMCalls = 0;
-        let totalEntitiesExtracted = 0;
+        const predictions: LongMemEvalPrediction[] = [];
 
-        for (const [index, instance] of instances.entries()) {
-            const sessionCount = instance.haystack_sessions.length;
-            const evidenceTurns = instance.haystack_sessions
-                .flat()
-                .filter(turn => turn.has_answer)
-                .length;
-            
-            totalTurns += evidenceTurns;
-            totalBatches += Math.ceil(evidenceTurns / 2);
-            
-            console.log(
-                `[${index + 1}/${instances.length}] ` +
-                `ID: ${instance.question_id} | ` +
-                `Type: ${instance.question_type} | ` +
-                `Sessions: ${sessionCount} (avg: ${(sessionCount / (index + 1)).toFixed(1)}) | ` +
-                `Evidence: ${evidenceTurns} (avg: ${(totalTurns / (index + 1)).toFixed(1)})`
-            );
-            
-            try {
-                await this.graphManager.clear();
-                const prediction = await this.generatePrediction(instance); // Only process 4 turns
-                
-                const line = JSON.stringify(prediction);
-                fs.appendFileSync(this.predictionsPath, line + '\n', { encoding: 'utf-8' });
-                
-                console.log(`  Answer: ${prediction.hypothesis}`);
-            } catch (err: any) {
-                const errorMessage = err instanceof Error ? err.message : String(err);
-                console.error(`  Error: ${errorMessage}`);
-                continue;
+        for (const instance of instances) {
+            const target = instance;
+
+            // Process sessions
+            for (let sessionIndex = 0; sessionIndex < instance.haystack_sessions.length; sessionIndex++) {
+                const session = instance.haystack_sessions[sessionIndex];
+                this.log(`Processing Session ${sessionIndex}: ${session.length} turns`);
+
+                let turnIndex = 0;
+                let currentBatch: Turn[] = [];
+                let batchTimestamp: Date = new Date(target.question_date);
+
+                for (const turn of session) {
+                    const turn_id = `turn_${sessionIndex}_${turnIndex}`;  // Create a unique turn_id
+                    const turnDate = instance.haystack_dates[sessionIndex] || instance.question_date;  // Use session date or question date
+
+                    currentBatch.push({
+                        role: turn.role,
+                        content: turn.content,
+                        turn_id: turn_id,
+                        date: turnDate
+                    });
+
+                    turnIndex++;
+
+                    // Process batch when it reaches the batch size or the end of the session
+                    if (currentBatch.length >= this.batchSize || turnIndex === session.length) {
+                        if (currentBatch.length > 0) {
+                            await this.processTurnBatch(
+                                currentBatch,
+                                batchTimestamp,
+                                `session_${sessionIndex}`
+                            );
+                            this.log(`Processed batch of ${currentBatch.length} turns`);
+                        }
+                        currentBatch = [];  // Reset batch after processing
+                    }
+                }
             }
+
+            // Search across all layers with temporal awareness
+            const questionDate = new Date(target.question_date);
+            const searchResults = await this.searchTurns(target.question, {
+                timestamp: questionDate,
+                filters: {
+                    timeRange: [new Date(0), questionDate]
+                }
+            });
+
+            // Format results for evaluation
+            let answer = 'Unable to determine from the available context';
             
-            await new Promise(resolve => setTimeout(resolve, 100));
+            if (searchResults.length > 0) {
+                // Sort by score and confidence
+                const relevantResults = searchResults
+                    .filter(r => r.score > 0.3)
+                    .sort((a, b) => b.score * b.confidence - a.score * a.confidence);
+
+                if (relevantResults.length > 0) {
+                    const metadata = Object.fromEntries(relevantResults[0].node.metadata);
+                    answer = relevantResults[0].node.content as string;
+                }
+            }
+
+            await this.graphManager.clear();
+
+            // Write prediction to file
+            const predictions = [{
+                question_id: target.question_id,
+                hypothesis: answer
+            }];
+
+            fs.writeFileSync(this.predictionsPath, JSON.stringify(predictions, null, 2));
+
+            // Output results in a format similar to test/graph-eval.txt
+            console.log('Question ID:', target.question_id);
+            console.log('Question:', target.question);
+            console.log('Answer:', target.answer);
+            console.log('Hypothesis:', answer);
+            console.log('Correct:', target.answer === answer);
+            console.log('---');
         }
-        
-        this.logProcessingStats();
-        
-        console.log('\nProcessing Complete:');
-        console.log(`Processed Instances: ${instances.length}`);
-        console.log(`Total Sessions: ${instances.reduce((acc, instance) => acc + instance.haystack_sessions.length, 0)} (avg: ${(instances.reduce((acc, instance) => acc + instance.haystack_sessions.length, 0) / instances.length).toFixed(1)} per instance)`);
-        console.log(`Total Evidence Turns: ${totalTurns} (avg: ${(totalTurns / instances.length).toFixed(1)} per instance)`);
-        console.log(`Results written to: ${this.predictionsPath}`);
-        process.exit(0); // Exit after processing the specified instances
+
+        // Write all predictions to file
+        fs.writeFileSync(this.predictionsPath, JSON.stringify(predictions, null, 2));
     }
 }

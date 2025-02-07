@@ -417,10 +417,10 @@ export class EpisodicMemory extends DeclarativeMemory {
         });
 
         return Promise.all(
-            results.map(async result => {
+            results.map(async (result: SearchResult) => {
                 const node = await this.graphStorage.getNode(result.nodeId);
                 return node ? graphNodeToMemoryUnit(node as EpisodeNode) : null;
             })
-        ).then(units => units.filter((unit): unit is IEpisodicMemoryUnit => unit !== null));
+        ).then(units => units.filter((unit: IMemoryUnit | null): unit is IEpisodicMemoryUnit => unit !== null));
     }
 }

@@ -51,12 +51,41 @@ export class GraphLLMProcessor {
             }
 
             const toolCall = message.tool_calls[0];
+            // Pretty print the raw LLM response
+            console.log('\nRaw LLM Response:');
+            console.log(JSON.stringify(JSON.parse(toolCall.function.arguments), null, 2));
+
             return JSON.parse(toolCall.function.arguments);
         };
 
         try {
-            const result = await retry(llmCall, 3, 1000);
-            return result as T;
+            const rawResponse = await retry(llmCall, 3, 1000);
+
+            // Define a simple schema for entities
+            const EntitySchema = z.object({
+                id: z.number(),
+                name: z.string(),
+                type: z.string(),
+                summary: z.string().optional()
+            });
+
+            // Validate only the entities part
+            if (task === GraphTask.EXTRACT_TEMPORAL) {
+                const entities = rawResponse.entities;
+                try {
+                    EntitySchema.array().parse(entities);
+                } catch (error) {
+                    if (error instanceof z.ZodError) {
+                        console.error("Entity validation failed:", error.errors);
+                        // Handle the validation error
+                    } else {
+                        console.error("Unexpected error during validation:", error);
+                        // Handle other unexpected errors
+                    }
+                }
+            }
+
+            return rawResponse as T;
         } catch (error) {
             console.error("LLM call failed after multiple retries:", error);
             throw error;
@@ -66,8 +95,23 @@ export class GraphLLMProcessor {
     private prepareRequest(task: GraphTask, data: any): { prompt: string; functionSchema: z.ZodType<any> } {
         switch (task) {
             case GraphTask.REFINE_COMMUNITIES:
+                console.log("REFINE_COMMUNITIES data: ", data);
+                const refineCommunitiesPrompt = `Refine the following graph community (ID: ${data.community_id}) with members: ${JSON.stringify(data.nodes)}
+
+                Guidelines:
+                1. Analyze the community members and their connections.
+                2. Identify any inconsistencies or inaccuracies in the community structure.
+                3. Refine the community by adding or removing members as necessary.
+                4. Provide a clear reason for any changes made.
+
+                Required Output Format:
+                JSON object with:
+                - community_id: string
+                - updated_members: array of strings
+                - reason: string (optional)`;
+                console.log("REFINE_COMMUNITIES prompt: ", refineCommunitiesPrompt);
                 return {
-                    prompt: `Refine the following graph community (ID: ${data.community_id}) with members: ${JSON.stringify(data.nodes)}`,
+                    prompt: refineCommunitiesPrompt,
                     functionSchema: z.object({
                         community_id: z.string(),
                         updated_members: z.array(z.string()),
@@ -76,8 +120,11 @@ export class GraphLLMProcessor {
                 };
             
             case GraphTask.LABEL_COMMUNITY:
+                console.log("LABEL_COMMUNITY data: ", data);
+                const labelCommunityPrompt = this.buildPrompt(`Generate a descriptive label for this community of nodes:\n${JSON.stringify(data.nodes)}\nProvide a concise label and confidence score.`);
+                console.log("LABEL_COMMUNITY prompt: ", labelCommunityPrompt);
                 return {
-                    prompt: this.buildPrompt(`Generate a descriptive label for this community of nodes:\n${JSON.stringify(data.nodes)}\nProvide a concise label and confidence score.`),
+                    prompt: labelCommunityPrompt,
                     functionSchema: z.object({
                         label: z.string(),
                         confidence: z.number().min(0).max(1)
@@ -85,26 +132,38 @@ export class GraphLLMProcessor {
                 };
 
             case GraphTask.EVALUATE_PATHS:
+                console.log("EVALUATE_PATHS data: ", data);
+                const evaluatePathsPrompt = this.buildFactExtractionPrompt({ text: `Evaluate paths between nodes:\n${JSON.stringify(data)}`, entities: data.entities });
+                console.log("EVALUATE_PATHS prompt: ", evaluatePathsPrompt);
                 return {
-                    prompt: this.buildFactExtractionPrompt({ text: `Evaluate paths between nodes:\n${JSON.stringify(data)}`, entities: data.entities }),
+                    prompt: evaluatePathsPrompt,
                     functionSchema: z.object({ source_entity: z.string(), target_entity: z.string(), relation_type: z.string(), description: z.string() })
                 };
             
             case GraphTask.RERANK_RESULTS:
+                console.log("RERANK_RESULTS data: ", data);
+                const rerankResultsPrompt = this.buildEntityExtractionPrompt(`Rerank search results for query "${data.query}":\n${JSON.stringify(data.nodes)}`);
+                console.log("RERANK_RESULTS prompt: ", rerankResultsPrompt);
                 return {
-                    prompt: this.buildEntityExtractionPrompt(`Rerank search results for query "${data.query}":\n${JSON.stringify(data.nodes)}`),
+                    prompt: rerankResultsPrompt,
                     functionSchema: z.object({ name: z.string(), type: z.string(), summary: z.string() })
                 };
 
             case GraphTask.PREPARE_FOR_EMBEDDING:
+                console.log("PREPARE_FOR_EMBEDDING data: ", data);
+                const prepareForEmbeddingPrompt = this.buildPrompt(`Prepare text for embedding:\n${JSON.stringify(data)}`);
+                console.log("PREPARE_FOR_EMBEDDING prompt: ", prepareForEmbeddingPrompt);
                 return {
-                    prompt: this.buildPrompt(`Prepare text for embedding:\n${JSON.stringify(data)}`),
+                    prompt: prepareForEmbeddingPrompt,
                     functionSchema: z.array(z.number())
                 };
 
             case GraphTask.DEDUPE_NODE:
+                console.log("DEDUPE_NODE data: ", data);
+                const dedupeNodePrompt = this.buildDedupePrompt({ newNode: data.newNode, existingNodes: data.existingNodes, context: data.context });
+                console.log("DEDUPE_NODE prompt: ", dedupeNodePrompt);
                 return {
-                    prompt: this.buildDedupePrompt({ newNode: data.newNode, existingNodes: data.existingNodes, context: data.context }),
+                    prompt: dedupeNodePrompt,
                     functionSchema: z.object({
                         is_duplicate: z.boolean(),
                         uuid: z.string().nullable(),
@@ -114,38 +173,50 @@ export class GraphLLMProcessor {
                 };
 
             case GraphTask.DEDUPE_EDGE:
+                console.log("DEDUPE_EDGE data: ", data);
+                const dedupeEdgePrompt = this.buildFactExtractionPrompt({ text: data.prompt, entities: data.entities });
+                console.log("DEDUPE_EDGE prompt: ", dedupeEdgePrompt);
                 return {
-                    prompt: this.buildFactExtractionPrompt({ text: data.prompt, entities: data.entities }),
+                    prompt: dedupeEdgePrompt,
                     functionSchema: z.object({ source_entity: z.string(), target_entity: z.string(), relation_type: z.string(), description: z.string() })
                 };
 
             case GraphTask.DEDUPE_BATCH:
+                console.log("DEDUPE_BATCH data: ", data);
+                const dedupeBatchPrompt = this.buildEntityExtractionPrompt(data.prompt);
+                console.log("DEDUPE_BATCH prompt: ", dedupeBatchPrompt);
                 return {
-                    prompt: this.buildEntityExtractionPrompt(data.prompt),
+                    prompt: dedupeBatchPrompt,
                     functionSchema: z.array(z.object({ name: z.string(), type: z.string(), summary: z.string() }))
                 };
 
             case GraphTask.DEDUPE_BATCH_EDGES:
+                console.log("DEDUPE_BATCH_EDGES data: ", data);
+                const dedupeBatchEdgesPrompt = this.buildFactExtractionPrompt({ text: data.prompt, entities: data.entities });
+                console.log("DEDUPE_BATCH_EDGES prompt: ", dedupeBatchEdgesPrompt);
                 return {
-                    prompt: this.buildFactExtractionPrompt({ text: data.prompt, entities: data.entities }),
+                    prompt: dedupeBatchEdgesPrompt,
                     functionSchema: z.array(z.object({ source_entity: z.string(), target_entity: z.string(), relation_type: z.string(), description: z.string() }))
                 };
 
             case GraphTask.EXTRACT_TEMPORAL:
-                console.log("Generated Prompt:", this.buildTemporalExtractionPrompt({ text: data.text, context: data.context, referenceTimestamp: data.referenceTimestamp }));
+                console.log("EXTRACT_TEMPORAL data: ", data);
+                const extractTemporalPrompt = this.buildTemporalExtractionPrompt({ text: data.text, context: data.context, referenceTimestamp: data.referenceTimestamp });
+                console.log("EXTRACT_TEMPORAL prompt: ", extractTemporalPrompt);
                 return {
-                    prompt: this.buildTemporalExtractionPrompt({ text: data.text, context: data.context, referenceTimestamp: data.referenceTimestamp }),
+                    prompt: extractTemporalPrompt,
                     functionSchema: z.object({
                         entities: z.array(z.object({
-                            id: z.string(),
+                            id: z.number(),
                             name: z.string(),
                             type: z.string(),
                             summary: z.string().optional()
                         })),
                         relationships: z.array(z.object({
-                            id: z.string(),
-                            sourceId: z.string(),
-                            targetId: z.string(),
+                            id: z.number(),
+                            sourceId: z.number(),
+                            targetId: z.number(),
+                            type: z.string(),
                             description: z.string(),
                             isTemporary: z.boolean().optional()
                         }))
@@ -153,8 +224,11 @@ export class GraphLLMProcessor {
                 };
 
             case GraphTask.EVALUATE_SEARCH:
+                console.log("EVALUATE_SEARCH data: ", data);
+                const evaluateSearchPrompt = this.buildEvaluateSearchPrompt(data);
+                console.log("EVALUATE_SEARCH prompt: ", evaluateSearchPrompt);
                 return {
-                    prompt: this.buildEvaluateSearchPrompt(data),
+                    prompt: evaluateSearchPrompt,
                     functionSchema: z.object({
                         relevance: z.number(),
                         confidence: z.number(),
@@ -163,13 +237,16 @@ export class GraphLLMProcessor {
                 };
 
             case GraphTask.SUMMARIZE_NODE:
+                console.log("SUMMARIZE_NODE data: ", data);
+                const summarizeNodePrompt = this.buildSummarizeNodePrompt({ 
+                    nodeName: data.nodeName,
+                    previousSummary: data.previousSummary,
+                    context: data.context,
+                    episodes: data.episodes
+                });
+                console.log("SUMMARIZE_NODE prompt: ", summarizeNodePrompt);
                 return {
-                    prompt: this.buildSummarizeNodePrompt({ 
-                        nodeName: data.nodeName,
-                        previousSummary: data.previousSummary,
-                        context: data.context,
-                        episodes: data.episodes
-                    }),
+                    prompt: summarizeNodePrompt,
                     functionSchema: z.object({
                         summary: z.string().max(500),
                         description: z.string().max(100),
@@ -178,8 +255,11 @@ export class GraphLLMProcessor {
                 };
 
             case GraphTask.INVALIDATE_EDGES:
+                console.log("INVALIDATE_EDGES data: ", data);
+                const invalidateEdgesPrompt = this.buildInvalidateEdgesPrompt(data);
+                console.log("INVALIDATE_EDGES prompt: ", invalidateEdgesPrompt);
                 return {
-                    prompt: this.buildInvalidateEdgesPrompt(data),
+                    prompt: invalidateEdgesPrompt,
                     functionSchema: z.object({
                         invalidatedEdges: z.array(z.string()),
                         reason: z.string()
@@ -187,8 +267,11 @@ export class GraphLLMProcessor {
                 };
 
             case GraphTask.EXPAND_QUERY:
+                console.log("EXPAND_QUERY data: ", data);
+                const expandQueryPrompt = this.buildExpandQueryPrompt(data);
+                console.log("EXPAND_QUERY prompt: ", expandQueryPrompt);
                 return {
-                    prompt: this.buildExpandQueryPrompt(data),
+                    prompt: expandQueryPrompt,
                     functionSchema: z.object({
                         expandedQuery: z.string(),
                         relatedTerms: z.array(z.string()),
@@ -283,41 +366,41 @@ ${input.text}`;
     }
 
     private buildTemporalExtractionPrompt(input: { text: string, context: string, referenceTimestamp: string }): string {
-        return `Given the text, extract entities and relationships that are explicitly or implicitly mentioned. **Pay close attention to identifying relationships between entities, both within the current text and between the current text and the previous context.**
+        return `Extract entities and their relationships from the given text and context. Follow these guidelines:
 
-Guidelines:
-1. ALWAYS extract the speaker/actor as the first node
-2. Extract significant entities that are:
-   - Physical objects or items
-   - People, organizations, or groups
-   - Concepts, topics, or subjects
-   - Locations or places
-3. For each entity:
-   - Use full, explicit names
-   - Include a brief summary for context
-   - Assign a general type (PERSON, OBJECT, CONCEPT, LOCATION, ORGANIZATION)
-4. DO NOT create nodes for:
-   - Actions or verbs
+For entities:
+1. Identify key entities including:
+   - People
+   - Objects (physical items, products)
+   - Concepts (abstract ideas, activities)
+   - Places
+   - Organizations
    - Temporal information (dates, times)
    - Attributes or properties
 
-**Emphasize the importance of identifying relationships between entities:**
-For relationships between entities:
-1. Only connect DISTINCT entities
-2. Use descriptive ALL_CAPS types from the following list, or create a new one if none fit (HAS_FEATURE, USES, NEEDS, PART_OF, WORKS_FOR, COLLABORATES_WITH, RECOMMENDS, SUPPORTS, EXTENDS, SIMILAR_TO, OPPOSITE_OF, DEPENDS_ON, INCLUDES, IS_A):
-3. Include detailed descriptions with context, explaining the relationship
-4. Note if relationships are temporary based on the reference timestamp (${input.referenceTimestamp})
-5. Ensure each relationship has a clear source and target entity. **Identify relationships between entities in the current text and entities in the context. When identifying relationships, consider if an entity in the current text is the same as an entity in the context (entity linking).**
+2. For each entity:
+   - Use numeric IDs starting from 1
+   - Provide a descriptive name
+   - Use ALL_CAPS type (PERSON, OBJECT, CONCEPT, PLACE, ORGANIZATION)
+   - Include a summary that captures the entity's role or significance
 
-Previous Context (Use this to identify relationships with the current text):
+For relationships:
+1. Only connect DISTINCT entities
+2. Use natural language relationship types in ALL_CAPS that describe the connection (e.g., IS_INTERESTED_IN, HAS_FEATURE, USES, IS_SUITABLE_FOR)
+3. Include detailed descriptions with context
+4. Note if relationships are temporary based on the reference timestamp (${input.referenceTimestamp})
+5. Use numeric IDs starting from 1
+6. Consider relationships between current text and context entities (entity linking)
+
+Previous Context:
 ${input.context}
 
 Current Text to Process:
 ${input.text}
 
 Return a JSON object with:
-1. entities: Array of {id, name, type, summary}
-2. relationships: Array of {id, sourceId, targetId, type, description, isTemporary}`;
+1. entities: Array of {id: number, name: string, type: string, summary: string}
+2. relationships: Array of {id: number, sourceId: number, targetId: number, type: string, description: string, isTemporary: boolean}`;
     }
 
     private buildPrompt(input: string): string {
@@ -616,6 +699,10 @@ Result: "In yesterday's team meeting, we discussed Q4 goals and project timeline
             }
 
             const toolCall = message.tool_calls[0];
+            // Pretty print the raw LLM response
+            console.log('\nRaw LLM Response:');
+            console.log(JSON.stringify(JSON.parse(toolCall.function.arguments), null, 2));
+
             return JSON.parse(toolCall.function.arguments);
         };
 

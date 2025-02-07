@@ -82,7 +82,8 @@ export interface GraphFilter {
     embedding?: number[];
     similarityThreshold?: number;
     limit?: number;
-    episode?: EpisodeFilter;  // Optional episode-specific filter
+    episode?: EpisodeFilter;
+    sessionId?: string;
 }
 
 /**
@@ -209,6 +210,7 @@ export interface EpisodeContent {
     source: string;
     sourceDescription: string;
     timestamp: Date;  // When the episode occurred
+    sessionId: string;
 }
 
 /**

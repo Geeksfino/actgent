@@ -247,7 +247,7 @@ export class SemanticMemory extends DeclarativeMemory {
         });
 
         // Convert back to memory units
-        return results.map(result => this.graphNodeToMemoryUnit(result.node) as ISemanticMemoryUnit);
+        return results.map((result: { node: IGraphNode }) => this.graphNodeToMemoryUnit(result.node) as ISemanticMemoryUnit);
     }
 
     /**

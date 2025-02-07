@@ -123,7 +123,7 @@ export class MemoryGraph implements IGraphStorage {
     /**
      * Query the graph
      */
-    async query(filter: GraphFilter): Promise<{nodes: IGraphNode[], edges: IGraphEdge[]}> {
+    async query(filter: GraphFilter & { sessionId?: string }): Promise<{nodes: IGraphNode[], edges: IGraphEdge[]}> {
         const result = await this.storage.query(filter);
 
         // Helper function to convert metadata Map to an object with sorted keys
@@ -366,6 +366,6 @@ export class MemoryGraph implements IGraphStorage {
             episodeIds: []
         } as IGraphEdge));
 
-        await Promise.all(edges.map(edge => this.storage.addEdge(edge)));
+        await Promise.all(edges.map((edge: IGraphEdge) => this.storage.addEdge(edge)));
     }
 }

@@ -45,17 +45,39 @@ export interface GraphConfig {
 }
 
 /**
+ * Search options
+ */
+export interface SearchOptions {
+    timestamp?: Date;
+    limit?: number;
+    filters?: {
+        role?: string;
+        timeRange?: [Date, Date];
+        nodeTypes?: string[];
+    };
+}
+
+/**
+ * Search result
+ */
+export interface SearchResult {
+    node: IGraphNode;
+    score: number;
+    confidence: number;
+}
+
+/**
  * GraphManager serves as the single access point for all graph operations.
  * It initializes and manages all necessary components (storage, search, LLM, etc.)
  * and provides a clean API for interacting with the graph system.
  */
 export class GraphManager {
     private storage: IGraphStorage;
+    private embedder?: IEmbedder;
+    private llmClient: any;
+    private llm: GraphLLMProcessor;
     private graph: MemoryGraph;
-    private llmProcessor: GraphLLMProcessor;
     private _hybridSearch: TemporalHybridSearch;
-    private communityDetector: any;
-    private embedder: IEmbedder;
 
     constructor(config: GraphConfig) {
         if (!config.llm) {
@@ -80,7 +102,7 @@ export class GraphManager {
         });
 
         // Initialize LLM processor with OpenAI client and config
-        this.llmProcessor = new GraphLLMProcessor({
+        this.llm = new GraphLLMProcessor({
             ...config.llm,
             client: openai
         });
@@ -91,7 +113,7 @@ export class GraphManager {
             : EmbedderFactory.create(EmbedderProvider.BGE); // Default to BGE
 
         // Initialize graph
-        this.graph = new MemoryGraph(this.storage, this.llmProcessor);
+        this.graph = new MemoryGraph(this.storage, this.llm);
 
         // Initialize search components
         const embeddingSearch = new EmbeddingSearch();
@@ -100,7 +122,7 @@ export class GraphManager {
             this.graph,
             {  
                 generateText: async (prompt: string) => {
-                    const result = await this.llmProcessor.process<{ text: string }>(
+                    const result = await this.llm.process<{ text: string }>(
                         GraphTask.SUMMARIZE_NODE,  // Use an existing task
                         { prompt }
                     );
@@ -127,366 +149,213 @@ export class GraphManager {
     }
 
     /**
-     * Add a node to the graph
+     * Ingest one or more messages into the graph
+     * Handles:
+     * - Creating episode nodes
+     * - Extracting entities and relationships using LLM
+     * - Building graph connections
+     * - Automatic community refinement
      */
-    async addNode<T>(node: IGraphNode<T>): Promise<string> {
-        return this.graph.addNode(node);
-    }
+    async ingest(messages: Array<{
+        id: string,
+        body: string,
+        role: string,
+        timestamp: Date,
+        sessionId: string
+    }>): Promise<void> {
+        const now = new Date();
 
-    /**
-     * Add an edge to the graph
-     */
-    async addEdge<T>(edge: IGraphEdge<T>): Promise<string> {
-        return this.graph.addEdge(edge);
-    }
-
-    /**
-     * Get a node by ID
-     */
-    async getNode<T>(id: string): Promise<IGraphNode<T> | null> {
-        return this.graph.getNode(id);
-    }
-
-    /**
-     * Get an edge by ID
-     */
-    async getEdge<T>(id: string): Promise<IGraphEdge<T> | null> {
-        return this.graph.getEdge(id);
-    }
-
-    /**
-     * Update a node
-     */
-    async updateNode<T>(id: string, updates: Partial<IGraphNode<T>>): Promise<void> {
-        return this.graph.updateNode(id, updates);
-    }
-
-    /**
-     * Update an edge
-     */
-    async updateEdge<T>(id: string, updates: Partial<IGraphEdge<T>>): Promise<void> {
-        return this.graph.updateEdge(id, updates);
-    }
-
-    /**
-     * Delete a node
-     */
-    async deleteNode(id: string): Promise<void> {
-        return this.graph.deleteNode(id);
-    }
-
-    /**
-     * Delete an edge
-     */
-    async deleteEdge(id: string): Promise<void> {
-        return this.graph.deleteEdge(id);
-    }
-
-    /**
-     * Query the graph using a filter
-     */
-    async query(filter: GraphFilter = {}) {
-        return this.graph.query(filter);
-    }
-
-    /**
-     * Find paths between nodes using LLM
-     */
-    async findPaths(sourceId: string, targetId: string, options?: TraversalOptions) {
-        return this.graph.findPathsWithLLM(sourceId, targetId, options);
-    }
-
-    /**
-     * Find communities in the graph
-     */
-    async findCommunities(filter?: GraphFilter) {
-        return this.graph.findCommunities(filter);
-    }
-
-    /**
-     * Get nodes by filter
-     */
-    async getByFilter(filter: GraphFilter): Promise<IGraphNode[]> {
-        const result = await this.graph.query(filter);
-        return result.nodes;
-    }
-
-    /**
-     * Get the neighbors of a node
-     */
-    async getNeighbors(nodeId: string, filter?: GraphFilter): Promise<IGraphNode[]> {
-        return this.graph.findConnectedNodes({
-            startId: nodeId,
-            nodeTypes: filter?.nodeTypes,
-            direction: 'both'
-        });
-    }
-
-    /**
-     * Process a custom graph task using LLM
-     */
-    async processWithLLM<T>(task: GraphTask, data: any): Promise<T> {
-        return this.llmProcessor.process(task, data);
-    }
-
-    /**
-     * Get graph statistics
-     */
-    async getStats() {
-        const result = await this.graph.query({});
-        
-        return {
-            nodeCount: result.nodes.length,
-            edgeCount: result.edges.length,
-            nodeTypes: this.getNodeTypeDistribution(result.nodes),
-            memoryTypes: this.getMemoryTypeDistribution(result.nodes)
-        };
-    }
-
-    /**
-     * Get the hybrid search instance
-     */
-    get hybridSearch(): TemporalHybridSearch {
-        return this._hybridSearch;
-    }
-
-    /**
-     * Update community assignment for a node
-     */
-    async updateNodeCommunity(nodeId: string): Promise<{
-        communityId: string;
-        divergenceScore: number;
-    }> {
-        const node = await this.getNode(nodeId);
-        if (!node) {
-            throw new Error(`Node ${nodeId} not found`);
-        }
-
-        const edges = await this.getNodeEdges(nodeId);
-        return this.communityDetector.updateNodeCommunity(node, edges);
-    }
-
-    /**
-     * Refresh a specific community
-     */
-    async refreshCommunity(communityId: string): Promise<void> {
-        return this.communityDetector.refreshCommunity(communityId);
-    }
-
-    /**
-     * Get community summary using map-reduce style summarization
-     */
-    async getCommunityMeta(communityId: string): Promise<{
-        summary: string;
-        lastUpdateTime: Date;
-        memberCount: number;
-        divergenceScore: number;
-    }> {
-        return this.communityDetector.getCommunityMeta(communityId);
-    }
-
-    /**
-     * Get the current divergence score for a community
-     */
-    async getCommunityDivergence(communityId: string): Promise<number> {
-        return this.communityDetector.getCommunityDivergence(communityId);
-    }
-
-    /**
-     * Get all communities that need refresh based on divergence score
-     */
-    async getCommunitiesNeedingRefresh(threshold: number): Promise<string[]> {
-        return this.communityDetector.getCommunitiesNeedingRefresh(threshold);
-    }
-
-    /**
-     * Get all edges connected to a node
-     */
-    async getNodeEdges(nodeId: string): Promise<IGraphEdge[]> {
-        return this.graph.getEdges([nodeId]);
-    }
-
-    /**
-     * Summarizes a node by combining its context and history into a concise summary
-     * @param nodeName Name of the node to summarize
-     * @param context Additional context to consider
-     * @returns Summary object containing main summary, description, and key points
-     */
-    async summarizeNode(nodeName: string, context: string = ''): Promise<{
-        summary: string;
-        description: string;
-        key_points: string[];
-    }> {
-        // Get existing node data
-        const node = await this.storage.getNode(nodeName);
-        const previousSummary = node?.content?.summary;
-
-        // Get relevant episodes by finding edges between episodes and this node
-        const { nodes: allNodes, edges } = await this.storage.query({
-            nodeTypes: ['episode']
-        });
-
-        // Find episodes connected to this node
-        const episodeNodes = allNodes
-            .filter(isEpisodeNode)
-            .filter(episode => edges.some(edge => 
-                (edge.sourceId === episode.id && edge.targetId === nodeName) ||
-                (edge.sourceId === nodeName && edge.targetId === episode.id)
-            ))
-            .sort((a, b) => a.validAt!.getTime() - b.validAt!.getTime());
-
-        // Process summarization
-        const result = await this.llmProcessor.process<{
-            summary: string;
-            description: string;
-            key_points: string[];
-        }>(GraphTask.SUMMARIZE_NODE, {
-            nodeName,
-            previousSummary,
-            context,
-            episodes: episodeNodes
-        });
-
-        // Update node with new summary if it exists
-        if (node) {
-            await this.storage.updateNode(node.id, {
+        // First, create all episode nodes
+        for (const message of messages) {
+            this.log('Message ID:', message.id);
+            // Create episode node
+            const episodeNode: IGraphNode<EpisodeContent> = {
+                id: `ep_${message.id}`,
+                type: 'episode',
                 content: {
-                    ...node.content,
-                    summary: result.summary
-                }
-            });
+                    body: message.body,
+                    timestamp: message.timestamp,
+                    source: message.role,
+                    sourceDescription: message.body,
+                    sessionId: message.sessionId // Pass sessionId to EpisodeContent
+                },
+                metadata: new Map([
+                    ['role', message.role],
+                    ['turnId', message.id],
+                    ['sessionId', message.sessionId],
+                    ['timestamp', message.timestamp.toISOString()]
+                ]),
+                createdAt: now,
+                validAt: message.timestamp
+            };
+            this.log('Episode Node:', episodeNode);
+            await this.addNode(episodeNode);
         }
 
-        return result;
-    }
+        // Get previous context (last 4 messages)
+        const { nodes: allNodes } = await this.graph.query({ nodeTypes: ['episode'] });
 
-    /**
-     * Invalidates edges that are superseded by new information
-     * @param newEdge The new edge that potentially invalidates existing edges
-     * @param existingEdges Existing edges to check for invalidation
-     * @param timestamp When the invalidation occurs
-     * @returns Updated existing edges with invalidation timestamps set
-     */
-    async invalidateEdges<T>(
-        newEdge: IGraphEdge<T>,
-        existingEdges: IGraphEdge<T>[],
-        timestamp: Date
-    ): Promise<IGraphEdge<T>[]> {
-        // Process edge invalidation using LLM
-        const result = await this.llmProcessor.process<{
-            invalidatedEdges: string[];  // IDs of edges that should be invalidated
-            reason: string;  // Reason for invalidation
-        }>(GraphTask.INVALIDATE_EDGES, {
-            newEdge,
-            existingEdges,
-            timestamp
-        });
+        this.log('All Nodes Before Sort:', allNodes.map(node => ({ id: node.id, validAt: node.validAt })));
 
-        // Update invalidated edges
-        const updatedEdges = await Promise.all(
-            existingEdges.map(async edge => {
-                if (result.invalidatedEdges.includes(edge.id)) {
-                    await this.storage.updateEdge(edge.id, {
-                        ...edge,
-                        invalidAt: timestamp
-                    });
-                    return { ...edge, invalidAt: timestamp };
+        const prevNodes = allNodes
+            .sort((a, b) => (b.validAt?.getTime() || 0) - (a.validAt?.getTime() || 0));
+
+        this.log('All Nodes After Sort:', allNodes.map(node => ({ id: node.id, validAt: node.validAt })));
+
+        const prevMessages = prevNodes
+            .slice(0, 4)
+            .filter(node => !messages.some(msg => msg.id === node.metadata.get('turnId')))  // Exclude current batch
+            .map(node => `${node.content.source}: ${node.content.body}`)
+            .join('\n');
+
+        this.log('Previous Messages:', prevMessages);
+
+        // Process all messages in the batch together
+        const currentMessages = messages
+            .map(msg => `${msg.role}: ${msg.body}`)
+            .join('\n');
+
+        // Extract entities and relationships for the entire batch
+        const entityResult = await this.processWithLLM(
+            GraphTask.EXTRACT_TEMPORAL,
+            {
+                text: currentMessages,
+                context: prevMessages || undefined,
+                metadata: {
+                    timestamp: messages[0].timestamp  // Use first message's timestamp
                 }
-                return edge;
-            })
+            }
         );
 
-        return updatedEdges;
-    }
+        this.log('Entities:', entityResult.entities);
+        this.log('Relationships:', entityResult.relationships);
 
-    /**
-     * Expands a search query with related terms and context
-     * @param query Original search query
-     * @param context Additional context to consider
-     * @returns Expanded query with related terms
-     */
-    async expandQuery(query: string, context: string = ''): Promise<{
-        expandedQuery: string;
-        relatedTerms: string[];
-        expansionReason: string;
-    }> {
-        // Process query expansion using LLM
-        const result = await this.llmProcessor.process<{
-            expandedQuery: string;
-            relatedTerms: string[];
-            expansionReason: string;
-        }>(GraphTask.EXPAND_QUERY, {
-            query,
-            context,
-            // Get some recent episodes for context
-            recentEpisodes: await this.getRecentEpisodes(5)
-        });
-
-        return result;
-    }
-
-    /**
-     * Helper method to get recent episodes
-     * @param limit Number of episodes to retrieve
-     * @returns Recent episodes sorted by timestamp
-     */
-    private async getRecentEpisodes(limit: number = 5): Promise<IGraphNode<EpisodeContent>[]> {
-        const { nodes } = await this.storage.query({
-            nodeTypes: ['episode']
-        });
-
-        return nodes
-            .filter(isEpisodeNode)
-            .sort((a, b) => b.validAt!.getTime() - a.validAt!.getTime())
-            .slice(0, limit);
-    }
-
-    private getNodeTypeDistribution(nodes: IGraphNode[]) {
-        const distribution: Record<string, number> = {};
-        
-        for (const node of nodes) {
-            distribution[node.type] = (distribution[node.type] || 0) + 1;
-        }
-        
-        return distribution;
-    }
-
-    private getMemoryTypeDistribution(nodes: IGraphNode[]) {
-        const distribution: Partial<Record<GraphMemoryType, number>> = {};
-        
-        for (const node of nodes) {
-            const memoryUnit = node as unknown as IGraphMemoryUnit;
-            if (memoryUnit.memoryType && Object.values(GraphMemoryType).includes(memoryUnit.memoryType)) {
-                distribution[memoryUnit.memoryType] = (distribution[memoryUnit.memoryType] || 0) + 1;
+        // Process entities
+        if (entityResult.entities && Array.isArray(entityResult.entities)) {
+            for (const entity of entityResult.entities) {
+                try {
+                    await this.addNode({
+                        id: `entity_${entity.id}`,
+                        type: GraphMemoryType.SEMANTIC,  // Entities are semantic knowledge
+                        metadata: new Map([
+                            ['entityType', entity.type],  // Store LLM's type (e.g. PERSON, OBJECT) in metadata
+                            ['entityName', entity.name],   // Store name in metadata for easier querying
+                            ['sessionId', messages[0].sessionId] // Store sessionId in metadata
+                        ]),
+                        content: {  // Store entity properties in content
+                            name: entity.name,
+                            summary: entity.summary,
+                            sessionId: messages[0].sessionId, // Store sessionId in content
+                            ...entity  // Store any other fields from LLM
+                        },
+                        createdAt: messages[0].timestamp,
+                        validAt: messages[0].timestamp
+                    });
+                    this.log('Added entity node:', { id: `entity_${entity.id}`, type: entity.type });
+                } catch (error: unknown) {
+                    const errorMessage = error instanceof Error ? error.message : String(error);
+                    this.log('Failed to add entity:', {
+                        entityId: `entity_${entity.id}`,
+                        type: entity.type,
+                        error: errorMessage
+                    });
+                }
             }
         }
-        
-        return distribution;
-    }
 
-    /**
-     * Extract searchable text content from a node
-     */
-    private extractSearchableText(node: IGraphNode): string {
-        if (isEpisodeNode(node)) {
-            return node.content.body;  // Use body instead of text
+        // Process relationships
+        if (entityResult.relationships && Array.isArray(entityResult.relationships)) {
+            for (const rel of entityResult.relationships) {
+                try {
+                    await this.addEdge({
+                        id: `rel_${rel.sourceId}_${rel.targetId}`,
+                        type: GraphMemoryType.SEMANTIC,  // Relationships are semantic knowledge
+                        sourceId: `entity_${rel.sourceId}`,
+                        targetId: `entity_${rel.targetId}`,
+                        metadata: new Map([
+                            ['relationshipType', rel.type],
+                            ['relationshipName', rel.name || rel.type],
+                            ['description', rel.description || '']
+                        ]),
+                        content: {
+                            type: rel.type,  // Store original type in content
+                            ...rel  // Store any additional relationship properties
+                        },
+                        createdAt: messages[0].timestamp,
+                        validAt: messages[0].timestamp
+                    });
+                    this.log('Added relationship:', {
+                        id: `rel_${rel.sourceId}_${rel.targetId}`,
+                        type: rel.type,
+                        sourceId: `entity_${rel.sourceId}`,
+                        targetId: `entity_${rel.targetId}`
+                    });
+                } catch (error: unknown) {
+                    const errorMessage = error instanceof Error ? error.message : String(error);
+                    this.log('Failed to add relationship:', {
+                        relationshipId: `rel_${rel.sourceId}_${rel.targetId}`,
+                        type: rel.type,
+                        error: errorMessage
+                    });
+                }
+            }
         }
-        return node.content?.toString() || '';
+
+        // Refine communities after processing entities and relationships
+        await this.refineCommunities(messages[0].sessionId);
+
+        const communityInput = {
+            nodes: (await this.graph.query({ nodeTypes: ['entity'] })).nodes,
+            metadata: {
+                type: 'community',
+                lastUpdateTime: new Date().toISOString()
+            }
+        };
+        const communityResponse = await this.processWithLLM(GraphTask.REFINE_COMMUNITIES, communityInput);
+        if (communityResponse && communityResponse.communities) {
+            for (const community of communityResponse.communities) {
+                if (community.id) {
+                    // Update community members
+                    await this.updateCommunityMembers(community.id, community.members);
+                }
+            }
+        }
     }
 
     /**
-     * Index a node for search
+     * Refines communities in the graph.
      */
-    async indexNode(node: IGraphNode): Promise<void> {
-        const text = this.extractSearchableText(node);
-        const embedding = await this.embedder.generateEmbeddings(text);
-        await this._hybridSearch.indexNode(node, embedding[0]);
+    async refineCommunities(sessionId: string): Promise<void> {
+        console.log("refineCommunities sessionId: ", sessionId);
+        const communityInput = {
+            nodes: (await this.graph.query({ nodeTypes: ['entity'], sessionId })).nodes,
+            metadata: {
+                type: 'community',
+                lastUpdateTime: new Date().toISOString()
+            }
+        };
+        console.log("refineCommunities communityInput: ", communityInput);
+        console.log("refineCommunities nodes: ", communityInput.nodes);
+        const communityResponse = await this.processWithLLM(GraphTask.REFINE_COMMUNITIES, communityInput);
+        if (communityResponse && communityResponse.communities) {
+            for (const community of communityResponse.communities) {
+                if (community.id) {
+                    // Update community members
+                    await this.updateCommunityMembers(community.id, community.members);
+                }
+            }
+        }
     }
 
     /**
-     * Search for nodes using hybrid search
+     * Search for relevant messages/episodes/entities using hybrid search
+     * Combines embeddings, LLM, and temporal aspects
      */
-    async search(query: string, filter?: GraphFilter): Promise<IGraphNode[]> {
+    async search(query: string, options?: SearchOptions): Promise<SearchResult[]> {
+        if (!this.embedder) {
+            throw new Error('Embedder not configured');
+        }
+
         // Get embedding for query
         const embeddings = await this.embedder.generateEmbeddings(query);
         
@@ -494,41 +363,35 @@ export class GraphManager {
         const searchResults = await this._hybridSearch.searchWithTemporal(
             query,
             embeddings[0],
-            filter
+            options
         );
         
         // Map search results back to nodes with scores
-        const nodes = await Promise.all(
+        const results = await Promise.all(
             searchResults.map(async result => {
                 const node = await this.getNode(result.id);
-                if (node) {
-                    // Add search score and confidence to metadata
-                    node.metadata.set('search_score', result.score.toString());
-                    node.metadata.set('search_confidence', result.confidence.toString());
-                    if (result.source) {
-                        node.metadata.set('search_source', result.source);
-                    }
-                }
-                return node;
+                if (!node) return null;
+
+                return {
+                    node,
+                    score: result.score,
+                    confidence: result.confidence
+                };
             })
         );
         
         // Filter out null results and sort by score
-        return nodes
-            .filter((node): node is IGraphNode => node !== null)
-            .sort((a, b) => {
-                const scoreA = parseFloat(a.metadata.get('search_score') || '0');
-                const scoreB = parseFloat(b.metadata.get('search_score') || '0');
-                return scoreB - scoreA;
-            });
+        return results
+            .filter((result): result is SearchResult => result !== null)
+            .sort((a, b) => b.score - a.score);
     }
 
     /**
-     * Clear all data from the graph
+     * Clear all data from the graph and embeddings
      */
-    public async clear(): Promise<void> {
+    async clear(): Promise<void> {
         // Clear graph storage
-        const nodes = await this.storage.query({ nodeTypes: ['entity'] });
+        const nodes = await this.graph.query({ nodeTypes: ['entity'] });
         for (const node of nodes.nodes) {
             await this.storage.deleteNode(node.id);
         }
@@ -537,5 +400,44 @@ export class GraphManager {
         if (this.embedder) {
             await this.embedder.clear();
         }
+    }
+
+    /**
+     * Get a snapshot of the graph with optional filters
+     * @param filter Optional filter to get specific nodes (e.g., by type)
+     * @returns Promise<{ nodes: IGraphNode[], edges: IGraphEdge[] }>
+     */
+    async getSnapshot(filter: GraphFilter & { sessionId?: string }): Promise<{ nodes: IGraphNode[], edges: IGraphEdge[] }> {
+        return this.graph.query(filter);
+    }
+
+    // Private methods for internal use
+    private async addNode<T>(node: IGraphNode<T>): Promise<string> {
+        return this.graph.addNode(node);
+    }
+
+    private async addEdge<T>(edge: IGraphEdge<T>): Promise<string> {
+        return this.graph.addEdge(edge);
+    }
+
+    private async getNode<T>(id: string): Promise<IGraphNode<T> | null> {
+        return this.graph.getNode(id);
+    }
+
+    private async getEdge<T>(id: string): Promise<IGraphEdge<T> | null> {
+        return this.graph.getEdge(id);
+    }
+
+    private async processWithLLM(task: GraphTask, data: any): Promise<any> {
+        return this.llm.process(task, data);
+    }
+
+    private async updateCommunityMembers(communityId: string, members: string[]): Promise<void> {
+        // Update community members in the graph
+        // This implementation is omitted for brevity
+    }
+
+    private log(message: string, data: any) {
+        console.log(message, data);
     }
 }

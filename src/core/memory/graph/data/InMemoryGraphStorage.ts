@@ -305,26 +305,70 @@ export class InMemoryGraphStorage implements IGraphStorage {
         return true;  // Include if all filters pass
     }
 
-    async query(filter: GraphFilter = {}): Promise<{ nodes: IGraphNode[]; edges: IGraphEdge[] }> {
+    async query(filter: GraphFilter & { sessionId?: string } = {}): Promise<{ nodes: IGraphNode[]; edges: IGraphEdge[] }> {
         let nodes = Array.from(this.nodes.values());
         let edges = Array.from(this.edges.values());
 
+        console.log('Initial graph state:', {
+            nodeCount: nodes.length,
+            edgeCount: edges.length,
+            nodeTypes: new Set(nodes.map(n => n.type)),
+            edgeTypes: new Set(edges.map(e => e.type))
+        });
+
+        // Apply sessionId filter
+        if (filter.sessionId) {
+            console.log("query before sessionId filter nodes.length: ", nodes.length);
+            nodes = nodes.filter(node => {
+                if (isEpisodeNode(node)) {
+                    return node.content.sessionId === filter.sessionId;
+                } else {
+                    return node.content.sessionId === filter.sessionId;
+                }
+                return true;
+            });
+            console.log("query after sessionId filter nodes.length: ", nodes.length);
+        }
+
         // Apply existing filters
+        if (filter.sessionId) {
+            console.log("query before sessionId filter nodes.length: ", nodes.length);
+            nodes = nodes.filter(node => {
+                if (isEpisodeNode(node)) {
+                    return node.content.sessionId === filter.sessionId;
+                } else {
+                    return node.content.sessionId === filter.sessionId;
+                }
+                return true;
+            });
+            console.log("query after sessionId filter nodes.length: ", nodes.length);
+        }
+
         if (filter.nodeTypes?.length) {
+            console.log("query before nodeTypes filter nodes.length: ", nodes.length);
             nodes = nodes.filter(node => filter.nodeTypes!.includes(node.type));
+            console.log("query after nodeTypes filter nodes.length: ", nodes.length);
         }
 
         if (filter.edgeTypes?.length) {
+            console.log("query before edgeTypes filter edges.length: ", edges.length);
             edges = edges.filter(edge => filter.edgeTypes!.includes(edge.type));
+            console.log("query after edgeTypes filter edges.length: ", edges.length);
         }
 
         if (filter.temporal) {
+            console.log("query before temporal filter nodes.length: ", nodes.length);
+            console.log("query before temporal filter edges.length: ", edges.length);
             nodes = nodes.filter(node => this.applyTemporalFilter(node, filter.temporal));
             edges = edges.filter(edge => this.applyTemporalFilter(edge, filter.temporal));
+            console.log("query after temporal filter nodes.length: ", nodes.length);
+            console.log("query after temporal filter edges.length: ", edges.length);
         }
 
         // Apply episode filter if present
         if (filter.episode) {
+            console.log("query before episode filter nodes.length: ", nodes.length);
+            console.log("query before episode filter edges.length: ", edges.length);
             // Only include episode nodes when using episode filters
             nodes = nodes.filter(node => isEpisodeNode(node) && this.applyEpisodeFilter(node, filter.episode));
             // Get edges connected to filtered nodes
@@ -332,23 +376,51 @@ export class InMemoryGraphStorage implements IGraphStorage {
             edges = edges.filter(edge => 
                 nodeIds.has(edge.sourceId) || nodeIds.has(edge.targetId)
             );
+            console.log("query after episode filter nodes.length: ", nodes.length);
+            console.log("query after episode filter edges.length: ", edges.length);
         }
 
         // Apply metadata filter
         if (filter.metadata) {
+            console.log("query before metadata filter nodes.length: ", nodes.length);
+            console.log("query before metadata filter edges.length: ", edges.length);
             nodes = nodes.filter(node => this.matchesMetadata(node.metadata, filter.metadata));
             edges = edges.filter(edge => this.matchesMetadata(edge.metadata, filter.metadata));
+            console.log("query after metadata filter nodes.length: ", nodes.length);
+            console.log("query after metadata filter edges.length: ", edges.length);
         }
 
         // Apply limit if specified
         if (typeof filter.limit === 'number' && filter.limit > 0) {
+            console.log("query before limit filter nodes.length: ", nodes.length);
+            console.log("query before limit filter edges.length: ", edges.length);
             nodes = nodes.slice(0, filter.limit);
-            // Keep only edges connected to remaining nodes
+            // Keep edges where at least one node is in the limited set
             const nodeIds = new Set(nodes.map(n => n.id));
             edges = edges.filter(edge => 
-                nodeIds.has(edge.sourceId) && nodeIds.has(edge.targetId)
+                nodeIds.has(edge.sourceId) || nodeIds.has(edge.targetId)
             );
+            // Add any nodes connected to these edges that weren't in the original limit
+            const connectedNodeIds = new Set<string>();
+            edges.forEach(edge => {
+                connectedNodeIds.add(edge.sourceId);
+                connectedNodeIds.add(edge.targetId);
+            });
+            const additionalNodes = Array.from(connectedNodeIds)
+                .filter(id => !nodeIds.has(id))
+                .map(id => this.nodes.get(id))
+                .filter((node): node is IGraphNode => node !== undefined);
+            nodes = [...nodes, ...additionalNodes];
+            console.log("query after limit filter nodes.length: ", nodes.length);
+            console.log("query after limit filter edges.length: ", edges.length);
         }
+
+        console.log('Final graph state:', {
+            nodeCount: nodes.length,
+            edgeCount: edges.length,
+            nodeTypes: new Set(nodes.map(n => n.type)),
+            edgeTypes: new Set(edges.map(e => e.type))
+        });
 
         return { nodes, edges };
     }
