@@ -15,7 +15,7 @@ import {
 import { IMemoryStorage, IMemoryIndex } from '../../storage';
 import { IEpisodicMemoryUnit } from './types';
 import { MemoryGraph } from '../../graph/data/operations';
-import { GraphLLMProcessor } from '../../graph/processing/episodic/processor';
+import { EpisodicGraphProcessor } from '../../graph/processing/episodic/processor';
 import { GraphTask } from '../../graph/types';
 import { SearchResult } from '../../graph/processing/episodic/types';
 import {
@@ -50,7 +50,7 @@ export class EpisodicMemory extends DeclarativeMemory {
     protected graphStorage: IGraphStorage;
     protected graphIndex: IGraphIndex;
     protected graphOps: MemoryGraph;
-    protected llm: GraphLLMProcessor;
+    protected llm: EpisodicGraphProcessor;
 
     constructor(storage: IGraphStorage, index: IGraphIndex, llmClient?: any) {
         // Create wrapper adapters for IMemoryStorage and IMemoryIndex
@@ -136,7 +136,7 @@ export class EpisodicMemory extends DeclarativeMemory {
         super(memoryStorage, memoryIndex, MemoryType.EPISODIC);
         this.graphStorage = storage;
         this.graphIndex = index;
-        this.llm = new GraphLLMProcessor(llmClient);
+        this.llm = new EpisodicGraphProcessor(llmClient);
         this.graphOps = new MemoryGraph(storage, this.llm);
     }
 

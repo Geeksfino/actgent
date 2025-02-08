@@ -1,54 +1,48 @@
-import { IGraphNode } from '../data/types';
-import { GraphLLMProcessor } from '../processing/episodic/processor';
-import { SearchResult } from '../processing/episodic/types';
-import { GraphTask } from '../types';
-import { IReranker, RerankerConfig, RerankResult } from './types';
+import { DEFAULT_RERANKER_CONFIG } from '../config/defaults';
+import { z } from 'zod';
+import { RerankerConfig } from '../config/types';
 
-/**
- * LLM-based reranker implementation
- */
-export class LLMReranker implements IReranker {
+export interface LLMRerankerInterface {
+    rerank(query: string, results: SearchResult[]): Promise<RerankResult[]>;
+}
+
+export interface LLMRerankerConfig {
+    apiKey?: string;
+}
+
+export interface RerankResult {
+    name: string;
+    type: string;
+    summary: string;
+}
+
+export interface SearchResult {
+    name: string;
+    type: string;
+    summary: string;
+}
+
+export class LLMReranker implements LLMRerankerInterface {
     constructor(
-        private llm: GraphLLMProcessor,
-        private config: RerankerConfig = {}
-    ) {}
+        private llm: any,
+        private config: RerankerConfig = DEFAULT_RERANKER_CONFIG
+    ) { }
 
-    /**
-     * Rerank nodes based on query using LLM
-     */
-    async rerank(query: string, nodes: IGraphNode[]): Promise<RerankResult[]> {
-        // Convert nodes to search inputs
-        const searchInputs = nodes.map(node => ({
-            nodeId: node.id,
-            content: node.content,
-            metadata: Object.fromEntries(node.metadata)
-        }));
-
-        // Get reranked results
-        const results = await this.llm.process<SearchResult[]>(
-            GraphTask.RERANK_RESULTS,
-            {
-                query,
-                nodes: searchInputs,
-                config: this.config
-            }
-        );
-
-        // Convert to RerankResult format
-        return results
-            .sort((a: { score: number }, b: { score: number }) => b.score - a.score)
-            .map((result: { nodeId: string; score: number; explanation: string }) => ({
-                id: result.nodeId,
-                score: result.score,
-                explanation: result.explanation
-            }));
+    async rerank(query: string, nodes: SearchResult[]): Promise<RerankResult[]> {
+        console.log("RERANK_RESULTS data: ", { query, nodes });
+        const rerankResultsPrompt = `Rerank search results for query "${query}":\n${JSON.stringify(nodes)}`;
+        console.log("RERANK_RESULTS prompt: ", rerankResultsPrompt);
+        const req = this.prepareRerankRequest({ query, nodes });
+        return req as any as RerankResult[];
     }
 
-    /**
-     * Get explanation for a specific result
-     */
-    async explain(query: string, node: IGraphNode): Promise<string> {
-        const results = await this.rerank(query, [node]);
-        return results[0]?.explanation || 'No explanation available';
+    prepareRerankRequest(data: { query: string; nodes: SearchResult[] }): { prompt: string; functionSchema: z.ZodObject<{ name: z.ZodString; type: z.ZodString; summary: z.ZodString }> } {
+        console.log("RERANK_RESULTS data: ", data);
+        const rerankResultsPrompt = `Rerank search results for query \"${data.query}\":\n${JSON.stringify(data.nodes)}`;
+        console.log("RERANK_RESULTS prompt: ", rerankResultsPrompt);
+        return {
+            prompt: rerankResultsPrompt,
+            functionSchema: z.object({ name: z.string(), type: z.string(), summary: z.string() })
+        };
     }
 }

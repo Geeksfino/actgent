@@ -18,7 +18,7 @@ import {
     ISemanticMemoryUnit 
 } from './types';
 import { DeclarativeMemory } from '../../DeclarativeMemory';
-import { GraphLLMProcessor } from '../../graph/processing/episodic/processor';
+import { EpisodicGraphProcessor } from '../../graph/processing/episodic/processor';
 import { MemoryGraph } from '../../graph/data/operations';
 import { IMemoryStorage, IMemoryIndex } from '../../storage';
 import crypto from 'crypto';
@@ -167,13 +167,13 @@ class GraphIndexAdapter implements IMemoryIndex {
  */
 export class SemanticMemory extends DeclarativeMemory {
     protected graphOps: MemoryGraph;
-    protected llm: GraphLLMProcessor;
+    protected llm: EpisodicGraphProcessor;
 
     constructor(graphStorage: IGraphStorage, graphIndex: IGraphIndex, llmClient?: any) {
         const storageAdapter = new GraphStorageAdapter(graphStorage);
         const indexAdapter = new GraphIndexAdapter(graphIndex);
         super(storageAdapter, indexAdapter, MemoryType.SEMANTIC);
-        this.llm = new GraphLLMProcessor(llmClient);
+        this.llm = new EpisodicGraphProcessor(llmClient);
         this.graphOps = new MemoryGraph(graphStorage, this.llm);
     }
 

@@ -7,7 +7,7 @@ import { retry } from "/Users/cliang/repos/clipforge/actgent/src/core/utils/retr
 /**
  * LLM processor for graph operations
  */
-export class GraphLLMProcessor {
+export class EpisodicGraphProcessor {
     private llm: OpenAI;
     private config: LLMConfig;
 
@@ -94,70 +94,6 @@ export class GraphLLMProcessor {
 
     private prepareRequest(task: GraphTask, data: any): { prompt: string; functionSchema: z.ZodType<any> } {
         switch (task) {
-            case GraphTask.REFINE_COMMUNITIES:
-                console.log("REFINE_COMMUNITIES data: ", data);
-                const refineCommunitiesPrompt = `Refine the following graph community (ID: ${data.community_id}) with members: ${JSON.stringify(data.nodes)}
-
-                Guidelines:
-                1. Analyze the community members and their connections.
-                2. Identify any inconsistencies or inaccuracies in the community structure.
-                3. Refine the community by adding or removing members as necessary.
-                4. Provide a clear reason for any changes made.
-
-                Required Output Format:
-                JSON object with:
-                - community_id: string
-                - updated_members: array of strings
-                - reason: string (optional)`;
-                console.log("REFINE_COMMUNITIES prompt: ", refineCommunitiesPrompt);
-                return {
-                    prompt: refineCommunitiesPrompt,
-                    functionSchema: z.object({
-                        community_id: z.string(),
-                        updated_members: z.array(z.string()),
-                        reason: z.string().optional()
-                    })
-                };
-            
-            case GraphTask.LABEL_COMMUNITY:
-                console.log("LABEL_COMMUNITY data: ", data);
-                const labelCommunityPrompt = this.buildPrompt(`Generate a descriptive label for this community of nodes:\n${JSON.stringify(data.nodes)}\nProvide a concise label and confidence score.`);
-                console.log("LABEL_COMMUNITY prompt: ", labelCommunityPrompt);
-                return {
-                    prompt: labelCommunityPrompt,
-                    functionSchema: z.object({
-                        label: z.string(),
-                        confidence: z.number().min(0).max(1)
-                    })
-                };
-
-            case GraphTask.EVALUATE_PATHS:
-                console.log("EVALUATE_PATHS data: ", data);
-                const evaluatePathsPrompt = this.buildFactExtractionPrompt({ text: `Evaluate paths between nodes:\n${JSON.stringify(data)}`, entities: data.entities });
-                console.log("EVALUATE_PATHS prompt: ", evaluatePathsPrompt);
-                return {
-                    prompt: evaluatePathsPrompt,
-                    functionSchema: z.object({ source_entity: z.string(), target_entity: z.string(), relation_type: z.string(), description: z.string() })
-                };
-            
-            case GraphTask.RERANK_RESULTS:
-                console.log("RERANK_RESULTS data: ", data);
-                const rerankResultsPrompt = this.buildEntityExtractionPrompt(`Rerank search results for query "${data.query}":\n${JSON.stringify(data.nodes)}`);
-                console.log("RERANK_RESULTS prompt: ", rerankResultsPrompt);
-                return {
-                    prompt: rerankResultsPrompt,
-                    functionSchema: z.object({ name: z.string(), type: z.string(), summary: z.string() })
-                };
-
-            case GraphTask.PREPARE_FOR_EMBEDDING:
-                console.log("PREPARE_FOR_EMBEDDING data: ", data);
-                const prepareForEmbeddingPrompt = this.buildPrompt(`Prepare text for embedding:\n${JSON.stringify(data)}`);
-                console.log("PREPARE_FOR_EMBEDDING prompt: ", prepareForEmbeddingPrompt);
-                return {
-                    prompt: prepareForEmbeddingPrompt,
-                    functionSchema: z.array(z.number())
-                };
-
             case GraphTask.DEDUPE_NODE:
                 console.log("DEDUPE_NODE data: ", data);
                 const dedupeNodePrompt = this.buildDedupePrompt({ newNode: data.newNode, existingNodes: data.existingNodes, context: data.context });
@@ -168,58 +104,19 @@ export class GraphLLMProcessor {
                         is_duplicate: z.boolean(),
                         uuid: z.string().nullable(),
                         name: z.string(),
-                        confidence: z.number().min(0).max(1)
+                        confidence: z.number()
                     })
-                };
-
-            case GraphTask.DEDUPE_EDGE:
-                console.log("DEDUPE_EDGE data: ", data);
-                const dedupeEdgePrompt = this.buildFactExtractionPrompt({ text: data.prompt, entities: data.entities });
-                console.log("DEDUPE_EDGE prompt: ", dedupeEdgePrompt);
-                return {
-                    prompt: dedupeEdgePrompt,
-                    functionSchema: z.object({ source_entity: z.string(), target_entity: z.string(), relation_type: z.string(), description: z.string() })
-                };
-
-            case GraphTask.DEDUPE_BATCH:
-                console.log("DEDUPE_BATCH data: ", data);
-                const dedupeBatchPrompt = this.buildEntityExtractionPrompt(data.prompt);
-                console.log("DEDUPE_BATCH prompt: ", dedupeBatchPrompt);
-                return {
-                    prompt: dedupeBatchPrompt,
-                    functionSchema: z.array(z.object({ name: z.string(), type: z.string(), summary: z.string() }))
-                };
-
-            case GraphTask.DEDUPE_BATCH_EDGES:
-                console.log("DEDUPE_BATCH_EDGES data: ", data);
-                const dedupeBatchEdgesPrompt = this.buildFactExtractionPrompt({ text: data.prompt, entities: data.entities });
-                console.log("DEDUPE_BATCH_EDGES prompt: ", dedupeBatchEdgesPrompt);
-                return {
-                    prompt: dedupeBatchEdgesPrompt,
-                    functionSchema: z.array(z.object({ source_entity: z.string(), target_entity: z.string(), relation_type: z.string(), description: z.string() }))
                 };
 
             case GraphTask.EXTRACT_TEMPORAL:
                 console.log("EXTRACT_TEMPORAL data: ", data);
-                const extractTemporalPrompt = this.buildTemporalExtractionPrompt({ text: data.text, context: data.context, referenceTimestamp: data.referenceTimestamp });
+                const extractTemporalPrompt = this.buildTemporalExtractionPrompt({ text: data.text, context: data.context, referenceTimestamp: data.referenceTimestamp, fact: data.fact });
                 console.log("EXTRACT_TEMPORAL prompt: ", extractTemporalPrompt);
                 return {
                     prompt: extractTemporalPrompt,
                     functionSchema: z.object({
-                        entities: z.array(z.object({
-                            id: z.number(),
-                            name: z.string(),
-                            type: z.string(),
-                            summary: z.string().optional()
-                        })),
-                        relationships: z.array(z.object({
-                            id: z.number(),
-                            sourceId: z.number(),
-                            targetId: z.number(),
-                            type: z.string(),
-                            description: z.string(),
-                            isTemporary: z.boolean().optional()
-                        }))
+                        valid_at: z.string().nullable(),
+                        invalid_at: z.string().nullable()
                     })
                 };
 
@@ -320,180 +217,96 @@ export class GraphLLMProcessor {
         return { type: 'object' };
     }
 
-    private buildEntityExtractionPrompt(input: string): string {
-        return `Guidelines:
-1. Extract significant entities, concepts, or actors mentioned in the input
-2. DO NOT create nodes for relationships or actions
-3. DO NOT create nodes for temporal information like dates, times or years
-4. Be as explicit as possible in entity names, using full names
-5. Only extract entities that are clearly mentioned
+    private buildEntityExtractionPrompt(input: { text: string, context: string }): string {
+        return `<PREVIOUS MESSAGES>
+${input.context}
+</PREVIOUS MESSAGES>
+<CURRENT MESSAGE>
+${input.text}
+</CURRENT MESSAGE>
 
-Definitions:
-- entity: a unique named instance (person, place, organization)
-- category: the type or classification of the entity
-- context: relevant surrounding information or metadata
+Given the above conversation, extract entity nodes from the CURRENT MESSAGE that are explicitly or implicitly mentioned:
+
+Guidelines:
+1. ALWAYS extract the speaker/actor as the first node. The speaker is the part before the colon in each line of dialogue.
+2. Extract other significant entities, concepts, or actors mentioned in the CURRENT MESSAGE.
+3. DO NOT create nodes for relationships or actions.
+4. DO NOT create nodes for temporal information like dates, times or years (these will be added to edges later).
+5. Be as explicit as possible in your node names, using full names.
+6. DO NOT extract entities mentioned only in previous messages.
 
 Required Output Format:
 JSON array of objects, each containing:
 - name: string (full, explicit name of the entity)
-- type: string (category of the entity)
-- summary: string (brief description or context)
-
-Input:
-${input}`;
+- type: string (category of the entity: PERSON, PLACE, ORGANIZATION, BOOK, etc.)
+- summary: string (brief description or context)`;
     }
 
-    private buildFactExtractionPrompt(input: { text: string, entities: any[] }): string {
-        return `Guidelines:
-1. Extract facts only between the provided entities
-2. Each fact should represent a clear relationship between two DISTINCT entities
-3. Use concise, all-caps relation types (e.g., LOVES, IS_FRIENDS_WITH, WORKS_FOR)
-4. Include all relevant contextual information in the fact description
-5. Consider temporal aspects when relevant
-
-Entities:
-${JSON.stringify(input.entities, null, 2)}
-
-Required Output Format:
-JSON array of objects, each containing:
-- source_entity: string
-- target_entity: string
-- relation_type: string (ALL_CAPS)
-- description: string (detailed fact with context)
-
-Input:
-${input.text}`;
-    }
-
-    private buildTemporalExtractionPrompt(input: { text: string, context: string, referenceTimestamp: string }): string {
-        return `Extract entities and their relationships from the given text and context. Follow these guidelines:
-
-For entities:
-1. Identify key entities including:
-   - People
-   - Objects (physical items, products)
-   - Concepts (abstract ideas, activities)
-   - Places
-   - Organizations
-   - Temporal information (dates, times)
-   - Attributes or properties
-
-2. For each entity:
-   - Use numeric IDs starting from 1
-   - Provide a descriptive name
-   - Use ALL_CAPS type (PERSON, OBJECT, CONCEPT, PLACE, ORGANIZATION)
-   - Include a summary that captures the entity's role or significance
-
-For relationships:
-1. Only connect DISTINCT entities
-2. Use natural language relationship types in ALL_CAPS that describe the connection (e.g., IS_INTERESTED_IN, HAS_FEATURE, USES, IS_SUITABLE_FOR)
-3. Include detailed descriptions with context
-4. Note if relationships are temporary based on the reference timestamp (${input.referenceTimestamp})
-5. Use numeric IDs starting from 1
-6. Consider relationships between current text and context entities (entity linking)
-
-Previous Context:
+    private buildTemporalExtractionPrompt(input: { text: string, context: string, referenceTimestamp: string, fact: string }): string {
+        return `<PREVIOUS MESSAGES>
 ${input.context}
-
-Current Text to Process:
+</PREVIOUS MESSAGES>
+<CURRENT MESSAGE>
 ${input.text}
+</CURRENT MESSAGE>
+<REFERENCE TIMESTAMP>
+${input.referenceTimestamp}
+</REFERENCE TIMESTAMP>
+<FACT>
+${input.fact}
+</FACT>
 
-Return a JSON object with:
-1. entities: Array of {id: number, name: string, type: string, summary: string}
-2. relationships: Array of {id: number, sourceId: number, targetId: number, type: string, description: string, isTemporary: boolean}`;
-    }
-
-    private buildPrompt(input: string): string {
-        return `Guidelines:
-- Extract key entities from the input text
-- Include only significant, well-defined entities
-- Identify proper names, organizations, dates, and key terms
-- Ensure each entity is distinct and non-redundant
+IMPORTANT: Only extract time information if it is part of the provided fact. Otherwise ignore the time mentioned.
+Make sure to determine dates from relative time mentions (eg 10 years ago, 2 mins ago) based on the reference timestamp.
+If the relationship is not of spanning nature, but you can determine dates, set the valid_at only.
 
 Definitions:
-- entity: a unique named instance (person, place, organization)
-- category: the type or classification of the entity
-- context: relevant surrounding information or metadata
+- valid_at: The date and time when the relationship described by the edge fact became true or was established.
+- invalid_at: The date and time when the relationship described by the edge fact stopped being true or ended.
 
-Required Output Format:
-JSON array of objects, each containing:
-- entity: string
-- category: string
-- context: string
+Guidelines:
+1. Use ISO 8601 format (YYYY-MM-DDTHH:MM:SS.SSSSSSZ) for datetimes.
+2. Use the reference timestamp as the current time when determining the valid_at and invalid_at dates.
+3. If the fact is written in the present tense, use the Reference Timestamp for the valid_at date.
+4. If no temporal information establishes or changes the relationship, leave fields as null.
+5. Do not infer dates from related events. Only use dates directly stated.
+6. For relative time mentions, calculate actual datetime based on reference timestamp.
+7. If only a date is mentioned without time, use 00:00:00 (midnight).
+8. If only year is mentioned, use January 1st at 00:00:00.
+9. Always include time zone offset (use Z for UTC if no specific zone mentioned).
 
-Input text:
-${input}`;
-    }
-
-    private buildQAPrompt(input: { question: string, context: string }): string {
-        return `You are tasked with answering a question based on provided context. Follow these guidelines:
-
-1. Answer Generation:
-   - Use ONLY information from the provided context
-   - If answer cannot be determined from context, clearly state the limitations
-   - Maintain factual accuracy and avoid speculation
-   - Consider temporal aspects (when events occurred)
-   - Be concise but complete
-   - Format your answer in first person if the context is about you
-
-2. Context Evaluation:
-   - Focus on entity summaries and facts from context
-   - Consider relationships between entities
-   - Pay attention to temporal information
-   - Only use information explicitly stated
-
-3. Response Format:
-   - Start with a clear, direct answer
-   - Support with relevant facts from context
-   - Note any uncertainty or missing information
-   - Keep response focused and relevant to question
-
-Question: ${input.question}
-
-Available Context:
-${input.context}
-
-Return a JSON object with a single "answer" field containing your response.`;
+Return a JSON object with:
+{
+    "valid_at": string | null,  // ISO 8601 datetime when the fact became true
+    "invalid_at": string | null // ISO 8601 datetime when the fact stopped being true
+}`;
     }
 
     private buildDedupePrompt(input: { newNode: any, existingNodes: any[], context: string }): string {
-        return `You are tasked with identifying duplicate entities in our knowledge graph. Follow these guidelines:
-
-1. Duplicate Detection:
-   - Compare both names and summaries of nodes
-   - Consider variations in naming (nicknames, abbreviations)
-   - Check for contextual clues that indicate same entity
-   - Evaluate temporal consistency
-   - Consider relationships with other entities
-
-2. Name Resolution:
-   - When duplicates found, choose most complete name
-   - Preserve full names over partial names
-   - Maintain consistent naming conventions
-   - Combine information if both names add value
-
-3. Response Requirements:
-   - Determine if new node matches any existing node
-   - If match found, provide existing node's UUID
-   - Suggest best name based on all available information
-   - Include confidence level in match
-
-Previous Context:
+        return `<PREVIOUS_MESSAGES>
 ${input.context}
+</PREVIOUS_MESSAGES>
 
-Existing Nodes:
+<EXISTING_NODES>
 ${JSON.stringify(input.existingNodes, null, 2)}
+</EXISTING_NODES>
 
-New Node to Check:
+Given the above EXISTING NODES, MESSAGE, and PREVIOUS MESSAGES. Determine if the NEW NODE
+extracted from the conversation is a duplicate entity of one of the EXISTING NODES.
+
+<NEW_NODE>
 ${JSON.stringify(input.newNode, null, 2)}
+</NEW_NODE>
 
+<EXPECTED_RESPONSE>
 Return a JSON object with:
 {
     "is_duplicate": boolean,
     "uuid": "existing node UUID if duplicate, null if not",
     "name": "best name to use",
     "confidence": number between 0 and 1
-}`;
+}
+</EXPECTED_RESPONSE>`;
     }
 
     private buildSummarizeNodePrompt(input: { 
@@ -648,22 +461,20 @@ Result: "In yesterday's team meeting, we discussed Q4 goals and project timeline
 
     private getFunctionName(task: GraphTask): string {
         switch (task) {
-            case GraphTask.EXTRACT_TEMPORAL:
-                return 'extractTemporal';
-            case GraphTask.DEDUPE_NODE:
-                return 'dedupeNode';
-            case GraphTask.SUMMARIZE_NODE:
-                return 'summarizeNode';
-            case GraphTask.INVALIDATE_EDGES:
-                return 'invalidateEdges';
-            case GraphTask.EXPAND_QUERY:
-                return 'expandQuery';
-            case GraphTask.EVALUATE_SEARCH:
-                return 'evaluateSearch';
             case GraphTask.REFINE_COMMUNITIES:
                 return 'refineCommunities';
+            case GraphTask.EXTRACT_TEMPORAL:
+                return 'extractTemporal';
+            case GraphTask.PREPARE_FOR_EMBEDDING:
+                return 'prepareForEmbedding';
+            case GraphTask.SUMMARIZE_CHUNK:
+                return 'summarizeChunk';
+            case GraphTask.COMBINE_SUMMARIES:
+                return 'combineSummaries';
+            case GraphTask.SUMMARIZE_NODE:
+                return 'summarizeNode';
             default:
-                throw new Error(`Unknown task: ${task}`);
+                return 'unknown';
         }
     }
 
@@ -717,25 +528,15 @@ Result: "In yesterday's team meeting, we discussed Q4 goals and project timeline
 
     async extractTemporal(data: any): Promise<{ entities: any[], relationships: any[] }> {
         try {
-            const { entities, relationships } = await this.processWithLLM(
+            const { valid_at, invalid_at } = await this.processWithLLM(
                 GraphTask.EXTRACT_TEMPORAL,
-                { text: data.text, context: data.context, referenceTimestamp: data.referenceTimestamp }
+                { text: data.text, context: data.context, referenceTimestamp: data.referenceTimestamp, fact: data.fact }
             );
 
-            console.log("Extracted entities:", entities);
-            console.log("Extracted relationships:", relationships);
+            console.log("Extracted valid_at:", valid_at);
+            console.log("Extracted invalid_at:", invalid_at);
 
-            if (!entities || !Array.isArray(entities)) {
-                console.warn("Invalid entities data received from LLM.", entities);
-                return { entities: [], relationships: [] };
-            }
-
-            if (relationships && !Array.isArray(relationships)) {
-                console.warn("Invalid relationships data received from LLM.", relationships);
-                return { entities: [], relationships: [] };
-            }
-
-            return { entities, relationships };
+            return { entities: [], relationships: [] };
         } catch (error) {
             console.error("Error in extractTemporal:", error);
             return { entities: [], relationships: [] };

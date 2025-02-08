@@ -1,5 +1,5 @@
 import { IGraphNode, IGraphEdge } from '../../data/types';
-import { GraphLLMProcessor } from '../episodic/processor';
+import { EpisodicGraphProcessor } from '../episodic/processor';
 import { CommunityResult } from '../episodic/types';
 import { GraphTask } from '../../types';
 import { LabelPropagation } from './label_propagation';
@@ -51,7 +51,7 @@ export class CommunityDetector {
     private communityMeta: Map<string, CommunityMeta>;
 
     constructor(
-        private llm: GraphLLMProcessor,
+        private llm: EpisodicGraphProcessor,
         private options: CommunityOptions = DEFAULT_OPTIONS
     ) {
         this.labelPropagation = new LabelPropagation();

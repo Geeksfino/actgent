@@ -4,6 +4,7 @@ import { RankingFeatures, GraphFeatures } from './types';
 import { GraphRankingOps } from './graph_ops';
 import { RerankerConfig } from '../config/types';
 import { DEFAULT_RERANKER_CONFIG } from '../config/defaults';
+import { z } from 'zod';
 
 /**
  * Enhanced result reranking system with cross-encoder, MMR, and graph features

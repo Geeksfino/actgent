@@ -67,7 +67,7 @@ export enum GraphTask {
     // LLM-based tasks
     RERANK_RESULTS = 'rerank_results',
     REFINE_COMMUNITIES = 'refine_communities',
-    EVALUATE_PATHS = 'evaluate_paths',
+    FACT_EXTRACTION = 'evaluate_paths',
     EXTRACT_TEMPORAL = 'extract_temporal',
     PREPARE_FOR_EMBEDDING = 'prepare_for_embedding',
     CONSOLIDATE_EPISODES = 'consolidate_episodes',

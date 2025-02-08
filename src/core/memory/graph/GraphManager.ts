@@ -13,7 +13,7 @@ import {
 import { GraphTask, LLMConfig } from './types';
 import { InMemoryGraphStorage } from './data/InMemoryGraphStorage';
 import { MemoryGraph } from './data/operations';
-import { GraphLLMProcessor } from './processing/episodic/processor';
+import { EpisodicGraphProcessor } from './processing/episodic/processor';
 import { TemporalHybridSearch } from './query/hybrid';
 import { EmbeddingSearch } from './query/embedding';
 import { BM25Search } from './query/bm25';
@@ -75,7 +75,7 @@ export class GraphManager {
     private storage: IGraphStorage;
     private embedder?: IEmbedder;
     private llmClient: any;
-    private llm: GraphLLMProcessor;
+    private llm: EpisodicGraphProcessor;
     private graph: MemoryGraph;
     private _hybridSearch: TemporalHybridSearch;
 
@@ -102,7 +102,7 @@ export class GraphManager {
         });
 
         // Initialize LLM processor with OpenAI client and config
-        this.llm = new GraphLLMProcessor({
+        this.llm = new EpisodicGraphProcessor({
             ...config.llm,
             client: openai
         });

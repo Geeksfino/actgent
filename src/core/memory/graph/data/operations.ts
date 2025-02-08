@@ -6,7 +6,7 @@ import {
     IGraphStorage,
     GraphMemoryType
 } from './types';
-import { GraphLLMProcessor } from '../processing/episodic/processor';
+import { EpisodicGraphProcessor } from '../processing/episodic/processor';
 import { TimeMode } from '../processing/temporal/temporal';
 import { GraphTask } from '../types';
 import { 
@@ -22,7 +22,7 @@ import {
 export class MemoryGraph implements IGraphStorage {
     constructor(
         private storage: IGraphStorage,
-        private llm: GraphLLMProcessor
+        private llm: EpisodicGraphProcessor
     ) {}
 
     /**
@@ -196,7 +196,7 @@ export class MemoryGraph implements IGraphStorage {
      * Find paths between nodes using LLM
      */
     async findPathsWithLLM(sourceId: string, targetId: string, options?: TraversalOptions): Promise<PathResult[]> {
-        const result = await this.llm.process<{paths: PathResult[]}>(GraphTask.EVALUATE_PATHS, {
+        const result = await this.llm.process<{paths: PathResult[]}>(GraphTask.FACT_EXTRACTION, {
             start: sourceId,
             end: targetId,
             options
@@ -251,7 +251,7 @@ export class MemoryGraph implements IGraphStorage {
         });
 
         // Use LLM to analyze and explain the best path
-        const result = await this.llm.process<PathResult>(GraphTask.EVALUATE_PATHS, {
+        const result = await this.llm.process<PathResult>(GraphTask.FACT_EXTRACTION, {
             source,
             target,
             nodes,
