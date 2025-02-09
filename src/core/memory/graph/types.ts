@@ -69,6 +69,7 @@ export enum GraphTask {
     REFINE_COMMUNITIES = 'refine_communities',
     FACT_EXTRACTION = 'evaluate_paths',
     EXTRACT_TEMPORAL = 'extract_temporal',
+    EXTRACT_ENTITIES = 'extract_entities',
     PREPARE_FOR_EMBEDDING = 'prepare_for_embedding',
     CONSOLIDATE_EPISODES = 'consolidate_episodes',
     LABEL_COMMUNITY = 'label_community',

@@ -163,163 +163,27 @@ export class GraphManager {
         timestamp: Date,
         sessionId: string
     }>): Promise<void> {
-        const now = new Date();
+        // 1. Create episode nodes
+        await this.createEpisodeNodes(messages);
 
-        // First, create all episode nodes
-        for (const message of messages) {
-            this.log('Message ID:', message.id);
-            // Create episode node
-            const episodeNode: IGraphNode<EpisodeContent> = {
-                id: `ep_${message.id}`,
-                type: 'episode',
-                content: {
-                    body: message.body,
-                    timestamp: message.timestamp,
-                    source: message.role,
-                    sourceDescription: message.body,
-                    sessionId: message.sessionId // Pass sessionId to EpisodeContent
-                },
-                metadata: new Map([
-                    ['role', message.role],
-                    ['turnId', message.id],
-                    ['sessionId', message.sessionId],
-                    ['timestamp', message.timestamp.toISOString()]
-                ]),
-                createdAt: now,
-                validAt: message.timestamp
-            };
-            this.log('Episode Node:', episodeNode);
-            await this.addNode(episodeNode);
-        }
+        // 2. Get context from previous messages
+        const { currentMessages, prevMessages } = await this.prepareMessageContext(messages);
 
-        // Get previous context (last 4 messages)
-        const { nodes: allNodes } = await this.graph.query({ nodeTypes: ['episode'] });
+        // 3. Process entities with deduplication
+        const resolvedEntities = await this.processEntities(currentMessages, prevMessages);
 
-        this.log('All Nodes Before Sort:', allNodes.map(node => ({ id: node.id, validAt: node.validAt })));
-
-        const prevNodes = allNodes
-            .sort((a, b) => (b.validAt?.getTime() || 0) - (a.validAt?.getTime() || 0));
-
-        this.log('All Nodes After Sort:', allNodes.map(node => ({ id: node.id, validAt: node.validAt })));
-
-        const prevMessages = prevNodes
-            .slice(0, 4)
-            .filter(node => !messages.some(msg => msg.id === node.metadata.get('turnId')))  // Exclude current batch
-            .map(node => `${node.content.source}: ${node.content.body}`)
-            .join('\n');
-
-        this.log('Previous Messages:', prevMessages);
-
-        // Process all messages in the batch together
-        const currentMessages = messages
-            .map(msg => `${msg.role}: ${msg.body}`)
-            .join('\n');
-
-        // Extract entities and relationships for the entire batch
-        const entityResult = await this.processWithLLM(
-            GraphTask.EXTRACT_TEMPORAL,
-            {
-                text: currentMessages,
-                context: prevMessages || undefined,
-                metadata: {
-                    timestamp: messages[0].timestamp  // Use first message's timestamp
-                }
-            }
+        // 4. Process temporal relationships
+        const temporalResult = await this.processTemporalRelationships(
+            currentMessages, 
+            prevMessages, 
+            messages[0].timestamp
         );
 
-        this.log('Entities:', entityResult.entities);
-        this.log('Relationships:', entityResult.relationships);
+        // 5. Create graph nodes and edges
+        await this.createGraphStructures(resolvedEntities, temporalResult, messages[0]);
 
-        // Process entities
-        if (entityResult.entities && Array.isArray(entityResult.entities)) {
-            for (const entity of entityResult.entities) {
-                try {
-                    await this.addNode({
-                        id: `entity_${entity.id}`,
-                        type: GraphMemoryType.SEMANTIC,  // Entities are semantic knowledge
-                        metadata: new Map([
-                            ['entityType', entity.type],  // Store LLM's type (e.g. PERSON, OBJECT) in metadata
-                            ['entityName', entity.name],   // Store name in metadata for easier querying
-                            ['sessionId', messages[0].sessionId] // Store sessionId in metadata
-                        ]),
-                        content: {  // Store entity properties in content
-                            name: entity.name,
-                            summary: entity.summary,
-                            sessionId: messages[0].sessionId, // Store sessionId in content
-                            ...entity  // Store any other fields from LLM
-                        },
-                        createdAt: messages[0].timestamp,
-                        validAt: messages[0].timestamp
-                    });
-                    this.log('Added entity node:', { id: `entity_${entity.id}`, type: entity.type });
-                } catch (error: unknown) {
-                    const errorMessage = error instanceof Error ? error.message : String(error);
-                    this.log('Failed to add entity:', {
-                        entityId: `entity_${entity.id}`,
-                        type: entity.type,
-                        error: errorMessage
-                    });
-                }
-            }
-        }
-
-        // Process relationships
-        if (entityResult.relationships && Array.isArray(entityResult.relationships)) {
-            for (const rel of entityResult.relationships) {
-                try {
-                    await this.addEdge({
-                        id: `rel_${rel.sourceId}_${rel.targetId}`,
-                        type: GraphMemoryType.SEMANTIC,  // Relationships are semantic knowledge
-                        sourceId: `entity_${rel.sourceId}`,
-                        targetId: `entity_${rel.targetId}`,
-                        metadata: new Map([
-                            ['relationshipType', rel.type],
-                            ['relationshipName', rel.name || rel.type],
-                            ['description', rel.description || '']
-                        ]),
-                        content: {
-                            type: rel.type,  // Store original type in content
-                            ...rel  // Store any additional relationship properties
-                        },
-                        createdAt: messages[0].timestamp,
-                        validAt: messages[0].timestamp
-                    });
-                    this.log('Added relationship:', {
-                        id: `rel_${rel.sourceId}_${rel.targetId}`,
-                        type: rel.type,
-                        sourceId: `entity_${rel.sourceId}`,
-                        targetId: `entity_${rel.targetId}`
-                    });
-                } catch (error: unknown) {
-                    const errorMessage = error instanceof Error ? error.message : String(error);
-                    this.log('Failed to add relationship:', {
-                        relationshipId: `rel_${rel.sourceId}_${rel.targetId}`,
-                        type: rel.type,
-                        error: errorMessage
-                    });
-                }
-            }
-        }
-
-        // Refine communities after processing entities and relationships
+        // 6. Refine communities
         await this.refineCommunities(messages[0].sessionId);
-
-        const communityInput = {
-            nodes: (await this.graph.query({ nodeTypes: ['entity'] })).nodes,
-            metadata: {
-                type: 'community',
-                lastUpdateTime: new Date().toISOString()
-            }
-        };
-        const communityResponse = await this.processWithLLM(GraphTask.REFINE_COMMUNITIES, communityInput);
-        if (communityResponse && communityResponse.communities) {
-            for (const community of communityResponse.communities) {
-                if (community.id) {
-                    // Update community members
-                    await this.updateCommunityMembers(community.id, community.members);
-                }
-            }
-        }
     }
 
     /**
@@ -439,5 +303,232 @@ export class GraphManager {
 
     private log(message: string, data: any) {
         console.log(message, data);
+    }
+
+    private async createEpisodeNodes(messages: Array<{
+        id: string,
+        body: string,
+        role: string,
+        timestamp: Date,
+        sessionId: string
+    }>): Promise<void> {
+        const now = new Date();
+        for (const message of messages) {
+            const episodeNode: IGraphNode<EpisodeContent> = {
+                id: `ep_${message.id}`,
+                type: 'episode',
+                content: {
+                    body: message.body,
+                    timestamp: message.timestamp,
+                    source: message.role,
+                    sourceDescription: message.body,
+                    sessionId: message.sessionId
+                },
+                metadata: new Map([
+                    ['role', message.role],
+                    ['turnId', message.id],
+                    ['sessionId', message.sessionId],
+                    ['timestamp', message.timestamp.toISOString()]
+                ]),
+                createdAt: now,
+                validAt: message.timestamp
+            };
+            this.log('Episode Node:', episodeNode);
+            await this.addNode(episodeNode);
+        }
+    }
+
+    private async prepareMessageContext(messages: Array<{
+        id: string,
+        body: string,
+        role: string,
+        timestamp: Date,
+        sessionId: string
+    }>): Promise<{
+        currentMessages: string,
+        prevMessages: string
+    }> {
+        // Get previous context (last 4 messages)
+        const { nodes: allNodes } = await this.graph.query({ nodeTypes: ['episode'] });
+        const prevNodes = allNodes.sort((a, b) => 
+            (b.validAt?.getTime() || 0) - (a.validAt?.getTime() || 0)
+        );
+
+        this.log('All Nodes After Sort:', allNodes.map(node => ({ id: node.id, validAt: node.validAt })));
+
+        const prevMessages = prevNodes
+            .slice(0, 4)
+            .filter(node => !messages.some(msg => msg.id === node.metadata.get('turnId')))
+            .map(node => `${node.content.source}: ${node.content.body}`)
+            .join('\n');
+
+        const currentMessages = messages
+            .map(msg => `${msg.role}: ${msg.body}`)
+            .join('\n');
+
+        this.log('Previous Messages:', prevMessages);
+        return { currentMessages, prevMessages };
+    }
+
+    private async processEntities(
+        currentMessages: string,
+        prevMessages: string
+    ): Promise<Array<any>> {
+        // Extract entities
+        const extractedEntities = await this.processWithLLM(
+            GraphTask.EXTRACT_ENTITIES,
+            {
+                text: currentMessages,
+                context: prevMessages || undefined
+            }
+        );
+        this.log('Extracted Entities:', extractedEntities);
+
+        // Dedupe entities
+        const resolvedEntities = [];
+        if (extractedEntities && Array.isArray(extractedEntities)) {
+            const { nodes: existingNodes } = await this.graph.query({ 
+                nodeTypes: [GraphMemoryType.SEMANTIC]
+            });
+
+            for (const entity of extractedEntities) {
+                try {
+                    const resolution = await this.processWithLLM(
+                        GraphTask.DEDUPE_NODE,
+                        {
+                            newNode: entity,
+                            existingNodes,
+                            context: currentMessages
+                        }
+                    );
+
+                    resolvedEntities.push(resolution.is_duplicate
+                        ? { ...entity, id: resolution.uuid.replace('entity_', '') }
+                        : entity
+                    );
+                } catch (error: unknown) {
+                    this.log('Failed to resolve entity:', {
+                        entity,
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                    resolvedEntities.push(entity);
+                }
+            }
+        }
+        return resolvedEntities;
+    }
+
+    private async processTemporalRelationships(
+        currentMessages: string,
+        prevMessages: string,
+        timestamp: Date
+    ): Promise<any> {
+        const result = await this.processWithLLM(
+            GraphTask.EXTRACT_TEMPORAL,
+            {
+                text: currentMessages,
+                context: prevMessages || undefined,
+                metadata: { timestamp }
+            }
+        );
+        this.log('Temporal Result:', result);
+        return result;
+    }
+
+    private async createGraphStructures(
+        resolvedEntities: Array<any>,
+        temporalResult: any,
+        firstMessage: {
+            timestamp: Date,
+            sessionId: string
+        }
+    ): Promise<void> {
+        // Helper to ensure entity ID has prefix
+        const ensureEntityPrefix = (id: string | number) => {
+            const strId = String(id);
+            return strId.startsWith('entity_') ? strId : `entity_${strId}`;
+        };
+
+        // Create entity nodes
+        const createdEntityIds = new Set<string>();
+        if (temporalResult?.entities && Array.isArray(temporalResult.entities)) {
+            for (const entity of temporalResult.entities) {
+                try {
+                    const entityId = ensureEntityPrefix(entity.id);
+                    await this.addNode({
+                        id: entityId,
+                        type: entity.type.toLowerCase(),
+                        content: {
+                            name: entity.name || '',
+                            summary: entity.summary || ''
+                        },
+                        metadata: new Map([
+                            ['sessionId', firstMessage.sessionId],
+                            ['timestamp', firstMessage.timestamp.toISOString()]
+                        ]),
+                        createdAt: new Date(),
+                        validAt: firstMessage.timestamp
+                    });
+                    createdEntityIds.add(entityId);
+                } catch (error) {
+                    console.error(`Failed to add entity node:`, {
+                        entityId: ensureEntityPrefix(entity.id),
+                        type: entity.type,
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                }
+            }
+        }
+
+        // Create relationships
+        if (temporalResult?.relationships && Array.isArray(temporalResult.relationships)) {
+            for (const rel of temporalResult.relationships) {
+                try {
+                    const sourceId = ensureEntityPrefix(rel.sourceId);
+                    const targetId = ensureEntityPrefix(rel.targetId);
+                    
+                    // Verify both nodes exist before creating relationship
+                    const sourceExists = await this.getNode(sourceId);
+                    const targetExists = await this.getNode(targetId);
+                    
+                    if (!sourceExists || !targetExists) {
+                        console.error(`Cannot create relationship - missing nodes:`, {
+                            sourceId,
+                            targetId,
+                            sourceExists: !!sourceExists,
+                            targetExists: !!targetExists,
+                            relationship: rel.type
+                        });
+                        continue;
+                    }
+
+                    const relationshipId = `rel_${rel.sourceId}_${rel.targetId}`;
+                    await this.addEdge({
+                        id: relationshipId,
+                        type: rel.type.toLowerCase(),
+                        sourceId,
+                        targetId,
+                        content: {
+                            name: rel.name || '',
+                            description: rel.description || ''
+                        },
+                        metadata: new Map([
+                            ['sessionId', firstMessage.sessionId],
+                            ['timestamp', firstMessage.timestamp.toISOString()]
+                        ]),
+                        createdAt: new Date(),
+                        validAt: new Date(rel.valid_at || firstMessage.timestamp),
+                        invalidAt: rel.invalid_at ? new Date(rel.invalid_at) : undefined
+                    });
+                } catch (error) {
+                    console.error(`Failed to add relationship:`, {
+                        sourceId: ensureEntityPrefix(rel.sourceId),
+                        targetId: ensureEntityPrefix(rel.targetId),
+                        type: rel.type,
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                }
+            }
+        }
     }
 }

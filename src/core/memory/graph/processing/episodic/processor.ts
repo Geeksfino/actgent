@@ -4,6 +4,15 @@ import { IGraphNode, IGraphEdge, EpisodeContent } from '../../data/types';
 import OpenAI from 'openai';
 import { retry } from "/Users/cliang/repos/clipforge/actgent/src/core/utils/retry";
 
+interface Message {
+    id: string;
+    body: string;
+    role: string;
+    timestamp: Date;
+    sessionId: string;
+    context?: any;
+}
+
 /**
  * LLM processor for graph operations
  */
@@ -108,15 +117,60 @@ export class EpisodicGraphProcessor {
                     })
                 };
 
+            case GraphTask.EXTRACT_ENTITIES:
+                console.log("EXTRACT_ENTITIES data: ", data);
+                const extractEntitiesPrompt = this.buildEntityExtractionPrompt({ text: data.text, context: data.context });
+                console.log("EXTRACT_ENTITIES prompt: ", extractEntitiesPrompt);
+                return {
+                    prompt: extractEntitiesPrompt,
+                    functionSchema: z.object({
+                        entities: z.array(z.object({
+                            id: z.number(),
+                            name: z.string(),
+                            type: z.string(),
+                            summary: z.string().optional()
+                        }))
+                    })
+                };
+
             case GraphTask.EXTRACT_TEMPORAL:
                 console.log("EXTRACT_TEMPORAL data: ", data);
-                const extractTemporalPrompt = this.buildTemporalExtractionPrompt({ text: data.text, context: data.context, referenceTimestamp: data.referenceTimestamp, fact: data.fact });
+                const extractTemporalPrompt = this.buildTemporalExtractionPrompt({ text: data.text, context: data.context, referenceTimestamp: data.metadata?.timestamp?.toISOString(), fact: data.fact });
                 console.log("EXTRACT_TEMPORAL prompt: ", extractTemporalPrompt);
                 return {
                     prompt: extractTemporalPrompt,
                     functionSchema: z.object({
-                        valid_at: z.string().nullable(),
-                        invalid_at: z.string().nullable()
+                        entities: z.array(z.object({
+                            id: z.number(),
+                            name: z.string(),
+                            type: z.string(),
+                            summary: z.string().optional()
+                        })),
+                        relationships: z.array(z.object({
+                            sourceId: z.number(),
+                            targetId: z.number(),
+                            type: z.string(),
+                            name: z.string().optional(),
+                            description: z.string().optional(),
+                            valid_at: z.string().nullable(),
+                            invalid_at: z.string().nullable()
+                        }))
+                    })
+                };
+
+            case GraphTask.REFINE_COMMUNITIES:
+                console.log("REFINE_COMMUNITIES data: ", data);
+                const refineCommunityPrompt = this.buildRefineCommunityPrompt(data);
+                console.log("REFINE_COMMUNITIES prompt: ", refineCommunityPrompt);
+                return {
+                    prompt: refineCommunityPrompt,
+                    functionSchema: z.object({
+                        communities: z.array(z.object({
+                            id: z.number(),
+                            name: z.string(),
+                            description: z.string(),
+                            members: z.array(z.number())
+                        }))
                     })
                 };
 
@@ -218,67 +272,75 @@ export class EpisodicGraphProcessor {
     }
 
     private buildEntityExtractionPrompt(input: { text: string, context: string }): string {
-        return `<PREVIOUS MESSAGES>
-${input.context}
-</PREVIOUS MESSAGES>
-<CURRENT MESSAGE>
+        return `Extract entities from the following conversation. For each entity:
+- Generate a numeric ID (starting from 1)
+- Identify the entity type (e.g., PERSON, ORGANIZATION, PRODUCT, LOCATION)
+- Provide a brief summary if relevant
+
+Current conversation:
 ${input.text}
-</CURRENT MESSAGE>
 
-Given the above conversation, extract entity nodes from the CURRENT MESSAGE that are explicitly or implicitly mentioned:
+${input.context ? `Previous context:\n${input.context}` : ''}
 
-Guidelines:
-1. ALWAYS extract the speaker/actor as the first node. The speaker is the part before the colon in each line of dialogue.
-2. Extract other significant entities, concepts, or actors mentioned in the CURRENT MESSAGE.
-3. DO NOT create nodes for relationships or actions.
-4. DO NOT create nodes for temporal information like dates, times or years (these will be added to edges later).
-5. Be as explicit as possible in your node names, using full names.
-6. DO NOT extract entities mentioned only in previous messages.
+Extract entities that are important to understanding the conversation. Focus on:
+1. People, organizations, and places mentioned
+2. Products, services, or items being discussed
+3. Key concepts or topics that are central to the conversation
 
-Required Output Format:
-JSON array of objects, each containing:
-- name: string (full, explicit name of the entity)
-- type: string (category of the entity: PERSON, PLACE, ORGANIZATION, BOOK, etc.)
-- summary: string (brief description or context)`;
+Return entities in this format:
+{
+  "entities": [
+    {
+      "id": 1,  // Numeric ID
+      "name": "Entity Name",
+      "type": "ENTITY_TYPE",
+      "summary": "Optional description"
+    }
+  ]
+}`;
     }
 
     private buildTemporalExtractionPrompt(input: { text: string, context: string, referenceTimestamp: string, fact: string }): string {
-        return `<PREVIOUS MESSAGES>
-${input.context}
-</PREVIOUS MESSAGES>
-<CURRENT MESSAGE>
+        return `Extract entities and their relationships from the following conversation, including temporal information.
+
+Current conversation:
 ${input.text}
-</CURRENT MESSAGE>
-<REFERENCE TIMESTAMP>
-${input.referenceTimestamp}
-</REFERENCE TIMESTAMP>
-<FACT>
-${input.fact}
-</FACT>
 
-IMPORTANT: Only extract time information if it is part of the provided fact. Otherwise ignore the time mentioned.
-Make sure to determine dates from relative time mentions (eg 10 years ago, 2 mins ago) based on the reference timestamp.
-If the relationship is not of spanning nature, but you can determine dates, set the valid_at only.
+${input.context ? `Previous context:\n${input.context}` : ''}
 
-Definitions:
-- valid_at: The date and time when the relationship described by the edge fact became true or was established.
-- invalid_at: The date and time when the relationship described by the edge fact stopped being true or ended.
+Reference timestamp: ${input.referenceTimestamp || 'Not provided'}
 
 Guidelines:
-1. Use ISO 8601 format (YYYY-MM-DDTHH:MM:SS.SSSSSSZ) for datetimes.
-2. Use the reference timestamp as the current time when determining the valid_at and invalid_at dates.
-3. If the fact is written in the present tense, use the Reference Timestamp for the valid_at date.
-4. If no temporal information establishes or changes the relationship, leave fields as null.
-5. Do not infer dates from related events. Only use dates directly stated.
-6. For relative time mentions, calculate actual datetime based on reference timestamp.
-7. If only a date is mentioned without time, use 00:00:00 (midnight).
-8. If only year is mentioned, use January 1st at 00:00:00.
-9. Always include time zone offset (use Z for UTC if no specific zone mentioned).
+1. Extract all important entities (people, products, organizations, etc.)
+2. Identify relationships between entities
+3. For each relationship, determine:
+   - When it was established (valid_at)
+   - When it ended, if applicable (invalid_at)
+   - Use ISO 8601 format (YYYY-MM-DDTHH:MM:SS.SSSSSSZ)
+   - Use the reference timestamp for present tense statements
+   - Calculate actual dates for relative time mentions
 
-Return a JSON object with:
+Return in this format:
 {
-    "valid_at": string | null,  // ISO 8601 datetime when the fact became true
-    "invalid_at": string | null // ISO 8601 datetime when the fact stopped being true
+  "entities": [
+    {
+      "id": 1,  // Numeric ID
+      "name": "Entity Name",
+      "type": "ENTITY_TYPE",
+      "summary": "Optional description"
+    }
+  ],
+  "relationships": [
+    {
+      "sourceId": 1,  // Numeric ID referencing an entity
+      "targetId": 2,  // Numeric ID referencing an entity
+      "type": "RELATIONSHIP_TYPE",
+      "name": "Optional name",
+      "description": "Optional description",
+      "valid_at": "2024-01-01T00:00:00.000Z",  // When relationship became true
+      "invalid_at": null  // When relationship ended (if applicable)
+    }
+  ]
 }`;
     }
 
@@ -459,6 +521,39 @@ Result: "In yesterday's team meeting, we discussed Q4 goals and project timeline
 }`;
     }
 
+    private buildRefineCommunityPrompt(data: any): string {
+        const { nodes, metadata } = data;
+        return `Analyze the following entities and group them into meaningful communities based on their relationships and shared characteristics.
+
+Entities:
+${nodes.map((node: any) => `- ${node.content.name} (${node.metadata.get('entityType')}): ${node.content.summary || 'No summary'}`).join('\n')}
+
+For each community:
+1. Generate a numeric ID (starting from 1)
+2. Give it a descriptive name
+3. Provide a brief description of what connects these entities
+4. List the member entity IDs (numeric IDs)
+
+Guidelines:
+- Focus on meaningful relationships and shared contexts
+- Consider both direct and indirect relationships
+- A single entity can belong to multiple communities
+- Communities should have at least 2 members
+- Don't force entities into communities if there's no clear connection
+
+Return in this format:
+{
+  "communities": [
+    {
+      "id": 1,  // Numeric ID
+      "name": "Community Name",
+      "description": "What connects these entities",
+      "members": [1, 2, 3]  // Array of numeric entity IDs
+    }
+  ]
+}`;
+    }
+
     private getFunctionName(task: GraphTask): string {
         switch (task) {
             case GraphTask.REFINE_COMMUNITIES:
@@ -530,7 +625,7 @@ Result: "In yesterday's team meeting, we discussed Q4 goals and project timeline
         try {
             const { valid_at, invalid_at } = await this.processWithLLM(
                 GraphTask.EXTRACT_TEMPORAL,
-                { text: data.text, context: data.context, referenceTimestamp: data.referenceTimestamp, fact: data.fact }
+                { text: data.text, context: data.context, referenceTimestamp: data.metadata?.timestamp?.toISOString(), fact: data.fact }
             );
 
             console.log("Extracted valid_at:", valid_at);
@@ -541,5 +636,55 @@ Result: "In yesterday's team meeting, we discussed Q4 goals and project timeline
             console.error("Error in extractTemporal:", error);
             return { entities: [], relationships: [] };
         }
+    }
+
+    private async extractTemporalRelationships(messages: Array<Message>): Promise<any> {
+        const data = {
+          text: messages.map(msg => `${msg.role}: ${msg.body}`).join('\n'),
+          context: messages[0].context,
+          prompt: `Extract temporal relationships between entities from the following conversation. For each relationship:
+- Use entity IDs with 'entity_' prefix (e.g., 'entity_1', 'entity_2')
+- Specify the relationship type
+- Provide a name and description
+- Include temporal information (valid_at, invalid_at)
+
+Current conversation:
+${messages.map(msg => `${msg.role}: ${msg.body}`).join('\n')}
+
+Return relationships in this format:
+{
+  "entities": [
+    {
+      "id": "entity_1",  // Entity ID with prefix
+      "name": "Entity Name",
+      "type": "ENTITY_TYPE",
+      "summary": "Optional description"
+    }
+  ],
+  "relationships": [
+    {
+      "sourceId": "entity_1",  // Source entity ID with prefix
+      "targetId": "entity_2",  // Target entity ID with prefix
+      "type": "RELATIONSHIP_TYPE",
+      "name": "Relationship Name",
+      "description": "Optional description",
+      "valid_at": "ISO timestamp",
+      "invalid_at": "ISO timestamp or null"
+    }
+  ]
+}
+
+Extract relationships that show:
+1. How entities are connected
+2. When these connections were established or changed
+3. Any temporal aspects of the relationships
+
+Focus on meaningful relationships that help understand:
+- User interactions with products/services
+- Connections between different entities
+- Changes in relationships over time`
+        };
+
+        return this.processWithLLM(GraphTask.EXTRACT_TEMPORAL, data);
     }
 }
