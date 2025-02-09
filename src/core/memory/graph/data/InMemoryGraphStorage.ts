@@ -345,7 +345,7 @@ export class InMemoryGraphStorage implements IGraphStorage {
         }
 
         if (filter.nodeTypes?.length) {
-            console.log("query before nodeTypes filter nodes.length: ", nodes.length);
+            // console.log("query before nodeTypes filter nodes.length: ", nodes.length);
             nodes = nodes.filter(node => filter.nodeTypes!.includes(node.type));
             console.log("query after nodeTypes filter nodes.length: ", nodes.length);
         }

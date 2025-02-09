@@ -149,12 +149,16 @@ export class GraphManager {
     }
 
     /**
-     * Ingest one or more messages into the graph
-     * Handles:
+     * Ingest messages into the graph memory system:
      * - Creating episode nodes
      * - Extracting entities and relationships using LLM
      * - Building graph connections
      * - Automatic community refinement
+     * @param messages Array of messages to ingest
+     * @param processingLayer Optional, controls depth of processing:
+     *   1 = episodic only
+     *   2 = episodic + semantic
+     *   3 = episodic + semantic + community (default)
      */
     async ingest(messages: Array<{
         id: string,
@@ -162,28 +166,33 @@ export class GraphManager {
         role: string,
         timestamp: Date,
         sessionId: string
-    }>): Promise<void> {
-        // 1. Create episode nodes
+    }>, processingLayer: number = 3): Promise<void> {
+        // Layer 1: Create episode nodes
         await this.createEpisodeNodes(messages);
 
-        // 2. Get context from previous messages
-        const { currentMessages, prevMessages } = await this.prepareMessageContext(messages);
+        if (processingLayer > 1) {
+            // Layer 2: Process semantic layer
+            // Get context from previous messages
+            const { currentMessages, prevMessages } = await this.prepareMessageContext(messages);
 
-        // 3. Process entities with deduplication
-        const resolvedEntities = await this.processEntities(currentMessages, prevMessages);
+            // Process entities with deduplication
+            const resolvedEntities = await this.processEntities(currentMessages, prevMessages);
 
-        // 4. Process temporal relationships
-        const temporalResult = await this.processTemporalRelationships(
-            currentMessages, 
-            prevMessages, 
-            messages[0].timestamp
-        );
+            // Process temporal relationships
+            const temporalResult = await this.processTemporalRelationships(
+                currentMessages, 
+                prevMessages, 
+                messages[0].timestamp
+            );
 
-        // 5. Create graph nodes and edges
-        await this.createGraphStructures(resolvedEntities, temporalResult, messages[0]);
+            // Create graph nodes and edges
+            await this.createGraphStructures(resolvedEntities, temporalResult, messages[0]);
+        }
 
-        // 6. Refine communities
-        await this.refineCommunities(messages[0].sessionId);
+        if (processingLayer > 2) {
+            // Layer 3: Process community layer
+            await this.refineCommunities(messages[0].sessionId);
+        }
     }
 
     /**
@@ -292,6 +301,9 @@ export class GraphManager {
         return this.graph.getEdge(id);
     }
 
+    /**
+     * Process a task using LLM with proper data handling
+     */
     private async processWithLLM(task: GraphTask, data: any): Promise<any> {
         return this.llm.process(task, data);
     }
@@ -449,29 +461,63 @@ export class GraphManager {
             return strId.startsWith('entity_') ? strId : `entity_${strId}`;
         };
 
-        // Create entity nodes
+        // Create or update entity nodes
         const createdEntityIds = new Set<string>();
-        if (temporalResult?.entities && Array.isArray(temporalResult.entities)) {
-            for (const entity of temporalResult.entities) {
+        const temporalEntities = temporalResult?.entities || [];
+        if (Array.isArray(temporalEntities)) {
+            for (const entity of temporalEntities) {
                 try {
                     const entityId = ensureEntityPrefix(entity.id);
-                    await this.addNode({
+                    const entityType = entity.type.toLowerCase();
+                    
+                    // Get existing node if any
+                    const existingNode = await this.storage.getNode(entityId);
+                    
+                    // Prepare node data, preserving existing metadata if present
+                    const entityNode: IGraphNode = {
                         id: entityId,
-                        type: entity.type.toLowerCase(),
+                        type: entityType,
                         content: {
                             name: entity.name || '',
-                            summary: entity.summary || ''
+                            summary: entity.summary || '',
+                            // Preserve any additional content fields
+                            ...(existingNode?.content || {})
                         },
                         metadata: new Map([
+                            // Preserve existing metadata
+                            ...(existingNode?.metadata || []),
+                            // Update with new metadata
                             ['sessionId', firstMessage.sessionId],
-                            ['timestamp', firstMessage.timestamp.toISOString()]
+                            ['timestamp', firstMessage.timestamp.toISOString()],
+                            ['entityType', entityType],
+                            ['lastUpdateTime', new Date().toISOString()]
                         ]),
-                        createdAt: new Date(),
-                        validAt: firstMessage.timestamp
-                    });
+                        createdAt: existingNode?.createdAt || new Date(),
+                        validAt: firstMessage.timestamp,
+                        // Don't include invalidAt for nodes
+                        expiredAt: existingNode?.expiredAt
+                    };
+
+                    if (existingNode) {
+                        // Update existing node
+                        await this.storage.updateNode(entityId, entityNode);
+                        this.log('Updated entity node:', { 
+                            entityId, 
+                            type: entityType,
+                            name: entity.name
+                        });
+                    } else {
+                        // Create new node
+                        await this.storage.addNode(entityNode);
+                        this.log('Created entity node:', { 
+                            entityId, 
+                            type: entityType,
+                            name: entity.name
+                        });
+                    }
                     createdEntityIds.add(entityId);
                 } catch (error) {
-                    console.error(`Failed to add entity node:`, {
+                    console.error(`Failed to add/update entity node:`, {
                         entityId: ensureEntityPrefix(entity.id),
                         type: entity.type,
                         error: error instanceof Error ? error.message : String(error)
@@ -480,53 +526,330 @@ export class GraphManager {
             }
         }
 
-        // Create relationships
+        // Create or update relationships
         if (temporalResult?.relationships && Array.isArray(temporalResult.relationships)) {
             for (const rel of temporalResult.relationships) {
                 try {
                     const sourceId = ensureEntityPrefix(rel.sourceId);
                     const targetId = ensureEntityPrefix(rel.targetId);
                     
-                    // Verify both nodes exist before creating relationship
-                    const sourceExists = await this.getNode(sourceId);
-                    const targetExists = await this.getNode(targetId);
+                    // Verify both nodes exist
+                    const [sourceExists, targetExists] = await Promise.all([
+                        this.storage.getNode(sourceId),
+                        this.storage.getNode(targetId)
+                    ]);
                     
                     if (!sourceExists || !targetExists) {
-                        console.error(`Cannot create relationship - missing nodes:`, {
+                        console.error('Cannot create relationship - missing nodes:', {
                             sourceId,
                             targetId,
-                            sourceExists: !!sourceExists,
-                            targetExists: !!targetExists,
                             relationship: rel.type
                         });
                         continue;
                     }
 
-                    const relationshipId = `rel_${rel.sourceId}_${rel.targetId}`;
-                    await this.addEdge({
+                    const relationshipId = `rel_${sourceId}_${targetId}_${rel.type}`;
+                    const validAt = rel.valid_at ? new Date(rel.valid_at) : firstMessage.timestamp;
+                    const invalidAt = rel.invalid_at ? new Date(rel.invalid_at) : undefined;
+
+                    // Get existing relationship if any
+                    const existingEdge = await this.storage.getEdge(relationshipId);
+
+                    const relationshipEdge: IGraphEdge = {
                         id: relationshipId,
                         type: rel.type.toLowerCase(),
                         sourceId,
                         targetId,
                         content: {
                             name: rel.name || '',
-                            description: rel.description || ''
+                            description: rel.description || '',
+                            // Preserve any additional content fields
+                            ...(existingEdge?.content || {})
                         },
                         metadata: new Map([
+                            // Preserve existing metadata
+                            ...(existingEdge?.metadata || []),
+                            // Update with new metadata
                             ['sessionId', firstMessage.sessionId],
-                            ['timestamp', firstMessage.timestamp.toISOString()]
+                            ['timestamp', firstMessage.timestamp.toISOString()],
+                            ['relationshipType', rel.type.toLowerCase()],
+                            ['lastUpdateTime', new Date().toISOString()]
                         ]),
-                        createdAt: new Date(),
-                        validAt: new Date(rel.valid_at || firstMessage.timestamp),
-                        invalidAt: rel.invalid_at ? new Date(rel.invalid_at) : undefined
-                    });
+                        createdAt: existingEdge?.createdAt || new Date(),
+                        validAt,
+                        invalidAt,
+                        expiredAt: existingEdge?.expiredAt
+                    };
+
+                    if (existingEdge) {
+                        // Update existing relationship
+                        await this.storage.updateEdge(relationshipId, relationshipEdge);
+                        this.log('Updated relationship:', { 
+                            id: relationshipId, 
+                            type: rel.type,
+                            source: sourceId,
+                            target: targetId
+                        });
+                    } else {
+                        // Create new relationship
+                        await this.storage.addEdge(relationshipEdge);
+                        this.log('Created relationship:', { 
+                            id: relationshipId, 
+                            type: rel.type,
+                            source: sourceId,
+                            target: targetId
+                        });
+                    }
                 } catch (error) {
-                    console.error(`Failed to add relationship:`, {
+                    console.error(`Failed to add/update relationship:`, {
                         sourceId: ensureEntityPrefix(rel.sourceId),
                         targetId: ensureEntityPrefix(rel.targetId),
                         type: rel.type,
                         error: error instanceof Error ? error.message : String(error)
                     });
+                }
+            }
+        }
+    }
+
+    /**
+     * Process a batch of messages through the staged pipeline:
+     * 1. Extract entities and store them
+     * 2. Deduplicate entities and update storage
+     * 3. Extract temporal relationships and update storage
+     */
+    private async processMessageBatch(messages: Array<{
+        id: string,
+        body: string,
+        role: string,
+        timestamp: Date,
+        sessionId: string
+    }>): Promise<void> {
+        try {
+            // Stage 1: Initial entity extraction
+            const extractedNodeIds = await this.processEntityExtraction(messages);
+            this.log('Stage 1: Extracted entities', { count: extractedNodeIds.length });
+
+            // Stage 2: Entity deduplication
+            const deduplicatedNodeIds = await this.processEntityDeduplication(extractedNodeIds);
+            this.log('Stage 2: Deduplicated entities', { count: deduplicatedNodeIds.length });
+
+            // Stage 3: Temporal relationship extraction
+            await this.processTemporalStage(deduplicatedNodeIds, {
+                timestamp: messages[0].timestamp,
+                sessionId: messages[0].sessionId
+            });
+            this.log('Stage 3: Processed temporal relationships', { nodeCount: deduplicatedNodeIds.length });
+        } catch (error) {
+            console.error('Failed to process message batch:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Stage 1: Extract entities and store them with initial metadata
+     */
+    private async processEntityExtraction(messages: Array<{
+        body: string,
+        timestamp: Date,
+        sessionId: string
+    }>): Promise<string[]> {
+        const extractedNodeIds: string[] = [];
+        const currentMessages = messages.map(m => m.body).join('\n');
+
+        // Extract entities using LLM
+        const entities = await this.processWithLLM(GraphTask.EXTRACT_ENTITIES, {
+            messages: currentMessages
+        });
+
+        // Store each entity
+        for (const entity of entities) {
+            try {
+                const entityId = `entity_${entity.id}`;
+                const entityNode: IGraphNode = {
+                    id: entityId,
+                    type: entity.type.toLowerCase(),
+                    content: {
+                        name: entity.name,
+                        summary: entity.summary
+                    },
+                    metadata: new Map([
+                        ['extractionStage', 'initial'],
+                        ['sessionId', messages[0].sessionId],
+                        ['timestamp', messages[0].timestamp.toISOString()]
+                    ]),
+                    createdAt: new Date(),
+                    validAt: messages[0].timestamp
+                };
+
+                await this.storage.addNode(entityNode);
+                extractedNodeIds.push(entityId);
+                this.log('Stored initial entity:', { entityId, type: entity.type });
+            } catch (error) {
+                console.error('Failed to store entity:', error);
+            }
+        }
+
+        return extractedNodeIds;
+    }
+
+    /**
+     * Stage 2: Deduplicate entities and update storage with merged data
+     */
+    private async processEntityDeduplication(nodeIds: string[]): Promise<string[]> {
+        const deduplicatedIds: string[] = [];
+        const nodes = await Promise.all(nodeIds.map(id => this.storage.getNode(id)));
+        const validNodes = nodes.filter((n): n is NonNullable<typeof n> => n !== null);
+
+        // Get deduplication results from LLM
+        const dedupeResult = await this.processWithLLM(GraphTask.DEDUPE_NODE, {
+            nodes: validNodes
+        });
+
+        // Process each merged entity
+        for (const mergedEntity of dedupeResult.entities) {
+            try {
+                const primaryId = `entity_${mergedEntity.primaryId}`;
+                const duplicateIds = mergedEntity.duplicateIds.map((id: string) => `entity_${id}`);
+
+                // Create merged node
+                const mergedNode: IGraphNode = {
+                    id: primaryId,
+                    type: mergedEntity.type.toLowerCase(),
+                    content: {
+                        name: mergedEntity.name,
+                        summary: mergedEntity.summary,
+                        alternateNames: mergedEntity.alternateNames || []
+                    },
+                    metadata: new Map([
+                        ['deduplicationStage', 'merged'],
+                        ['mergedIds', duplicateIds],
+                        ['lastUpdateTime', new Date().toISOString()]
+                    ]),
+                    createdAt: new Date(),
+                    validAt: new Date()
+                };
+
+                // Update primary node
+                await this.storage.updateNode(primaryId, mergedNode);
+                deduplicatedIds.push(primaryId);
+
+                // Mark duplicates as merged
+                for (const dupId of duplicateIds) {
+                    if (dupId !== primaryId) {
+                        const dupNode = await this.storage.getNode(dupId);
+                        if (dupNode) {
+                            dupNode.metadata.set('mergedInto', primaryId);
+                            dupNode.metadata.set('lastUpdateTime', new Date().toISOString());
+                            await this.storage.updateNode(dupId, dupNode);
+                        }
+                    }
+                }
+
+                this.log('Merged entities:', { primaryId, duplicateIds });
+            } catch (error) {
+                console.error('Failed to merge entities:', error);
+            }
+        }
+
+        return deduplicatedIds;
+    }
+
+    /**
+     * Stage 3: Extract and store temporal relationships
+     */
+    private async processTemporalStage(nodeIds: string[], firstMessage: {
+        timestamp: Date,
+        sessionId: string
+    }): Promise<void> {
+        // Get all deduplicated nodes
+        const nodes = await Promise.all(nodeIds.map(id => this.storage.getNode(id)));
+        const validNodes = nodes.filter((n): n is NonNullable<typeof n> => n !== null);
+
+        // Extract temporal relationships
+        const temporalResult = await this.processWithLLM(GraphTask.EXTRACT_TEMPORAL, {
+            nodes: validNodes,
+            metadata: {
+                timestamp: firstMessage.timestamp,
+                sessionId: firstMessage.sessionId
+            }
+        });
+
+        // Update nodes with temporal data
+        if (temporalResult.entities) {
+            for (const entity of temporalResult.entities) {
+                try {
+                    const entityId = `entity_${entity.id}`;
+                    const existingNode = await this.storage.getNode(entityId);
+                    if (existingNode) {
+                        // Merge temporal metadata
+                        const updatedNode: IGraphNode = {
+                            ...existingNode,
+                            metadata: new Map([
+                                ...existingNode.metadata,
+                                ['temporalStage', 'processed'],
+                                ['lastUpdateTime', new Date().toISOString()]
+                            ])
+                        };
+                        await this.storage.updateNode(entityId, updatedNode);
+                    }
+                } catch (error) {
+                    console.error('Failed to update temporal entity data:', error);
+                }
+            }
+        }
+
+        // Create temporal relationships
+        if (temporalResult.relationships) {
+            for (const rel of temporalResult.relationships) {
+                try {
+                    const sourceId = `entity_${rel.sourceId}`;
+                    const targetId = `entity_${rel.targetId}`;
+                    
+                    // Verify both nodes exist
+                    const [sourceExists, targetExists] = await Promise.all([
+                        this.storage.getNode(sourceId),
+                        this.storage.getNode(targetId)
+                    ]);
+                    
+                    if (!sourceExists || !targetExists) {
+                        console.error('Cannot create relationship - missing nodes:', {
+                            sourceId,
+                            targetId,
+                            relationship: rel.type
+                        });
+                        continue;
+                    }
+
+                    const relationshipId = `rel_${sourceId}_${targetId}_${rel.type}`;
+                    const edge: IGraphEdge = {
+                        id: relationshipId,
+                        type: rel.type.toLowerCase(),
+                        sourceId,
+                        targetId,
+                        content: {
+                            name: rel.name,
+                            description: rel.description
+                        },
+                        metadata: new Map([
+                            ['temporalStage', 'processed'],
+                            ['sessionId', firstMessage.sessionId],
+                            ['timestamp', firstMessage.timestamp.toISOString()]
+                        ]),
+                        createdAt: new Date(),
+                        validAt: rel.valid_at ? new Date(rel.valid_at) : firstMessage.timestamp,
+                        invalidAt: rel.invalid_at ? new Date(rel.invalid_at) : undefined
+                    };
+
+                    await this.storage.addEdge(edge);
+                    this.log('Created temporal relationship:', {
+                        id: relationshipId,
+                        type: rel.type,
+                        source: sourceId,
+                        target: targetId
+                    });
+                } catch (error) {
+                    console.error('Failed to create temporal relationship:', error);
                 }
             }
         }

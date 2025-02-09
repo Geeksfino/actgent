@@ -134,9 +134,9 @@ export class EpisodicGraphProcessor {
                 };
 
             case GraphTask.EXTRACT_TEMPORAL:
-                console.log("EXTRACT_TEMPORAL data: ", data);
+                // console.log("EXTRACT_TEMPORAL data: ", data);
                 const extractTemporalPrompt = this.buildTemporalExtractionPrompt({ text: data.text, context: data.context, referenceTimestamp: data.metadata?.timestamp?.toISOString(), fact: data.fact });
-                console.log("EXTRACT_TEMPORAL prompt: ", extractTemporalPrompt);
+                // console.log("EXTRACT_TEMPORAL prompt: ", extractTemporalPrompt);
                 return {
                     prompt: extractTemporalPrompt,
                     functionSchema: z.object({
@@ -159,9 +159,9 @@ export class EpisodicGraphProcessor {
                 };
 
             case GraphTask.REFINE_COMMUNITIES:
-                console.log("REFINE_COMMUNITIES data: ", data);
+                // console.log("REFINE_COMMUNITIES data: ", data);
                 const refineCommunityPrompt = this.buildRefineCommunityPrompt(data);
-                console.log("REFINE_COMMUNITIES prompt: ", refineCommunityPrompt);
+                // console.log("REFINE_COMMUNITIES prompt: ", refineCommunityPrompt);
                 return {
                     prompt: refineCommunityPrompt,
                     functionSchema: z.object({
@@ -175,9 +175,9 @@ export class EpisodicGraphProcessor {
                 };
 
             case GraphTask.EVALUATE_SEARCH:
-                console.log("EVALUATE_SEARCH data: ", data);
+                // console.log("EVALUATE_SEARCH data: ", data);
                 const evaluateSearchPrompt = this.buildEvaluateSearchPrompt(data);
-                console.log("EVALUATE_SEARCH prompt: ", evaluateSearchPrompt);
+                // console.log("EVALUATE_SEARCH prompt: ", evaluateSearchPrompt);
                 return {
                     prompt: evaluateSearchPrompt,
                     functionSchema: z.object({
@@ -188,14 +188,14 @@ export class EpisodicGraphProcessor {
                 };
 
             case GraphTask.SUMMARIZE_NODE:
-                console.log("SUMMARIZE_NODE data: ", data);
+                // console.log("SUMMARIZE_NODE data: ", data);
                 const summarizeNodePrompt = this.buildSummarizeNodePrompt({ 
                     nodeName: data.nodeName,
                     previousSummary: data.previousSummary,
                     context: data.context,
                     episodes: data.episodes
                 });
-                console.log("SUMMARIZE_NODE prompt: ", summarizeNodePrompt);
+                // console.log("SUMMARIZE_NODE prompt: ", summarizeNodePrompt);
                 return {
                     prompt: summarizeNodePrompt,
                     functionSchema: z.object({
@@ -206,9 +206,9 @@ export class EpisodicGraphProcessor {
                 };
 
             case GraphTask.INVALIDATE_EDGES:
-                console.log("INVALIDATE_EDGES data: ", data);
+                // console.log("INVALIDATE_EDGES data: ", data);   
                 const invalidateEdgesPrompt = this.buildInvalidateEdgesPrompt(data);
-                console.log("INVALIDATE_EDGES prompt: ", invalidateEdgesPrompt);
+                // console.log("INVALIDATE_EDGES prompt: ", invalidateEdgesPrompt);
                 return {
                     prompt: invalidateEdgesPrompt,
                     functionSchema: z.object({
@@ -218,9 +218,9 @@ export class EpisodicGraphProcessor {
                 };
 
             case GraphTask.EXPAND_QUERY:
-                console.log("EXPAND_QUERY data: ", data);
+                // console.log("EXPAND_QUERY data: ", data);   
                 const expandQueryPrompt = this.buildExpandQueryPrompt(data);
-                console.log("EXPAND_QUERY prompt: ", expandQueryPrompt);
+                // console.log("EXPAND_QUERY prompt: ", expandQueryPrompt);
                 return {
                     prompt: expandQueryPrompt,
                     functionSchema: z.object({
