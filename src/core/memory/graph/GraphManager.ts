@@ -289,16 +289,8 @@ export class GraphManager {
         return this.graph.addNode(node);
     }
 
-    private async addEdge<T>(edge: IGraphEdge<T>): Promise<string> {
-        return this.graph.addEdge(edge);
-    }
-
     private async getNode<T>(id: string): Promise<IGraphNode<T> | null> {
         return this.graph.getNode(id);
-    }
-
-    private async getEdge<T>(id: string): Promise<IGraphEdge<T> | null> {
-        return this.graph.getEdge(id);
     }
 
     /**
