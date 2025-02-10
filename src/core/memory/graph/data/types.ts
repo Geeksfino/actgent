@@ -39,6 +39,7 @@ export interface IGraphEdge<T = any> extends IGraphUnit {
     targetId: string;
     invalidAt?: Date;
     content: T;
+    fact?: string;
 }
 
 /**
@@ -152,24 +153,146 @@ export interface IGraphIndex<N = any, E = any> {
 }
 
 /**
+ * Node types in the graph, following a cognitive memory model
+ */
+export const GraphNodeType = {
+    // Episodic Memory Layer (experiences and autobiographical events)
+    EPISODE: 'episode',           // Direct experience/interaction (e.g., conversation turn, user action)
+    EXPERIENCE: 'experience',     // Composite experience (e.g., a meeting, a trip)
+    
+    // Semantic Memory Layer (knowledge and concepts)
+    ENTITY: {
+        // Core entity types (mutually exclusive)
+        AGENT: 'entity.agent',        // People, AI, organizations that can act
+        OBJECT: 'entity.object',      // Physical or digital things
+        LOCATION: 'entity.location',  // Places, coordinates, addresses
+        CONCEPT: 'entity.concept',    // Abstract ideas, theories, methods
+        TIME: 'entity.time',         // Temporal entities (dates, periods, events)
+    } as const,
+    
+    // Working Memory Layer (current context and state)
+    CONTEXT: 'context',          // Current execution context
+    STATE: 'state',             // System or environment state
+    
+    // Procedural Memory Layer (skills and procedures)
+    PROCEDURE: 'procedure',      // Methods, functions, algorithms
+    SKILL: 'skill',             // Learned capabilities
+    
+    // Community Layer (emergent patterns)
+    COMMUNITY: 'community',      // Clusters of related entities
+    PATTERN: 'pattern'          // Recurring structures or behaviors
+} as const;
+
+// Flatten entity types for easier type checking
+export type EntityType = typeof GraphNodeType.ENTITY[keyof typeof GraphNodeType.ENTITY];
+export type GraphNodeTypeValues = 
+    | typeof GraphNodeType.EPISODE
+    | typeof GraphNodeType.EXPERIENCE
+    | typeof GraphNodeType.CONTEXT
+    | typeof GraphNodeType.STATE
+    | typeof GraphNodeType.PROCEDURE
+    | typeof GraphNodeType.SKILL
+    | typeof GraphNodeType.COMMUNITY
+    | typeof GraphNodeType.PATTERN
+    | EntityType;
+
+/**
+ * Type guard for episode nodes
+ */
+export function isEpisodeNode(node: IGraphNode): node is IGraphNode<EpisodeContent> {
+    return node.type === GraphNodeType.EPISODE;
+}
+
+/**
+ * Edge types in the graph, defining allowed relationships
+ */
+export const GraphEdgeType = {
+    // Temporal relationships
+    PRECEDES: 'precedes',           // A happens before B
+    CONTAINS: 'contains',           // A includes B in time
+    
+    // Semantic relationships
+    IS_A: 'is_a',                   // Type hierarchy
+    PART_OF: 'part_of',            // Composition
+    RELATED_TO: 'related_to',      // Generic semantic relation
+    SIMILAR_TO: 'similar_to',      // Semantic similarity
+    
+    // Causal relationships
+    CAUSES: 'causes',               // A leads to B
+    INFLUENCES: 'influences',       // A affects B
+    
+    // Social relationships
+    KNOWS: 'knows',                 // Social connection
+    MEMBER_OF: 'member_of',        // Group membership
+    
+    // Spatial relationships
+    LOCATED_IN: 'located_in',      // Physical/virtual location
+    NEAR: 'near',                  // Spatial proximity
+    
+    // Procedural relationships
+    REQUIRES: 'requires',           // Dependency
+    USES: 'uses',                  // Utilization
+    
+    // Reference relationships
+    REFERS_TO: 'refers_to',        // Reference/mention
+    DESCRIBES: 'describes'         // Description/elaboration
+} as const;
+
+export type GraphEdgeTypeValues = typeof GraphEdgeType[keyof typeof GraphEdgeType];
+
+/**
+ * Base interface for entity content
+ */
+export interface EntityContent {
+    name: string;
+    type: GraphNodeTypeValues;
+    summary?: string;
+    metadata?: Record<string, any>;
+}
+
+/**
+ * Content type for episode nodes
+ */
+export interface EpisodeContent {
+    body: string;
+    source: string;
+    sourceDescription: string;
+    timestamp: Date;
+    sessionId: string;
+}
+
+/**
+ * Content type for experience nodes (composite episodes)
+ */
+export interface ExperienceContent {
+    title: string;
+    description: string;
+    startTime: Date;
+    endTime?: Date;
+    episodeIds: string[];  // References to constituent episodes
+    location?: string;     // Optional location reference
+    participants?: string[]; // Optional participant references
+}
+
+/**
+ * Memory type classification
+ */
+export enum MemoryType {
+    EPISODIC = 'episodic',     // Direct experiences
+    SEMANTIC = 'semantic',      // Knowledge and facts
+    WORKING = 'working',       // Current context
+    PROCEDURAL = 'procedural'  // Skills and procedures
+}
+
+/**
  * Interface for a memory unit in the graph memory system
  */
 export interface IGraphMemoryUnit extends IGraphNode {
-    memoryType: GraphMemoryType;
+    memoryType: MemoryType;
     importance: number;
     lastAccessed?: Date;
     accessCount: number;
     episodeIds?: string[];
-}
-
-/**
- * Graph Memory Type
- */
-export enum GraphMemoryType {
-    EPISODIC = 'episodic',
-    SEMANTIC = 'semantic',
-    PROCEDURAL = 'procedural',
-    WORKING = 'working'
 }
 
 /**
@@ -189,33 +312,4 @@ export enum CoreTemporalMode {
     CURRENT = 'current',
     HISTORICAL = 'historical',
     ALL = 'all'
-}
-
-/**
- * Node types in the graph
- */
-export const GraphNodeType = {
-    EPISODE: 'episode',
-    ENTITY: 'entity',
-    SEMANTIC: 'semantic'
-} as const;
-
-export type GraphNodeTypeValues = typeof GraphNodeType[keyof typeof GraphNodeType];
-
-/**
- * Content type for episode nodes
- */
-export interface EpisodeContent {
-    body: string;
-    source: string;
-    sourceDescription: string;
-    timestamp: Date;  // When the episode occurred
-    sessionId: string;
-}
-
-/**
- * Type guard for episode nodes
- */
-export function isEpisodeNode(node: IGraphNode): node is IGraphNode<EpisodeContent> {
-    return node.type === GraphNodeType.EPISODE;
 }

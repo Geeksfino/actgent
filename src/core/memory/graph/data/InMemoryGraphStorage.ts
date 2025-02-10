@@ -1,5 +1,6 @@
-import { IGraphStorage, IGraphNode, IGraphEdge, GraphFilter, GraphMemoryType, TraversalOptions, IGraphUnit, EpisodeContent, isEpisodeNode, EpisodeFilter } from './types';
+import { IGraphStorage, IGraphNode, IGraphEdge, GraphFilter, MemoryType, TraversalOptions, IGraphUnit, EpisodeContent, isEpisodeNode, EpisodeFilter } from './types';
 import crypto from 'crypto';
+import { IdGenerator } from '../id/IdGenerator';
 
 /**
  * In-memory implementation of graph storage
@@ -8,8 +9,10 @@ export class InMemoryGraphStorage implements IGraphStorage {
     private nodes: Map<string, IGraphNode>;
     private edges: Map<string, IGraphEdge>;
     private adjacencyList: Map<string, Set<string>>;
+    private idGenerator: IdGenerator;
 
-    constructor(maxCapacity: number = 1000) {
+    constructor(idGenerator: IdGenerator, maxCapacity: number = 1000) {
+        this.idGenerator = idGenerator;
         this.nodes = new Map();
         this.edges = new Map();
         this.adjacencyList = new Map();
@@ -17,7 +20,7 @@ export class InMemoryGraphStorage implements IGraphStorage {
 
     // Graph-specific operations
     async addNode(node: IGraphNode): Promise<string> {
-        const id = node.id || crypto.randomUUID();
+        const id = node.id || this.idGenerator.generateNodeId({ type: node.type, content: node.content });
         node.id = id;
         
         // Validate temporal consistency
@@ -59,25 +62,33 @@ export class InMemoryGraphStorage implements IGraphStorage {
     }
 
     async addEdge(edge: IGraphEdge): Promise<string> {
-        const id = edge.id || crypto.randomUUID();
+        const id = edge.id || this.idGenerator.generateEdgeId({
+            sourceId: edge.sourceId,
+            targetId: edge.targetId,
+            type: edge.type,
+            content: edge.content
+        });
         edge.id = id;
-        
+
         // Validate temporal consistency
         this.validateTemporalConsistency(edge);
-        
-        // Verify that source and target nodes exist
-        if (!this.nodes.has(edge.sourceId) || !this.nodes.has(edge.targetId)) {
-            throw new Error('Source or target node does not exist');
+
+        // Ensure both nodes exist
+        if (!this.nodes.has(edge.sourceId)) {
+            throw new Error(`Source node ${edge.sourceId} not found`);
         }
-        
+        if (!this.nodes.has(edge.targetId)) {
+            throw new Error(`Target node ${edge.targetId} not found`);
+        }
+
         this.edges.set(id, edge);
-        
+
         // Update adjacency list
         if (!this.adjacencyList.has(edge.sourceId)) {
             this.adjacencyList.set(edge.sourceId, new Set());
         }
         this.adjacencyList.get(edge.sourceId)!.add(edge.targetId);
-        
+
         return id;
     }
 
@@ -560,9 +571,6 @@ export class InMemoryGraphStorage implements IGraphStorage {
         }
     }
 
-    /**
-     * Find paths between two nodes in the graph
-     */
     async findPaths(options: {
         startId: string;
         endId: string;
@@ -726,33 +734,45 @@ export class InMemoryGraphStorage implements IGraphStorage {
     }
 
     createNode(data: Partial<IGraphNode>): IGraphNode {
-        const id = data.id || crypto.randomUUID();
+        const type = data.type ? data.type : 'default';
+        const content = data.content ? data.content : {};
+        const id = data.id || this.idGenerator.generateNodeId({ type, content });
         const timestamp = new Date();
         return {
             id,
-            type: data.type || 'default',
-            metadata: data.metadata || new Map(),
+            type,
+            metadata: data.metadata ?? new Map(),
             createdAt: timestamp,
             expiredAt: data.expiredAt,
             validAt: data.validAt,
-            content: data.content || {}
+            content
         };
     }
 
     createEdge(data: Partial<IGraphEdge>): IGraphEdge {
-        const id = data.id || crypto.randomUUID();
+        const sourceId = data.sourceId ? data.sourceId : '';
+        const targetId = data.targetId ? data.targetId : '';
+        const type = data.type ? data.type : 'default';
+        const fact = data.fact ? data.fact : '';
+        const id = data.id || this.idGenerator.generateEdgeId({
+            sourceId,
+            targetId,
+            type,
+            content: data.content
+        });
         const timestamp = new Date();
         return {
             id,
-            sourceId: data.sourceId || '',
-            targetId: data.targetId || '',
-            type: data.type || 'default',
-            metadata: data.metadata || new Map(),
+            sourceId,
+            targetId,
+            type,
+            metadata: data.metadata ?? new Map(),
             createdAt: timestamp,
             expiredAt: data.expiredAt,
             validAt: data.validAt,
             invalidAt: data.invalidAt,
-            content: data.content || {}
+            fact,
+            content: data.content ?? {}
         };
     }
 

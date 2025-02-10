@@ -4,7 +4,7 @@ import {
     GraphFilter, 
     TraversalOptions, 
     IGraphStorage,
-    GraphMemoryType
+    MemoryType
 } from './types';
 import { EpisodicGraphProcessor } from '../processing/episodic/processor';
 import { TimeMode } from '../processing/temporal/temporal';
@@ -361,7 +361,7 @@ export class MemoryGraph implements IGraphStorage {
             metadata: new Map([['confidence', r.confidence]]),
             createdAt: r.createdAt ?? new Date(),
             validAt: r.validAt ?? (r.createdAt ?? new Date()),
-            memoryType: GraphMemoryType.SEMANTIC,
+            memoryType: MemoryType.SEMANTIC,
             content: r.relationship,
             episodeIds: []
         } as IGraphEdge));

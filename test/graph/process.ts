@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { GraphManager } from '../../src/core/memory/graph/GraphManager';
 import { GraphConfig, LLMConfig, GraphTask } from '../../src/core/memory/graph/types';
+import { DeterministicIdGenerator } from '../../src/core/memory/graph/id/DeterministicIdGenerator';
 import { OpenAI } from 'openai';
 import * as fs from 'fs/promises';
 import path from 'path';
@@ -159,7 +160,7 @@ async function main() {
     };
 
     // Initialize graph manager
-    const graphManager = new GraphManager(graphConfig);
+    const graphManager = new GraphManager(graphConfig, new DeterministicIdGenerator());
 
     // Process conversations
     console.log('Processing conversations...');

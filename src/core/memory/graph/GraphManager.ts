@@ -1,14 +1,12 @@
 import {
     IGraphNode,
     IGraphEdge,
-    IGraphStorage,
-    GraphMemoryType,
-    IGraphMemoryUnit,
-    isEpisodeNode,
-    EpisodeFilter,
     GraphFilter,
+    MemoryType,
     TraversalOptions,
-    EpisodeContent
+    IGraphStorage,
+    EpisodeContent,
+    isEpisodeNode
 } from './data/types';
 import { GraphTask, LLMConfig } from './types';
 import { InMemoryGraphStorage } from './data/InMemoryGraphStorage';
@@ -22,6 +20,8 @@ import { OpenAI } from 'openai';
 import { IEmbedder, EmbedderProvider } from './embedder/types';
 import { EmbedderFactory } from './embedder/factory';
 import crypto from 'crypto';
+import { IdGenerator } from './id/IdGenerator';
+import { DeterministicIdGenerator } from './id/DeterministicIdGenerator';
 
 /**
  * Configuration for graph operations
@@ -78,23 +78,24 @@ export class GraphManager {
     private llmClient: any;
     private llm: EpisodicGraphProcessor;
     private graph: MemoryGraph;
+    private idGenerator: IdGenerator;
     private _hybridSearch: TemporalHybridSearch;
     private entities: Map<string, any> = new Map();
 
-    constructor(config: GraphConfig) {
+    constructor(config: GraphConfig, idGenerator: IdGenerator) {
         if (!config.llm) {
             throw new Error('LLM configuration is required');
         }
 
         // Initialize storage based on config
         if (config.storage?.type === 'memory') {
-            this.storage = new InMemoryGraphStorage();
+            this.storage = new InMemoryGraphStorage(new DeterministicIdGenerator());
         } else if (config.storage?.type === 'neo4j') {
             // TODO: Add Neo4j storage support when needed
             throw new Error('Neo4j storage not yet supported');
         } else {
             // Default to in-memory storage
-            this.storage = new InMemoryGraphStorage();
+            this.storage = new InMemoryGraphStorage(new DeterministicIdGenerator());
         }
 
         // Initialize OpenAI client
@@ -153,6 +154,8 @@ export class GraphManager {
             this.graph,
             searchConfig
         );
+
+        this.idGenerator = idGenerator;
     }
 
     /**
