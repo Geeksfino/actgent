@@ -1,5 +1,7 @@
 import { IEmbedder, EmbedderConfig, EmbedderProvider } from './types';
 import { BGEEmbedder, BGEConfig } from './bge';
+import { MPNetEmbedder, MPNetConfig } from './mpnet';
+import { JinaEmbedder, JinaConfig } from './jina';
 
 // Default configurations for each provider
 const DEFAULT_CONFIGS: Record<EmbedderProvider, Partial<EmbedderConfig>> = {
@@ -32,8 +34,31 @@ const DEFAULT_CONFIGS: Record<EmbedderProvider, Partial<EmbedderConfig>> = {
             maxSize: 10000,
             ttl: 24 * 60 * 60 * 1000
         }
+    },
+    [EmbedderProvider.MPNet]: {
+        modelName: 'sentence-transformers/all-mpnet-base-v2',
+        maxTokens: 8192,
+        batchSize: 32,
+        cache: {
+            enabled: true,
+            maxSize: 10000,
+            ttl: 24 * 60 * 60 * 1000 // 24 hours
+        }
+    },
+    [EmbedderProvider.Jina]: {
+        modelName: 'jinaai/jina-embeddings-v2-base-en',
+        maxTokens: 8192,
+        batchSize: 32,
+        cache: {
+            enabled: true,
+            maxSize: 10000,
+            ttl: 24 * 60 * 60 * 1000 // 24 hours
+        }
     }
 };
+
+const MPNET_DIMENSION = 768;
+const JINA_DIMENSION = 768; // PLACEHOLDER, need to check the actual dimension
 
 /**
  * Factory for creating embedding providers
@@ -45,19 +70,42 @@ export class EmbedderFactory {
     static create(
         provider: EmbedderProvider = EmbedderProvider.BGE,
         config: Partial<EmbedderConfig> = {}
-    ): IEmbedder {
+    ): IEmbedder | undefined {
+        console.log(`EmbedderFactory.create called with provider: ${provider}, config: ${JSON.stringify(config)}`);
+        if (!config.provider) {
+            provider = EmbedderProvider.BGE;
+        }
+
+        if (config && config.enabled === false) {
+            return undefined;
+        }
+
         // Merge with default config for the provider
-        const defaultConfig = DEFAULT_CONFIGS[provider];
+        const defaultConfig = this.getDefaultConfig(provider);
         const mergedConfig = {
             ...defaultConfig,
             ...config,
             provider // Ensure provider is set
         };
 
+        console.log(`EmbedderFactory.create - provider before instantiation: ${provider}`);
+
+        const mergedConfigCast = mergedConfig as EmbedderConfig;
+
+        if (!mergedConfigCast.enabled) {
+            return undefined;
+        }
+
         switch (provider) {
             case EmbedderProvider.BGE:
                 return new BGEEmbedder(mergedConfig as BGEConfig);
             
+            case EmbedderProvider.MPNet:
+                return new MPNetEmbedder(mergedConfig as MPNetConfig);
+
+            case EmbedderProvider.Jina:
+                return new JinaEmbedder(mergedConfig as JinaConfig);
+
             case EmbedderProvider.OpenAI:
                 if (!mergedConfig.apiKey) {
                     throw new Error('OpenAI embedder requires an API key');
@@ -81,7 +129,13 @@ export class EmbedderFactory {
      * Get the default configuration for a provider
      */
     static getDefaultConfig(provider: EmbedderProvider): Partial<EmbedderConfig> {
-        return DEFAULT_CONFIGS[provider];
+        const defaultConfig = DEFAULT_CONFIGS[provider] || {};
+        return {
+            ...defaultConfig,
+            maxTokens: 512,
+            batchSize: 32,
+            enabled: true
+        };
     }
 }
 

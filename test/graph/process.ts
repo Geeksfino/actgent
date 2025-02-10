@@ -50,6 +50,8 @@ program
     .option('--batch-size <n>', 'Number of messages to process in each batch', '4')
     .option('--layer <n>', 'Processing layer depth (1: episodic, 2: semantic, 3: community)', '3')
     .option('--debug', 'Enable debug mode')
+    .option('--embedder-provider <provider>', 'Embedder provider')
+    .option('--embedder-model <model>', 'Embedder model')
     .parse(process.argv);
 
 const options = program.opts();
@@ -130,7 +132,22 @@ async function main() {
         client: openai
     };
 
+    const embedderConfig = options.embedderProvider ? {
+        provider: options.embedderProvider.toLowerCase(),
+        config: {
+            modelName: options.embedderModel
+        }
+    } : undefined;
+
     const graphConfig: GraphConfig = {
+        ...(options.embedderProvider ? { embedder: {
+            provider: options.embedderProvider.toUpperCase() as any,
+            config: {
+                modelName: options.embedderModel,
+                maxTokens: 512,
+                batchSize: 32
+            }
+        } } : {}),
         llm: llmConfig,
         search: {
             textWeight: 0.4,

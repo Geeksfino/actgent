@@ -4,30 +4,52 @@
 export enum EmbedderProvider {
     BGE = 'bge',
     OpenAI = 'openai',
-    VoyageAI = 'voyage'
+    VoyageAI = 'voyage',
+    MPNet = 'mpnet',
+    Jina = 'jina'
 }
 
 /**
- * Configuration for embedding providers
+ * Base configuration for embedding providers
  */
-export interface EmbedderConfig {
-    // Base configuration
-    provider: EmbedderProvider;
-    modelName: string;
-    maxTokens: number;
-    batchSize: number;
-    
-    // Caching configuration
+export interface BaseEmbedderConfig {
+    enabled?: boolean;
+    modelName?: string;
+    maxTokens?: number;
+    batchSize?: number;
     cache?: {
         enabled: boolean;
         maxSize?: number;  // Maximum number of entries
         ttl?: number;     // Time-to-live in milliseconds
     };
-    
-    // Optional provider-specific settings
     apiKey?: string;
     baseURL?: string;
     customOptions?: Record<string, any>;
+}
+
+/**
+ * Base configuration for specific embedders
+ */
+export interface SpecificEmbedderConfig extends BaseEmbedderConfig {
+    provider: EmbedderProvider;
+    modelName: string;
+    maxTokens: number;
+    batchSize: number;
+}
+
+/**
+ * Configuration for embedding providers
+ */
+export interface EmbedderConfig extends BaseEmbedderConfig {
+    // Base configuration
+    provider: EmbedderProvider;
+}
+
+/**
+ * Configuration for BGE embedder
+ */
+export interface BGEConfig extends SpecificEmbedderConfig {
+    quantized?: boolean;
 }
 
 /**

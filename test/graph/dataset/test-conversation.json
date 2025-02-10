@@ -1,0 +1,27 @@
+{
+  "conversations": [
+    {
+      "session_id": "session_0",
+      "timestamp": "2024-01-01T10:00:00.000Z",
+      "turns": [
+        {
+          "turn_id": "turn_0",
+          "messages": [
+            {
+              "role": "user",
+              "content": "What can you tell me about George Orwell?"
+            },
+            {
+              "role": "assistant",
+              "content": "George Orwell was a British author."
+            },
+            {
+              "role": "user",
+              "content": "Tell me more about Eric Blair."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

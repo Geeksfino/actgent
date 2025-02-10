@@ -103,17 +103,17 @@ export class EpisodicGraphProcessor {
 
     private prepareRequest(task: GraphTask, data: any): { prompt: string; functionSchema: z.ZodType<any> } {
         switch (task) {
-            case GraphTask.DEDUPE_NODE:
-                console.log("DEDUPE_NODE data: ", data);
-                const dedupeNodePrompt = this.buildDedupePrompt({ newNode: data.newNode, existingNodes: data.existingNodes, context: data.context });
-                console.log("DEDUPE_NODE prompt: ", dedupeNodePrompt);
+            case GraphTask.DEDUPE_NODES:
+                console.log("DEDUPE_NODES data: ", data);
+                const dedupeNodesPrompt = this.buildDedupeNodesPrompt({ entities: data.entities, context: data.context });
+                console.log("DEDUPE_NODES prompt: ", dedupeNodesPrompt);
                 return {
-                    prompt: dedupeNodePrompt,
+                    prompt: dedupeNodesPrompt,
                     functionSchema: z.object({
-                        is_duplicate: z.boolean(),
-                        uuid: z.string().nullable(),
-                        name: z.string(),
-                        confidence: z.number()
+                        results: z.array(z.object({
+                            isDuplicate: z.boolean(),
+                            duplicateOf: z.string().nullable(),
+                        }))
                     })
                 };
 
@@ -344,31 +344,8 @@ Return in this format:
 }`;
     }
 
-    private buildDedupePrompt(input: { newNode: any, existingNodes: any[], context: string }): string {
-        return `<PREVIOUS_MESSAGES>
-${input.context}
-</PREVIOUS_MESSAGES>
-
-<EXISTING_NODES>
-${JSON.stringify(input.existingNodes, null, 2)}
-</EXISTING_NODES>
-
-Given the above EXISTING NODES, MESSAGE, and PREVIOUS MESSAGES. Determine if the NEW NODE
-extracted from the conversation is a duplicate entity of one of the EXISTING NODES.
-
-<NEW_NODE>
-${JSON.stringify(input.newNode, null, 2)}
-</NEW_NODE>
-
-<EXPECTED_RESPONSE>
-Return a JSON object with:
-{
-    "is_duplicate": boolean,
-    "uuid": "existing node UUID if duplicate, null if not",
-    "name": "best name to use",
-    "confidence": number between 0 and 1
-}
-</EXPECTED_RESPONSE>`;
+    private buildDedupeNodesPrompt(input: { entities: any[], context: string }): string {
+        return `<PREVIOUS_MESSAGES>\n${input.context}\n</PREVIOUS_MESSAGES>\n<ENTITIES>\n${JSON.stringify(input.entities, null, 2)}\n</ENTITIES>\nGiven the above ENTITIES and PREVIOUS MESSAGES. Determine if any of the entities are duplicates of each other.\n<EXPECTED_RESPONSE>\nReturn a JSON object with:\n{\n    "results": [\n        {\n            "isDuplicate": boolean,\n            "duplicateOf": "entity_id if duplicate, null if not"\n        }\n    ]\n}\n</EXPECTED_RESPONSE>`;
     }
 
     private buildSummarizeNodePrompt(input: { 

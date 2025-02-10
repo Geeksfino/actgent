@@ -36,7 +36,10 @@ export class BGEEmbedder implements IEmbedder {
     }) {
         env.allowLocalModels = true;
         this.config = config;
+        this.pipe = undefined;
         
+        this.ensurePipeline();
+
         // Initialize cache if enabled
         if (config.cache?.enabled) {
             this.cache = new EmbeddingCache(
@@ -47,6 +50,7 @@ export class BGEEmbedder implements IEmbedder {
     }
 
     private async ensurePipeline(): Promise<any> {
+        console.log("ensurePipeline called");
         if (!this.pipe) {
             console.log(`Loading BGE model: ${this.config.modelName}`);
             try {
@@ -87,6 +91,8 @@ export class BGEEmbedder implements IEmbedder {
     }
 
     async generateEmbeddings(texts: string | string[]): Promise<number[][]> {
+        await this.ensurePipeline();
+
         const textArray = Array.isArray(texts) ? texts : [texts];
         if (textArray.length === 0) return [];
 

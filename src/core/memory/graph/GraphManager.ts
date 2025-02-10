@@ -21,6 +21,7 @@ import { ResultReranker } from './query/reranking';
 import { OpenAI } from 'openai';
 import { IEmbedder, EmbedderProvider } from './embedder/types';
 import { EmbedderFactory } from './embedder/factory';
+import crypto from 'crypto';
 
 /**
  * Configuration for graph operations
@@ -78,6 +79,7 @@ export class GraphManager {
     private llm: EpisodicGraphProcessor;
     private graph: MemoryGraph;
     private _hybridSearch: TemporalHybridSearch;
+    private entities: Map<string, any> = new Map();
 
     constructor(config: GraphConfig) {
         if (!config.llm) {
@@ -111,12 +113,17 @@ export class GraphManager {
         this.embedder = config.embedder 
             ? EmbedderFactory.create(config.embedder.provider, config.embedder.config)
             : EmbedderFactory.create(EmbedderProvider.BGE); // Default to BGE
+        console.log(`config.embedder.provider: ${config.embedder?.provider}`);
+
+        if (!this.embedder) {
+            throw new Error('Failed to initialize embedder');
+        }
 
         // Initialize graph
         this.graph = new MemoryGraph(this.storage, this.llm);
 
         // Initialize search components
-        const embeddingSearch = new EmbeddingSearch();
+        const embeddingSearch = new EmbeddingSearch(this.embedder);
         const textSearch = new BM25Search();
         const reranker = new ResultReranker(
             this.graph,
@@ -230,14 +237,20 @@ export class GraphManager {
         }
 
         // Get embedding for query
-        const embeddings = await this.embedder.generateEmbeddings(query);
+        const embeddingsStartTime = Date.now();
+        const embeddings = await this.embedder!.generateEmbeddings(query);
+        const embeddingsEndTime = Date.now();
+        console.log(`Embeddings generation took: ${embeddingsEndTime - embeddingsStartTime}ms`);
         
         // Perform hybrid search with temporal awareness
+        const searchStartTime = Date.now();
         const searchResults = await this._hybridSearch.searchWithTemporal(
             query,
             embeddings[0],
             options
         );
+        const searchEndTime = Date.now();
+        console.log(`Hybrid search took: ${searchEndTime - searchStartTime}ms`);
         
         // Map search results back to nodes with scores
         const results = await Promise.all(
@@ -297,7 +310,11 @@ export class GraphManager {
      * Process a task using LLM with proper data handling
      */
     private async processWithLLM(task: GraphTask, data: any): Promise<any> {
-        return this.llm.process(task, data);
+        const llmStartTime = Date.now();
+        const result = await this.llm.process(task, data);
+        const llmEndTime = Date.now();
+        console.log(`LLM processing took: ${llmEndTime - llmStartTime}ms`);
+        return result;
     }
 
     private async updateCommunityMembers(communityId: string, members: string[]): Promise<void> {
@@ -378,48 +395,131 @@ export class GraphManager {
         currentMessages: string,
         prevMessages: string
     ): Promise<Array<any>> {
-        // Extract entities
-        const extractedEntities = await this.processWithLLM(
+        // Extract entities using LLM
+        const extractionResult = await this.processWithLLM(
             GraphTask.EXTRACT_ENTITIES,
             {
                 text: currentMessages,
-                context: prevMessages || undefined
+                context: prevMessages
             }
         );
-        this.log('Extracted Entities:', extractedEntities);
 
-        // Dedupe entities
-        const resolvedEntities = [];
-        if (extractedEntities && Array.isArray(extractedEntities)) {
-            const { nodes: existingNodes } = await this.graph.query({ 
-                nodeTypes: [GraphMemoryType.SEMANTIC]
-            });
+        const extractedEntities = extractionResult.entities;
 
-            for (const entity of extractedEntities) {
-                try {
-                    const resolution = await this.processWithLLM(
-                        GraphTask.DEDUPE_NODE,
-                        {
-                            newNode: entity,
-                            existingNodes,
-                            context: currentMessages
-                        }
-                    );
+        // Deduplicate entities
+        await this.deduplicateEntities(extractedEntities, prevMessages);
 
-                    resolvedEntities.push(resolution.is_duplicate
-                        ? { ...entity, id: resolution.uuid.replace('entity_', '') }
-                        : entity
-                    );
-                } catch (error: unknown) {
-                    this.log('Failed to resolve entity:', {
-                        entity,
-                        error: error instanceof Error ? error.message : String(error)
+        return extractedEntities;
+    }
+
+    private async deduplicateEntities(entities: any[], prevMessages: string): Promise<void> {
+        if (!this.embedder) {
+            throw new Error('Embedder is not initialized');
+        }
+
+        const startTime = Date.now();
+
+        // Get embeddings for all entity names at once
+        const embeddingsStartTime = Date.now();
+        const embeddings = await Promise.all(entities.map(entity => this.embedder!.generateEmbeddings(entity.name)));
+        const embeddingsEndTime = Date.now();
+        console.log(`Embeddings generation took: ${embeddingsEndTime - embeddingsStartTime}ms`);
+
+        // Find similar entities for all entities at once
+        const searchStartTime = Date.now();
+        const similarEntitiesPromises = entities.map((entity, i) => 
+            this._hybridSearch.searchWithTemporal(entity.name, embeddings[i][0])
+        );
+        const similarEntitiesResults = await Promise.all(similarEntitiesPromises);
+        const searchEndTime = Date.now();
+        console.log(`Hybrid search took: ${searchEndTime - searchStartTime}ms`);
+
+        // Prepare data for bulk deduplication
+        const dedupeData = entities.map((entity, i) => {
+            const similarEntities = similarEntitiesResults[i];
+            const entityId = this.generateEntityId(entity.name, entity.type);
+            return {
+                newEntity: {
+                    id: entityId,
+                    name: entity.name,
+                    type: entity.type,
+                    summary: entity.summary
+                },
+                existingNodes: similarEntities
+            };
+        });
+
+        // Perform bulk deduplication using LLM
+        const dedupeResult = await this.processWithLLM(
+            GraphTask.DEDUPE_NODES,
+            {
+                entities: dedupeData,
+                context: prevMessages
+            }
+        );
+
+        // Process deduplication results
+        for (let i = 0; i < entities.length; i++) {
+            const entity = entities[i];
+            const entityId = this.generateEntityId(entity.name, entity.type);
+            const dedupeInfo = dedupeResult.results[i];
+
+            if (dedupeInfo.isDuplicate && dedupeInfo.duplicateOf) {
+                // Merge with existing entity
+                const existingEntity = this.entities.get(dedupeInfo.duplicateOf);
+                if (existingEntity) {
+                    // Merge entity data
+                    const mergedEntity = {
+                        ...existingEntity,
+                        name: entity.name || existingEntity.name,
+                        summary: entity.summary || existingEntity.summary,
+                        // Preserve any additional content fields
+                        ...(existingEntity.content || {})
+                    };
+
+                    // Update entity in registry
+                    this.entities.set(entityId, mergedEntity);
+
+                    // Update entity node in graph
+                    const existingNode = await this.storage.getNode(entityId);
+                    if (existingNode) {
+                        const updatedNode: IGraphNode = {
+                            ...existingNode,
+                            content: mergedEntity,
+                            metadata: new Map([
+                                ...existingNode.metadata,
+                                ['lastUpdateTime', new Date().toISOString()]
+                            ])
+                        };
+                        await this.storage.updateNode(entityId, updatedNode);
+                    }
+                }
+            } else {
+                // Add as new entity if not already exists
+                if (!this.entities.has(entityId)) {
+                    this.entities.set(entityId, entity);
+                    await this.storage.addNode({
+                        id: entityId,
+                        type: 'entity',
+                        content: entity,
+                        metadata: new Map([
+                            ['createdAt', new Date().toISOString()],
+                            ['type', entity.type]
+                        ]),
+                        createdAt: new Date(),
+                        validAt: new Date()
                     });
-                    resolvedEntities.push(entity);
                 }
             }
         }
-        return resolvedEntities;
+
+        const endTime = Date.now();
+        console.log(`Entity deduplication took: ${endTime - startTime}ms`);
+    }
+
+    private generateEntityId(name: string, entityType: string): string {
+        const uniqueString = `${name.toLowerCase().trim()}|${entityType.toLowerCase()}`;
+        return crypto.createHash('md5').update(uniqueString).digest('hex');
     }
 
     private async processTemporalRelationships(
@@ -457,64 +557,56 @@ export class GraphManager {
         const createdEntityIds = new Set<string>();
         const temporalEntities = temporalResult?.entities || [];
         if (Array.isArray(temporalEntities)) {
-            for (const entity of temporalEntities) {
-                try {
-                    const entityId = ensureEntityPrefix(entity.id);
-                    const entityType = entity.type.toLowerCase();
-                    
-                    // Get existing node if any
-                    const existingNode = await this.storage.getNode(entityId);
-                    
-                    // Prepare node data, preserving existing metadata if present
-                    const entityNode: IGraphNode = {
-                        id: entityId,
-                        type: entityType,
-                        content: {
-                            name: entity.name || '',
-                            summary: entity.summary || '',
-                            // Preserve any additional content fields
-                            ...(existingNode?.content || {})
-                        },
-                        metadata: new Map([
-                            // Preserve existing metadata
-                            ...(existingNode?.metadata || []),
-                            // Update with new metadata
-                            ['sessionId', firstMessage.sessionId],
-                            ['timestamp', firstMessage.timestamp.toISOString()],
-                            ['entityType', entityType],
-                            ['lastUpdateTime', new Date().toISOString()]
-                        ]),
-                        createdAt: existingNode?.createdAt || new Date(),
-                        validAt: firstMessage.timestamp,
-                        // Don't include invalidAt for nodes
-                        expiredAt: existingNode?.expiredAt
-                    };
+            for (const entity of temporalEntities) { 
+                const entityId = ensureEntityPrefix(entity.id);
+                const entityType = entity.type.toLowerCase();
+                
+                // Get existing node if any
+                const existingNode = await this.storage.getNode(entityId);
+                
+                // Prepare node data, preserving existing metadata if present
+                const entityNode: IGraphNode = {
+                    id: entityId,
+                    type: entityType,
+                    content: {
+                        name: entity.name || '',
+                        summary: entity.summary || '',
+                        // Preserve any additional content fields
+                        ...(existingNode?.content || {})
+                    },
+                    metadata: new Map([
+                        // Preserve existing metadata
+                        ...(existingNode?.metadata || []),
+                        // Update with new metadata
+                        ['sessionId', firstMessage.sessionId],
+                        ['timestamp', firstMessage.timestamp.toISOString()],
+                        ['entityType', entityType],
+                        ['lastUpdateTime', new Date().toISOString()]
+                    ]),
+                    createdAt: existingNode?.createdAt || new Date(),
+                    validAt: firstMessage.timestamp,
+                    // Don't include invalidAt for nodes
+                    expiredAt: existingNode?.expiredAt
+                };
 
-                    if (existingNode) {
-                        // Update existing node
-                        await this.storage.updateNode(entityId, entityNode);
-                        this.log('Updated entity node:', { 
-                            entityId, 
-                            type: entityType,
-                            name: entity.name
-                        });
-                    } else {
-                        // Create new node
-                        await this.storage.addNode(entityNode);
-                        this.log('Created entity node:', { 
-                            entityId, 
-                            type: entityType,
-                            name: entity.name
-                        });
-                    }
-                    createdEntityIds.add(entityId);
-                } catch (error) {
-                    console.error(`Failed to add/update entity node:`, {
-                        entityId: ensureEntityPrefix(entity.id),
-                        type: entity.type,
-                        error: error instanceof Error ? error.message : String(error)
+                if (existingNode) {
+                    // Update existing node
+                    await this.storage.updateNode(entityId, entityNode);
+                    this.log('Updated entity node:', { 
+                        entityId, 
+                        type: entityType,
+                        name: entity.name
+                    });
+                } else {
+                    // Create new node
+                    await this.storage.addNode(entityNode);
+                    this.log('Created entity node:', { 
+                        entityId, 
+                        type: entityType,
+                        name: entity.name
                     });
                 }
+                createdEntityIds.add(entityId);
             }
         }
 
@@ -553,19 +645,13 @@ export class GraphManager {
                         sourceId,
                         targetId,
                         content: {
-                            name: rel.name || '',
-                            description: rel.description || '',
-                            // Preserve any additional content fields
-                            ...(existingEdge?.content || {})
+                            name: rel.name,
+                            description: rel.description
                         },
                         metadata: new Map([
-                            // Preserve existing metadata
-                            ...(existingEdge?.metadata || []),
-                            // Update with new metadata
+                            ['temporalStage', 'processed'],
                             ['sessionId', firstMessage.sessionId],
-                            ['timestamp', firstMessage.timestamp.toISOString()],
-                            ['relationshipType', rel.type.toLowerCase()],
-                            ['lastUpdateTime', new Date().toISOString()]
+                            ['timestamp', firstMessage.timestamp.toISOString()]
                         ]),
                         createdAt: existingEdge?.createdAt || new Date(),
                         validAt,
@@ -593,23 +679,12 @@ export class GraphManager {
                         });
                     }
                 } catch (error) {
-                    console.error(`Failed to add/update relationship:`, {
-                        sourceId: ensureEntityPrefix(rel.sourceId),
-                        targetId: ensureEntityPrefix(rel.targetId),
-                        type: rel.type,
-                        error: error instanceof Error ? error.message : String(error)
-                    });
+                    console.error('Failed to add/update relationship:', error);
                 }
             }
         }
     }
 
-    /**
-     * Process a batch of messages through the staged pipeline:
-     * 1. Extract entities and store them
-     * 2. Deduplicate entities and update storage
-     * 3. Extract temporal relationships and update storage
-     */
     private async processMessageBatch(messages: Array<{
         id: string,
         body: string,
@@ -623,7 +698,7 @@ export class GraphManager {
             this.log('Stage 1: Extracted entities', { count: extractedNodeIds.length });
 
             // Stage 2: Entity deduplication
-            const deduplicatedNodeIds = await this.processEntityDeduplication(extractedNodeIds);
+            const deduplicatedNodeIds = await this.processEntityDeduplication(extractedNodeIds, messages[0].body);
             this.log('Stage 2: Deduplicated entities', { count: deduplicatedNodeIds.length });
 
             // Stage 3: Temporal relationship extraction
@@ -646,18 +721,29 @@ export class GraphManager {
         timestamp: Date,
         sessionId: string
     }>): Promise<string[]> {
+        const processStartTime = Date.now();
+
         const extractedNodeIds: string[] = [];
         const currentMessages = messages.map(m => m.body).join('\n');
 
         // Extract entities using LLM
-        const entities = await this.processWithLLM(GraphTask.EXTRACT_ENTITIES, {
-            messages: currentMessages
-        });
+        const extractEntitiesStartTime = Date.now();
+        const entities = await this.processWithLLM(
+            GraphTask.EXTRACT_ENTITIES,
+            {
+                messages: currentMessages
+            }
+        );
+        const extractEntitiesEndTime = Date.now();
+        console.log(`Entity extraction took: ${extractEntitiesEndTime - extractEntitiesStartTime}ms`);
+        this.log('Extracted Entities:', entities);
 
         // Store each entity
-        for (const entity of entities) {
+        for (const entity of entities?.entities || []) { 
+            const entityId = this.generateEntityId(entity.name, entity.type);
+            entity.id = entityId;
+
             try {
-                const entityId = `entity_${entity.id}`;
                 const entityNode: IGraphNode = {
                     id: entityId,
                     type: entity.type.toLowerCase(),
@@ -674,7 +760,7 @@ export class GraphManager {
                     validAt: messages[0].timestamp
                 };
 
-                await this.storage.addNode(entityNode);
+                await this.addNode(entityNode);
                 extractedNodeIds.push(entityId);
                 this.log('Stored initial entity:', { entityId, type: entity.type });
             } catch (error) {
@@ -682,21 +768,32 @@ export class GraphManager {
             }
         }
 
+        const processEndTime = Date.now();
+        console.log(`Entity extraction process took: ${processEndTime - processStartTime}ms`);
         return extractedNodeIds;
     }
 
     /**
      * Stage 2: Deduplicate entities and update storage with merged data
      */
-    private async processEntityDeduplication(nodeIds: string[]): Promise<string[]> {
+    private async processEntityDeduplication(nodeIds: string[], prevMessages: string): Promise<string[]> {
+        const processStartTime = Date.now();
+
         const deduplicatedIds: string[] = [];
         const nodes = await Promise.all(nodeIds.map(id => this.storage.getNode(id)));
         const validNodes = nodes.filter((n): n is NonNullable<typeof n> => n !== null);
 
         // Get deduplication results from LLM
-        const dedupeResult = await this.processWithLLM(GraphTask.DEDUPE_NODE, {
-            nodes: validNodes
-        });
+        const llmStartTime = Date.now();
+        const dedupeResult = await this.processWithLLM(
+            GraphTask.DEDUPE_NODES,
+            {
+                entities: validNodes,
+                context: prevMessages
+            }
+        );
+        const llmEndTime = Date.now();
+        console.log(`LLM deduplication took: ${llmEndTime - llmStartTime}ms`);
 
         // Process each merged entity
         for (const mergedEntity of dedupeResult.entities) {
@@ -744,6 +841,8 @@ export class GraphManager {
             }
         }
 
+        const processEndTime = Date.now();
+        console.log(`Entity deduplication process took: ${processEndTime - processStartTime}ms`);
         return deduplicatedIds;
     }
 
@@ -754,6 +853,8 @@ export class GraphManager {
         timestamp: Date,
         sessionId: string
     }): Promise<void> {
+        const processStartTime = Date.now();
+
         // Get all deduplicated nodes
         const nodes = await Promise.all(nodeIds.map(id => this.storage.getNode(id)));
         const validNodes = nodes.filter((n): n is NonNullable<typeof n> => n !== null);
@@ -845,5 +946,8 @@ export class GraphManager {
                 }
             }
         }
+
+        const processEndTime = Date.now();
+        console.log(`Temporal relationship extraction process took: ${processEndTime - processStartTime}ms`);
     }
 }

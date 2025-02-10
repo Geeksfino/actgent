@@ -1,4 +1,4 @@
 export * from './types';
+export { BGEEmbedder } from './bge';
 export * from './factory';
-export * from './bge';
 export * from './cache';

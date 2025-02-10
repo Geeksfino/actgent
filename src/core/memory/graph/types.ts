@@ -78,7 +78,7 @@ export enum GraphTask {
     SUMMARIZE_NODE = 'summarize_node',  
 
     // Entity resolution tasks
-    DEDUPE_NODE = 'dedupe_node',
+    DEDUPE_NODES = 'dedupe_node',
     DEDUPE_EDGE = 'dedupe_edge',
     DEDUPE_BATCH = 'dedupe_batch',
     DEDUPE_BATCH_EDGES = 'dedupe_batch_edges',

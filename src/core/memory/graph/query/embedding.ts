@@ -1,12 +1,15 @@
+import { IEmbedder } from '../embedder/types';
 
 /**
  * Vector embedding search functionality
  */
 export class EmbeddingSearch {
     private embeddings: Map<string, number[]>;
+    private embedder?: IEmbedder;
     
-    constructor() {
+    constructor(embedder?: IEmbedder) {
         this.embeddings = new Map();
+        this.embedder = embedder;
     }
 
     /**
@@ -17,9 +20,21 @@ export class EmbeddingSearch {
     }
 
     /**
+     * Generate embedding for text
+     */
+    async generateEmbedding(text: string): Promise<number[]> {
+        if (!this.embedder) {
+            throw new Error('Embedder is not initialized');
+        }
+        const embeddings = await this.embedder.generateEmbeddings(text);
+        return embeddings[0];
+    }
+
+    /**
      * Search for similar nodes using embedding
      */
-    search(embedding: number[], limit: number = 10): string[] {
+    async search(query: string, limit: number = 10): Promise<string[]> {
+        const embedding = await this.generateEmbedding(query);
         const results = this.searchWithScores(embedding, limit);
         return results.map(r => r.id);
     }
