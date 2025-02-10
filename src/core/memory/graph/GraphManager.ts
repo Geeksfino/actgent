@@ -416,102 +416,54 @@ export class GraphManager {
     }
 
     private async deduplicateEntities(entities: any[], prevMessages: string): Promise<void> {
-        if (!this.embedder) {
-            throw new Error('Embedder is not initialized');
-        }
-
         const startTime = Date.now();
-
-        // Get embeddings for all entity names at once
-        const embeddingsStartTime = Date.now();
-        const embeddings = await Promise.all(entities.map(entity => this.embedder!.generateEmbeddings(entity.name)));
-        const embeddingsEndTime = Date.now();
-        console.log(`Embeddings generation took: ${embeddingsEndTime - embeddingsStartTime}ms`);
-
-        // Find similar entities for all entities at once
-        const searchStartTime = Date.now();
-        const similarEntitiesPromises = entities.map((entity, i) => 
-            this._hybridSearch.searchWithTemporal(entity.name, embeddings[i][0])
-        );
-        const similarEntitiesResults = await Promise.all(similarEntitiesPromises);
-        const searchEndTime = Date.now();
-        console.log(`Hybrid search took: ${searchEndTime - searchStartTime}ms`);
-
-        // Prepare data for bulk deduplication
-        const dedupeData = entities.map((entity, i) => {
-            const similarEntities = similarEntitiesResults[i];
-            const entityId = this.generateEntityId(entity.name, entity.type);
-            return {
-                newEntity: {
-                    id: entityId,
-                    name: entity.name,
-                    type: entity.type,
-                    summary: entity.summary
-                },
-                existingNodes: similarEntities
-            };
-        });
-
-        // Perform bulk deduplication using LLM
+        
+        // Get deduplication info from LLM
         const dedupeResult = await this.processWithLLM(
             GraphTask.DEDUPE_NODES,
             {
-                entities: dedupeData,
-                context: prevMessages
+                entities: entities.map(entity => ({
+                    newEntity: entity,
+                    existingNodes: []
+                })),
+                context: prevMessages || undefined
             }
         );
 
-        // Process deduplication results
-        for (let i = 0; i < entities.length; i++) {
-            const entity = entities[i];
-            const entityId = this.generateEntityId(entity.name, entity.type);
-            const dedupeInfo = dedupeResult.results[i];
+        // Process results
+        if (dedupeResult?.results) {
+            for (let i = 0; i < dedupeResult.results.length; i++) {
+                const result = dedupeResult.results[i];
+                const entity = entities[i];
+                
+                if (!result) continue;
 
-            if (dedupeInfo.isDuplicate && dedupeInfo.duplicateOf) {
-                // Merge with existing entity
-                const existingEntity = this.entities.get(dedupeInfo.duplicateOf);
-                if (existingEntity) {
-                    // Merge entity data
-                    const mergedEntity = {
-                        ...existingEntity,
-                        name: entity.name || existingEntity.name,
-                        summary: entity.summary || existingEntity.summary,
-                        // Preserve any additional content fields
-                        ...(existingEntity.content || {})
-                    };
-
-                    // Update entity in registry
-                    this.entities.set(entityId, mergedEntity);
-
-                    // Update entity node in graph
-                    const existingNode = await this.storage.getNode(entityId);
-                    if (existingNode) {
-                        const updatedNode: IGraphNode = {
-                            ...existingNode,
-                            content: mergedEntity,
-                            metadata: new Map([
-                                ...existingNode.metadata,
-                                ['lastUpdateTime', new Date().toISOString()]
-                            ])
-                        };
-                        await this.storage.updateNode(entityId, updatedNode);
+                const entityId = this.generateEntityId(entity.name, entity.type);
+                
+                if (result.isDuplicate && result.duplicateOf) {
+                    // Handle duplicate - merge with existing entity
+                    const existingEntity = this.entities.get(result.duplicateOf);
+                    if (existingEntity) {
+                        existingEntity.alternateNames = existingEntity.alternateNames || [];
+                        existingEntity.alternateNames.push(entity.name);
+                        this.entities.set(result.duplicateOf, existingEntity);
                     }
-                }
-            } else {
-                // Add as new entity if not already exists
-                if (!this.entities.has(entityId)) {
-                    this.entities.set(entityId, entity);
-                    await this.storage.addNode({
-                        id: entityId,
-                        type: 'entity',
-                        content: entity,
-                        metadata: new Map([
-                            ['createdAt', new Date().toISOString()],
-                            ['type', entity.type]
-                        ]),
-                        createdAt: new Date(),
-                        validAt: new Date()
-                    });
+                } else {
+                    // Add as new entity if not already exists
+                    if (!this.entities.has(entityId)) {
+                        this.entities.set(entityId, entity);
+                        await this.storage.addNode({
+                            id: entityId,
+                            type: 'entity',
+                            content: entity,
+                            metadata: new Map([
+                                ['createdAt', new Date().toISOString()],
+                                ['type', entity.type]
+                            ]),
+                            createdAt: new Date(),
+                            validAt: new Date()
+                        });
+                    }
                 }
             }
         }
