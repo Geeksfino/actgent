@@ -22,6 +22,7 @@ import { EmbedderFactory } from './embedder/factory';
 import crypto from 'crypto';
 import { IdGenerator } from './id/IdGenerator';
 import { DeterministicIdGenerator } from './id/DeterministicIdGenerator';
+import { SemanticGraphProcessor } from './processing/semantic/processor';
 
 /**
  * Configuration for graph operations
@@ -77,6 +78,7 @@ export class GraphManager {
     private embedder?: IEmbedder;
     private llmClient: any;
     private llm: EpisodicGraphProcessor;
+    private semanticProcessor: SemanticGraphProcessor;
     private graph: MemoryGraph;
     private idGenerator: IdGenerator;
     private _hybridSearch: TemporalHybridSearch;
@@ -106,6 +108,12 @@ export class GraphManager {
 
         // Initialize LLM processor with OpenAI client and config
         this.llm = new EpisodicGraphProcessor({
+            ...config.llm,
+            client: openai
+        });
+
+        // Initialize semantic processor with OpenAI client and config
+        this.semanticProcessor = new SemanticGraphProcessor({
             ...config.llm,
             client: openai
         });
@@ -187,6 +195,25 @@ export class GraphManager {
 
             // Process entities with deduplication
             const resolvedEntities = await this.processEntities(currentMessages, prevMessages);
+
+            // Extract facts
+            const extractedFacts = await this.processWithLLM(
+                GraphTask.FACT_EXTRACTION,
+                {
+                    previousMessages: prevMessages,
+                    currentMessage: currentMessages,
+                    entities: resolvedEntities
+                }
+            );
+
+            // Get relevant entity IDs
+            const relevantEntityIds = resolvedEntities.map(entity => entity.id);
+
+            // Get existing edges from the graph, filtering by relevant entities
+            const existingEdges = await this.graph.getEdges(relevantEntityIds);
+
+            // Resolve facts
+            const resolvedFacts = await this.resolveFacts(extractedFacts, existingEdges);
 
             // Process temporal relationships
             const temporalResult = await this.processTemporalRelationships(
@@ -313,11 +340,22 @@ export class GraphManager {
      * Process a task using LLM with proper data handling
      */
     private async processWithLLM(task: GraphTask, data: any): Promise<any> {
-        const llmStartTime = Date.now();
-        const result = await this.llm.process(task, data);
-        const llmEndTime = Date.now();
-        console.log(`LLM processing took: ${llmEndTime - llmStartTime}ms`);
-        return result;
+        console.log("processWithLLM task: ", task);
+        if (task === GraphTask.EVALUATE_PATHS || task === GraphTask.FACT_EXTRACTION || task === GraphTask.RESOLVE_FACTS) {
+            console.log(`Using semantic processor for task: ${task}`);
+            const result = await this.semanticProcessor.process(task, data);
+            return result;
+        }
+        try {
+            const llmStartTime = Date.now();
+            const result = await this.llm.process(task, data);
+            const llmEndTime = Date.now();
+            console.log(`LLM processing took: ${llmEndTime - llmStartTime}ms`);
+            return result;
+        } catch (error) {
+            console.error('Failed to process task:', error);
+            throw error;
+        }
     }
 
     private async updateCommunityMembers(communityId: string, members: string[]): Promise<void> {
@@ -904,5 +942,23 @@ export class GraphManager {
 
         const processEndTime = Date.now();
         console.log(`Temporal relationship extraction process took: ${processEndTime - processStartTime}ms`);
+    }
+
+    /**
+     * Resolve extracted facts against existing edges in the graph
+     * @param fact The extracted fact to resolve
+     * @param existingEdges The existing edges in the graph
+     */
+    private async resolveFacts(fact: any, existingEdges: any[]): Promise<any> {
+        // Use the RESOLVE_FACTS task to check if the extracted fact is a duplicate of any existing edges
+        const resolveFactsResult = await this.processWithLLM(
+            GraphTask.RESOLVE_FACTS,
+            {
+                new_edge: fact,
+                existing_edges: existingEdges
+            }
+        );
+
+        return resolveFactsResult;
     }
 }

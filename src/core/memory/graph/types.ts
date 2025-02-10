@@ -67,7 +67,8 @@ export enum GraphTask {
     // LLM-based tasks
     RERANK_RESULTS = 'rerank_results',
     REFINE_COMMUNITIES = 'refine_communities',
-    FACT_EXTRACTION = 'evaluate_paths',
+    EVALUATE_PATHS = 'evaluate_paths',
+    FACT_EXTRACTION = 'fact_extraction',
     EXTRACT_TEMPORAL = 'extract_temporal',
     EXTRACT_ENTITIES = 'extract_entities',
     PREPARE_FOR_EMBEDDING = 'prepare_for_embedding',
@@ -83,6 +84,7 @@ export enum GraphTask {
     DEDUPE_BATCH = 'dedupe_batch',
     DEDUPE_BATCH_EDGES = 'dedupe_batch_edges',
     INVALIDATE_EDGES = 'invalidate_edges',
+    RESOLVE_FACTS = 'resolve_facts',
 
     // Evaluation tasks
     EVALUATE_COMMUNITY = 'evaluate_community',
