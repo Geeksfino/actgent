@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { InMemoryGraphStorage } from '../../../src/core/memory/graph/data/InMemoryGraphStorage';
 import { MemoryGraph } from '../../../src/core/memory/graph/data/operations';
-import { GraphLLMProcessor } from '../../../src/core/memory/graph/processing/llm/processor';
+import { EpisodicGraphProcessor } from '../../../src/core/memory/graph/processing/episodic/processor';
+import { LLMConfig } from '../../../src/core/memory/graph/types';
+import { DeterministicIdGenerator } from '../../../src/core/memory/graph/id/DeterministicIdGenerator';
+import OpenAI from 'openai';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
@@ -22,25 +25,45 @@ interface TestConversationNode {
 class GraphFrameworkTest {
     private storage: InMemoryGraphStorage;
     public operations: MemoryGraph;
-    private mockLLMProcessor: GraphLLMProcessor;
+    private mockLLMProcessor: EpisodicGraphProcessor;
+    private idGenerator: DeterministicIdGenerator;
     
-    constructor() {
-        this.storage = new InMemoryGraphStorage();
-        this.mockLLMProcessor = this.createMockLLMProcessor();
+    constructor(config: LLMConfig & { client: OpenAI }) {
+        this.idGenerator = new DeterministicIdGenerator();
+        this.storage = new InMemoryGraphStorage(this.idGenerator);
+        this.mockLLMProcessor = this.createMockLLMProcessor(config);
         this.operations = new MemoryGraph(this.storage, this.mockLLMProcessor);
     }
 
-    private createMockLLMProcessor(): GraphLLMProcessor {
+    private createMockLLMProcessor(config: LLMConfig & { client: OpenAI }): EpisodicGraphProcessor {
         return {
+            llm: config.client,
+            prepareRequest: vi.fn(),
+            convertZodToJsonSchema: vi.fn(),
+            buildEntityExtractionPrompt: vi.fn(),
+            buildFactExtractionPrompt: vi.fn(),
+            buildFactResolutionPrompt: vi.fn(),
+            buildCommunityRefinementPrompt: vi.fn(),
+            buildNodeSummarizationPrompt: vi.fn(),
+            buildPathEvaluationPrompt: vi.fn(),
+            buildTemporalExtractionPrompt: vi.fn(),
+            buildTemporalResolutionPrompt: vi.fn(),
+            buildTemporalRefinementPrompt: vi.fn(),
+            buildTemporalSummarizationPrompt: vi.fn(),
+            buildTemporalEvaluationPrompt: vi.fn(),
             process: vi.fn().mockImplementation(async (task, data) => {
                 // Mock implementations for different tasks
                 switch(task) {
-                    case 'evaluate_paths':
-                        return [{
-                            path: data.path,
-                            score: 0.8,
-                            explanation: 'Mock path evaluation'
-                        }];
+                    case 'fact_extraction':
+                        return {
+                            entities: [],
+                            relationships: []
+                        };
+                    case 'resolve_facts':
+                        return {
+                            isDuplicate: false,
+                            uuid: null
+                        };
                     case 'refine_communities':
                         return [{
                             nodes: data.nodes,
@@ -51,7 +74,7 @@ class GraphFrameworkTest {
                         return null;
                 }
             })
-        } as unknown as GraphLLMProcessor;
+        } as unknown as EpisodicGraphProcessor;
     }
 
     async loadTestData() {
@@ -183,7 +206,13 @@ describe('Graph Framework Integration', () => {
     let testFramework: GraphFrameworkTest;
 
     beforeEach(async () => {
-        testFramework = new GraphFrameworkTest();
+        testFramework = new GraphFrameworkTest({
+            client: {} as OpenAI,
+            model: 'gpt-4',
+            apiKey: 'test-key',
+            temperature: 0.1,
+            maxTokens: 1000
+        });
         await testFramework.loadTestData();
     });
 
