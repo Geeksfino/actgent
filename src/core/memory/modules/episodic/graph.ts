@@ -50,6 +50,7 @@ export interface EpisodeNode extends BaseEpisodicNode {
         temporalDistance: number;
         userInstruction?: string;
     };
+    edges: IGraphEdge[];
 }
 
 /**
@@ -135,7 +136,8 @@ export function memoryUnitToGraphNode(unit: IEpisodicMemoryUnit): EpisodeNode {
             temporalDistance: unit.content.temporalDistance,
             userInstruction: unit.content.userInstruction
         },
-        metadata
+        metadata,
+        edges: []
     };
 }
 

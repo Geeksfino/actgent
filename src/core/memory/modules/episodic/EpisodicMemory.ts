@@ -203,7 +203,8 @@ export class EpisodicMemory extends DeclarativeMemory {
             type: EpisodicNodeType.LOCATION,
             content: { name: unit.content.location },
             metadata: new Map(),
-            createdAt: new Date()
+            createdAt: new Date(),
+            edges: []
         };
 
         // Create actor nodes
@@ -212,7 +213,8 @@ export class EpisodicMemory extends DeclarativeMemory {
             type: EpisodicNodeType.ACTOR,
             content: { name: actor },
             metadata: new Map(),
-            createdAt: new Date()
+            createdAt: new Date(),
+            edges: []
         }));
 
         // Create action nodes
@@ -221,7 +223,8 @@ export class EpisodicMemory extends DeclarativeMemory {
             type: EpisodicNodeType.ACTION,
             content: { name: action },
             metadata: new Map(),
-            createdAt: new Date()
+            createdAt: new Date(),
+            edges: []
         }));
 
         // Store all nodes

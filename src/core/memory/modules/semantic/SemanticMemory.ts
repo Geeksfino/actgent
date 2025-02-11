@@ -107,7 +107,8 @@ class GraphStorageAdapter implements IMemoryStorage {
             metadata: unit.metadata || new Map(),
             createdAt: unit.createdAt || new Date(),
             expiredAt: unit.expiredAt,
-            validAt: unit.validAt
+            validAt: unit.validAt,
+            edges: []
         };
     }
 
@@ -139,7 +140,8 @@ class GraphIndexAdapter implements IMemoryIndex {
             metadata: unit.metadata,
             createdAt: unit.createdAt,
             expiredAt: unit.expiredAt,
-            validAt: unit.validAt
+            validAt: unit.validAt,
+            edges: []
         };
         await this.graphIndex.indexNode(node);
     }

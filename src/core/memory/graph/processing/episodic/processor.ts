@@ -103,20 +103,6 @@ export class EpisodicGraphProcessor {
 
     private prepareRequest(task: GraphTask, data: any): { prompt: string; functionSchema: z.ZodType<any> } {
         switch (task) {
-            case GraphTask.DEDUPE_NODES:
-                console.log("DEDUPE_NODES data: ", data);
-                const dedupeNodesPrompt = this.buildDedupeNodesPrompt({ entities: data.entities, context: data.context });
-                console.log("DEDUPE_NODES prompt: ", dedupeNodesPrompt);
-                return {
-                    prompt: dedupeNodesPrompt,
-                    functionSchema: z.object({
-                        results: z.array(z.object({
-                            isDuplicate: z.boolean(),
-                            duplicateOf: z.string().nullable(),
-                        }))
-                    })
-                };
-
             case GraphTask.EXTRACT_ENTITIES:
                 console.log("EXTRACT_ENTITIES data: ", data);
                 const extractEntitiesPrompt = this.buildEntityExtractionPrompt({ text: data.text, context: data.context });
@@ -342,10 +328,6 @@ Return in this format:
     }
   ]
 }`;
-    }
-
-    private buildDedupeNodesPrompt(input: { entities: any[], context: string }): string {
-        return `<PREVIOUS_MESSAGES>\n${input.context}\n</PREVIOUS_MESSAGES>\n<ENTITIES>\n${JSON.stringify(input.entities, null, 2)}\n</ENTITIES>\nGiven the above ENTITIES and PREVIOUS MESSAGES. Determine if any of the entities are duplicates of each other.\n<EXPECTED_RESPONSE>\nReturn a JSON object with:\n{\n    "results": [\n        {\n            "isDuplicate": boolean,\n            "duplicateOf": "entity_id if duplicate, null if not"\n        }\n    ]\n}\n</EXPECTED_RESPONSE>`;
     }
 
     private buildSummarizeNodePrompt(input: { 
@@ -613,55 +595,5 @@ Return in this format:
             console.error("Error in extractTemporal:", error);
             return { entities: [], relationships: [] };
         }
-    }
-
-    private async extractTemporalRelationships(messages: Array<Message>): Promise<any> {
-        const data = {
-          text: messages.map(msg => `${msg.role}: ${msg.body}`).join('\n'),
-          context: messages[0].context,
-          prompt: `Extract temporal relationships between entities from the following conversation. For each relationship:
-- Use entity IDs with 'entity_' prefix (e.g., 'entity_1', 'entity_2')
-- Specify the relationship type
-- Provide a name and description
-- Include temporal information (valid_at, invalid_at)
-
-Current conversation:
-${messages.map(msg => `${msg.role}: ${msg.body}`).join('\n')}
-
-Return relationships in this format:
-{
-  "entities": [
-    {
-      "id": "entity_1",  // Entity ID with prefix
-      "name": "Entity Name",
-      "type": "ENTITY_TYPE",
-      "summary": "Optional description"
-    }
-  ],
-  "relationships": [
-    {
-      "sourceId": "entity_1",  // Source entity ID with prefix
-      "targetId": "entity_2",  // Target entity ID with prefix
-      "type": "RELATIONSHIP_TYPE",
-      "name": "Relationship Name",
-      "description": "Optional description",
-      "valid_at": "ISO timestamp",
-      "invalid_at": "ISO timestamp or null"
-    }
-  ]
-}
-
-Extract relationships that show:
-1. How entities are connected
-2. When these connections were established or changed
-3. Any temporal aspects of the relationships
-
-Focus on meaningful relationships that help understand:
-- User interactions with products/services
-- Connections between different entities
-- Changes in relationships over time`
-        };
-
-        return this.processWithLLM(GraphTask.EXTRACT_TEMPORAL, data);
     }
 }

@@ -29,6 +29,7 @@ export interface IGraphUnit {
 export interface IGraphNode<T = any> extends IGraphUnit {
     content: T;
     embedding?: Float32Array | number[];  // Support both Float32Array and number[] for embeddings
+    edges: IGraphEdge[];
 }
 
 /**

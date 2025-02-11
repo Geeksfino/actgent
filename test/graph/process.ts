@@ -182,17 +182,50 @@ async function main() {
     const snapshot = await graphManager.getSnapshot({});
     const { nodes: entities, edges: relationships } = snapshot;
 
-    // Write results
+    // Convert Map objects to plain objects for JSON serialization
+    const serializableEntities = entities.map(entity => ({
+        ...entity,
+        metadata: Object.fromEntries(entity.metadata),
+        // Ensure edges array exists
+        edges: entity.edges?.map(edge => ({
+            ...edge,
+            metadata: Object.fromEntries(edge.metadata || new Map())
+        })) || []
+    }));
+
+    // Get all edges, including those stored in nodes
+    const allEdges = new Set<string>();
+    
+    // Add edges from relationships
+    relationships.forEach(rel => {
+        const edgeStr = JSON.stringify({
+            ...rel,
+            metadata: Object.fromEntries(rel.metadata)
+        });
+        if (edgeStr) allEdges.add(edgeStr);
+    });
+
+    // Add edges from nodes
+    serializableEntities.forEach(entity => {
+        entity.edges?.forEach(edge => {
+            const edgeStr = JSON.stringify(edge);
+            if (edgeStr) allEdges.add(edgeStr);
+        });
+    });
+
+    // Convert back from strings and deduplicate
+    const serializableEdges = Array.from(allEdges).map(edge => JSON.parse(edge));
+
+    // Write results to a single file
     await fs.writeFile(
-        path.join(outputPath, 'entities.json'),
-        JSON.stringify(entities, null, 2)
-    );
-    await fs.writeFile(
-        path.join(outputPath, 'relationships.json'),
-        JSON.stringify(relationships, null, 2)
+        path.join(outputPath, 'graph.json'),
+        JSON.stringify({
+            nodes: serializableEntities,
+            edges: serializableEdges
+        }, null, 2)
     );
 
-    console.log('\nProcessing complete. Results written to:', outputPath);
+    console.log('\nProcessing complete. Results written to:', path.join(outputPath, 'graph.json'));
 }
 
 main().catch((err: any) => {

@@ -68,6 +68,15 @@ export interface SearchResult {
     confidence: number;
 }
 
+interface EntityExtractionResult {
+    entities: Array<{
+        id: number;
+        name: string;
+        type: string;
+        summary?: string;
+    }>;
+}
+
 /**
  * GraphManager serves as the single access point for all graph operations.
  * It initializes and manages all necessary components (storage, search, LLM, etc.)
@@ -185,18 +194,54 @@ export class GraphManager {
         timestamp: Date,
         sessionId: string
     }>, processingLayer: number = 3): Promise<void> {
-        // Layer 1: Create episode nodes
+        // Layer 1: Create episode nodes and raw entities
         await this.createEpisodeNodes(messages);
+        const { currentMessages, prevMessages } = await this.prepareMessageContext(messages);
+
+        // Extract and store raw entities
+        const extractionResult = await this.llm.process<EntityExtractionResult>(GraphTask.EXTRACT_ENTITIES, {
+            text: currentMessages,
+            context: prevMessages
+        });
+
+        // Store raw entities in Layer 1
+        const extractedEntities = [];
+        for (const entity of extractionResult.entities) {
+            const entityId = this.semanticProcessor.generateEntityId(entity.name, entity.type);
+            
+            // Store raw entity with metadata
+            await this.graph.addNode({
+                id: entityId,
+                type: entity.type.toLowerCase(),
+                content: {
+                    name: entity.name,
+                    summary: entity.summary
+                },
+                metadata: new Map([
+                    ['sessionId', messages[0].sessionId],
+                    ['timestamp', messages[0].timestamp.toISOString()],
+                    ['entityType', entity.type],
+                    ['lastUpdateTime', new Date().toISOString()]
+                ]),
+                createdAt: new Date(),
+                validAt: messages[0].timestamp,
+                edges: []
+            });
+
+            extractedEntities.push({
+                ...entity,
+                id: entityId
+            });
+        }
 
         if (processingLayer > 1) {
             // Layer 2: Process semantic layer
-            // Get context from previous messages
-            const { currentMessages, prevMessages } = await this.prepareMessageContext(messages);
+            
+            // Step 1: Entity Resolution
+            const deduplicationResult = await this.semanticProcessor.deduplicateEntities(extractedEntities);
+            const resolvedEntities = deduplicationResult.entities;
 
-            // Process entities with deduplication
-            const resolvedEntities = await this.processEntities(currentMessages, prevMessages);
-
-            // Extract facts
+            // Step 2: Extract facts between resolved entities
             const extractedFacts = await this.processWithLLM(
                 GraphTask.FACT_EXTRACTION,
                 {
@@ -206,7 +251,7 @@ export class GraphManager {
                 }
             );
 
-            // Get relevant entity IDs
+            // Get relevant entity IDs from resolved entities
             const relevantEntityIds = resolvedEntities.map(entity => entity.id);
 
             // Get existing edges from the graph, filtering by relevant entities
@@ -222,7 +267,7 @@ export class GraphManager {
                 messages[0].timestamp
             );
 
-            // Create graph nodes and edges
+            // Create graph nodes and edges using resolved entities
             await this.createGraphStructures(resolvedEntities, temporalResult, messages[0]);
         }
 
@@ -324,7 +369,18 @@ export class GraphManager {
      * @returns Promise<{ nodes: IGraphNode[], edges: IGraphEdge[] }>
      */
     async getSnapshot(filter: GraphFilter & { sessionId?: string }): Promise<{ nodes: IGraphNode[], edges: IGraphEdge[] }> {
-        return this.graph.query(filter);
+        console.log('Getting snapshot with filter:', filter);
+        const result = await this.storage.query(filter);
+        console.log('Snapshot query result:', {
+            nodeCount: result.nodes.length,
+            nodeTypes: new Set(result.nodes.map(n => n.type)),
+            nodes: result.nodes.map(n => ({
+                id: n.id,
+                type: n.type,
+                name: n.content?.name
+            }))
+        });
+        return result;
     }
 
     // Private methods for internal use
@@ -393,7 +449,8 @@ export class GraphManager {
                     ['timestamp', message.timestamp.toISOString()]
                 ]),
                 createdAt: now,
-                validAt: message.timestamp
+                validAt: message.timestamp,
+                edges: [] // Initialize edges property
             };
             this.log('Episode Node:', episodeNode);
             await this.addNode(episodeNode);
@@ -410,18 +467,18 @@ export class GraphManager {
         currentMessages: string,
         prevMessages: string
     }> {
-        // Get previous context (last 4 messages)
-        const { nodes: allNodes } = await this.graph.query({ nodeTypes: ['episode'] });
-        const prevNodes = allNodes.sort((a, b) => 
-            (b.validAt?.getTime() || 0) - (a.validAt?.getTime() || 0)
+        // Get previous nodes
+        const { nodes: prevNodes } = await this.graph.query({ nodeTypes: ['episode'] });
+        const allNodes = [...prevNodes].sort((a, b) => 
+            (a.validAt?.getTime() || 0) - (b.validAt?.getTime() || 0)
         );
 
         this.log('All Nodes After Sort:', allNodes.map(node => ({ id: node.id, validAt: node.validAt })));
 
         const prevMessages = prevNodes
             .slice(0, 4)
-            .filter(node => !messages.some(msg => msg.id === node.metadata.get('turnId')))
-            .map(node => `${node.content.source}: ${node.content.body}`)
+            .filter((node: IGraphNode) => !messages.some(msg => msg.id === node.metadata.get('turnId')))
+            .map((node: IGraphNode) => `${node.content.source}: ${node.content.body}`)
             .join('\n');
 
         const currentMessages = messages
@@ -432,87 +489,8 @@ export class GraphManager {
         return { currentMessages, prevMessages };
     }
 
-    private async processEntities(
-        currentMessages: string,
-        prevMessages: string
-    ): Promise<Array<any>> {
-        // Extract entities using LLM
-        const extractionResult = await this.processWithLLM(
-            GraphTask.EXTRACT_ENTITIES,
-            {
-                text: currentMessages,
-                context: prevMessages
-            }
-        );
-
-        const extractedEntities = extractionResult.entities;
-
-        // Deduplicate entities
-        await this.deduplicateEntities(extractedEntities, prevMessages);
-
-        return extractedEntities;
-    }
-
-    private async deduplicateEntities(entities: any[], prevMessages: string): Promise<void> {
-        const startTime = Date.now();
-        
-        // Get deduplication info from LLM
-        const dedupeResult = await this.processWithLLM(
-            GraphTask.DEDUPE_NODES,
-            {
-                entities: entities.map(entity => ({
-                    newEntity: entity,
-                    existingNodes: []
-                })),
-                context: prevMessages || undefined
-            }
-        );
-
-        // Process results
-        if (dedupeResult?.results) {
-            for (let i = 0; i < dedupeResult.results.length; i++) {
-                const result = dedupeResult.results[i];
-                const entity = entities[i];
-                
-                if (!result) continue;
-
-                const entityId = this.generateEntityId(entity.name, entity.type);
-                
-                if (result.isDuplicate && result.duplicateOf) {
-                    // Handle duplicate - merge with existing entity
-                    const existingEntity = this.entities.get(result.duplicateOf);
-                    if (existingEntity) {
-                        existingEntity.alternateNames = existingEntity.alternateNames || [];
-                        existingEntity.alternateNames.push(entity.name);
-                        this.entities.set(result.duplicateOf, existingEntity);
-                    }
-                } else {
-                    // Add as new entity if not already exists
-                    if (!this.entities.has(entityId)) {
-                        this.entities.set(entityId, entity);
-                        await this.storage.addNode({
-                            id: entityId,
-                            type: 'entity',
-                            content: entity,
-                            metadata: new Map([
-                                ['createdAt', new Date().toISOString()],
-                                ['type', entity.type]
-                            ]),
-                            createdAt: new Date(),
-                            validAt: new Date()
-                        });
-                    }
-                }
-            }
-        }
-
-        const endTime = Date.now();
-        console.log(`Entity deduplication took: ${endTime - startTime}ms`);
-    }
-
-    private generateEntityId(name: string, entityType: string): string {
-        const uniqueString = `${name.toLowerCase().trim()}|${entityType.toLowerCase()}`;
-        return crypto.createHash('md5').update(uniqueString).digest('hex');
+    private async deduplicateEntities(nodes: Array<any>): Promise<{ entities: Array<any>, mappings: Array<any> }> {
+        return await this.semanticProcessor.deduplicateEntities(nodes);
     }
 
     private async processTemporalRelationships(
@@ -540,19 +518,12 @@ export class GraphManager {
             sessionId: string
         }
     ): Promise<void> {
-        // Helper to ensure entity ID has prefix
-        const ensureEntityPrefix = (id: string | number) => {
-            const strId = String(id);
-            return strId.startsWith('entity_') ? strId : `entity_${strId}`;
-        };
-
         // Create or update entity nodes
         const createdEntityIds = new Set<string>();
         const temporalEntities = temporalResult?.entities || [];
         if (Array.isArray(temporalEntities)) {
             for (const entity of temporalEntities) { 
-                const entityId = ensureEntityPrefix(entity.id);
-                const entityType = entity.type.toLowerCase();
+                const entityId = this.semanticProcessor.generateEntityId(entity.name, entity.type);
                 
                 // Get existing node if any
                 const existingNode = await this.storage.getNode(entityId);
@@ -560,7 +531,7 @@ export class GraphManager {
                 // Prepare node data, preserving existing metadata if present
                 const entityNode: IGraphNode = {
                     id: entityId,
-                    type: entityType,
+                    type: entity.type.toLowerCase(),
                     content: {
                         name: entity.name || '',
                         summary: entity.summary || '',
@@ -573,13 +544,14 @@ export class GraphManager {
                         // Update with new metadata
                         ['sessionId', firstMessage.sessionId],
                         ['timestamp', firstMessage.timestamp.toISOString()],
-                        ['entityType', entityType],
+                        ['entityType', entity.type],
                         ['lastUpdateTime', new Date().toISOString()]
                     ]),
                     createdAt: existingNode?.createdAt || new Date(),
                     validAt: firstMessage.timestamp,
                     // Don't include invalidAt for nodes
-                    expiredAt: existingNode?.expiredAt
+                    expiredAt: existingNode?.expiredAt,
+                    edges: [] // Initialize edges property
                 };
 
                 if (existingNode) {
@@ -587,7 +559,7 @@ export class GraphManager {
                     await this.storage.updateNode(entityId, entityNode);
                     this.log('Updated entity node:', { 
                         entityId, 
-                        type: entityType,
+                        type: entity.type,
                         name: entity.name
                     });
                 } else {
@@ -595,7 +567,7 @@ export class GraphManager {
                     await this.storage.addNode(entityNode);
                     this.log('Created entity node:', { 
                         entityId, 
-                        type: entityType,
+                        type: entity.type,
                         name: entity.name
                     });
                 }
@@ -607,8 +579,8 @@ export class GraphManager {
         if (temporalResult?.relationships && Array.isArray(temporalResult.relationships)) {
             for (const rel of temporalResult.relationships) {
                 try {
-                    const sourceId = ensureEntityPrefix(rel.sourceId);
-                    const targetId = ensureEntityPrefix(rel.targetId);
+                    const sourceId = this.semanticProcessor.generateEntityId(rel.sourceName, rel.sourceType);
+                    const targetId = this.semanticProcessor.generateEntityId(rel.targetName, rel.targetType);
                     
                     // Verify both nodes exist
                     const [sourceExists, targetExists] = await Promise.all([
@@ -721,23 +693,24 @@ export class GraphManager {
 
         // Extract entities using LLM
         const extractEntitiesStartTime = Date.now();
-        const entities = await this.processWithLLM(
-            GraphTask.EXTRACT_ENTITIES,
-            {
-                messages: currentMessages
-            }
-        );
+        const result = await this.llm.process<EntityExtractionResult>(GraphTask.EXTRACT_ENTITIES, {
+            messages: currentMessages
+        });
         const extractEntitiesEndTime = Date.now();
         console.log(`Entity extraction took: ${extractEntitiesEndTime - extractEntitiesStartTime}ms`);
-        this.log('Extracted Entities:', entities);
+        console.log('Extracted Entities:', result);
 
-        // Store each entity
-        for (const entity of entities?.entities || []) { 
-            const entityId = this.generateEntityId(entity.name, entity.type);
-            entity.id = entityId;
+        // Store entities and return their IDs
+        const entityIds: string[] = [];
+        if (Array.isArray(result.entities)) {
+            console.log('Processing entities:', result.entities);
+            for (const entity of result.entities) {
+                const entityId = this.semanticProcessor.generateEntityId(entity.name, entity.type);
+                console.log('Generated entity ID:', { name: entity.name, type: entity.type, id: entityId });
+                entityIds.push(entityId);
 
-            try {
-                const entityNode: IGraphNode = {
+                // Store entity with metadata
+                await this.graph.addNode({
                     id: entityId,
                     type: entity.type.toLowerCase(),
                     content: {
@@ -745,25 +718,22 @@ export class GraphManager {
                         summary: entity.summary
                     },
                     metadata: new Map([
-                        ['extractionStage', 'initial'],
                         ['sessionId', messages[0].sessionId],
-                        ['timestamp', messages[0].timestamp.toISOString()]
+                        ['timestamp', messages[0].timestamp.toISOString()],
+                        ['entityType', entity.type],
+                        ['lastUpdateTime', new Date().toISOString()]
                     ]),
                     createdAt: new Date(),
-                    validAt: messages[0].timestamp
-                };
-
-                await this.addNode(entityNode);
-                extractedNodeIds.push(entityId);
-                this.log('Stored initial entity:', { entityId, type: entity.type });
-            } catch (error) {
-                console.error('Failed to store entity:', error);
+                    validAt: messages[0].timestamp,
+                    edges: []
+                });
             }
         }
 
         const processEndTime = Date.now();
         console.log(`Entity extraction process took: ${processEndTime - processStartTime}ms`);
-        return extractedNodeIds;
+        console.log('Final entity IDs:', entityIds);
+        return entityIds;
     }
 
     /**
@@ -791,8 +761,8 @@ export class GraphManager {
         // Process each merged entity
         for (const mergedEntity of dedupeResult.entities) {
             try {
-                const primaryId = `entity_${mergedEntity.primaryId}`;
-                const duplicateIds = mergedEntity.duplicateIds.map((id: string) => `entity_${id}`);
+                const primaryId = mergedEntity.primaryId;
+                const duplicateIds = mergedEntity.duplicateIds;
 
                 // Create merged node
                 const mergedNode: IGraphNode = {
@@ -809,7 +779,8 @@ export class GraphManager {
                         ['lastUpdateTime', new Date().toISOString()]
                     ]),
                     createdAt: new Date(),
-                    validAt: new Date()
+                    validAt: new Date(),
+                    edges: [] // Initialize edges property
                 };
 
                 // Update primary node
@@ -856,7 +827,7 @@ export class GraphManager {
         const temporalResult = await this.processWithLLM(GraphTask.EXTRACT_TEMPORAL, {
             nodes: validNodes,
             metadata: {
-                timestamp: firstMessage.timestamp,
+                timestamp: firstMessage.timestamp.toISOString(),
                 sessionId: firstMessage.sessionId
             }
         });
@@ -865,7 +836,7 @@ export class GraphManager {
         if (temporalResult.entities) {
             for (const entity of temporalResult.entities) {
                 try {
-                    const entityId = `entity_${entity.id}`;
+                    const entityId = this.semanticProcessor.generateEntityId(entity.name, entity.type);
                     const existingNode = await this.storage.getNode(entityId);
                     if (existingNode) {
                         // Merge temporal metadata
@@ -875,7 +846,8 @@ export class GraphManager {
                                 ...existingNode.metadata,
                                 ['temporalStage', 'processed'],
                                 ['lastUpdateTime', new Date().toISOString()]
-                            ])
+                            ]),
+                            edges: [] // Initialize edges property
                         };
                         await this.storage.updateNode(entityId, updatedNode);
                     }
@@ -889,8 +861,8 @@ export class GraphManager {
         if (temporalResult.relationships) {
             for (const rel of temporalResult.relationships) {
                 try {
-                    const sourceId = `entity_${rel.sourceId}`;
-                    const targetId = `entity_${rel.targetId}`;
+                    const sourceId = this.semanticProcessor.generateEntityId(rel.sourceName, rel.sourceType);
+                    const targetId = this.semanticProcessor.generateEntityId(rel.targetName, rel.targetType);
                     
                     // Verify both nodes exist
                     const [sourceExists, targetExists] = await Promise.all([

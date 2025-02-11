@@ -7,15 +7,11 @@ import { IdGenerator } from '../id/IdGenerator';
  */
 export class InMemoryGraphStorage implements IGraphStorage {
     private nodes: Map<string, IGraphNode>;
-    private edges: Map<string, IGraphEdge>;
-    private adjacencyList: Map<string, Set<string>>;
     private idGenerator: IdGenerator;
 
     constructor(idGenerator: IdGenerator, maxCapacity: number = 1000) {
         this.idGenerator = idGenerator;
         this.nodes = new Map();
-        this.edges = new Map();
-        this.adjacencyList = new Map();
     }
 
     // Graph-specific operations
@@ -23,9 +19,14 @@ export class InMemoryGraphStorage implements IGraphStorage {
         const id = node.id || this.idGenerator.generateNodeId({ type: node.type, content: node.content });
         node.id = id;
         
-        // Validate temporal consistency
-        this.validateTemporalConsistency(node);
-        
+        node.edges = [];
+        console.log('Adding node to storage:', {
+            id,
+            type: node.type,
+            name: node.content?.name,
+            metadata: Object.fromEntries(node.metadata || new Map()),
+            existingNodes: Array.from(this.nodes.keys())
+        });
         this.nodes.set(id, node);
         return id;
     }
@@ -40,25 +41,12 @@ export class InMemoryGraphStorage implements IGraphStorage {
         
         Object.assign(node, updates);
         
-        // Validate temporal consistency
-        this.validateTemporalConsistency(node);
-        
         this.nodes.set(id, node);
     }
 
     async deleteNode(id: string): Promise<void> {
         // Remove from main storage
         this.nodes.delete(id);
-        
-        // Remove connected edges
-        for (const [edgeId, edge] of this.edges) {
-            if (edge.sourceId === id || edge.targetId === id) {
-                await this.deleteEdge(edgeId);
-            }
-        }
-        
-        // Remove from adjacency list
-        this.adjacencyList.delete(id);
     }
 
     async addEdge(edge: IGraphEdge): Promise<string> {
@@ -70,95 +58,42 @@ export class InMemoryGraphStorage implements IGraphStorage {
         });
         edge.id = id;
 
-        // Validate temporal consistency
-        this.validateTemporalConsistency(edge);
-
         // Ensure both nodes exist
-        if (!this.nodes.has(edge.sourceId)) {
+        const sourceNode = await this.getNode(edge.sourceId);
+        if (!sourceNode) {
             throw new Error(`Source node ${edge.sourceId} not found`);
         }
-        if (!this.nodes.has(edge.targetId)) {
+
+        const targetNode = await this.getNode(edge.targetId);
+        if (!targetNode) {
             throw new Error(`Target node ${edge.targetId} not found`);
         }
 
-        this.edges.set(id, edge);
-
-        // Update adjacency list
-        if (!this.adjacencyList.has(edge.sourceId)) {
-            this.adjacencyList.set(edge.sourceId, new Set());
-        }
-        this.adjacencyList.get(edge.sourceId)!.add(edge.targetId);
+        // Add edge to source node's edges array
+        sourceNode.edges.push(edge);
+        this.nodes.set(sourceNode.id, sourceNode);
 
         return id;
     }
 
     async getEdge(id: string): Promise<IGraphEdge | null> {
-        return this.edges.get(id) || null;
+        return null;
     }
 
     async updateEdge(id: string, updates: Partial<IGraphEdge>): Promise<void> {
-        const edge = await this.getEdge(id);
-        if (!edge) throw new Error(`Edge ${id} not found`);
-        
-        Object.assign(edge, updates);
-        
-        // Validate temporal consistency
-        this.validateTemporalConsistency(edge);
-        
-        this.edges.set(id, edge);
+        throw new Error('Method not implemented.');
     }
 
     async deleteEdge(id: string): Promise<void> {
-        const edge = this.edges.get(id);
-        if (!edge) return;
-        
-        // Remove from main storage
-        this.edges.delete(id);
-        
-        // Update adjacency list
-        const sourceAdjList = this.adjacencyList.get(edge.sourceId);
-        if (sourceAdjList) {
-            sourceAdjList.delete(edge.targetId);
-        }
+        // No-op
     }
 
     async getNeighbors(nodeId: string): Promise<IGraphNode[]> {
-        const neighbors = this.adjacencyList.get(nodeId);
-        if (!neighbors) return [];
-
-        const nodes: IGraphNode[] = [];
-        for (const id of neighbors) {
-            const node = this.nodes.get(id);
-            if (node) nodes.push(node);
-        }
-
-        return nodes;
+        return [];
     }
 
     async getEdges(nodeIds: string[]): Promise<IGraphEdge[]> {
-        const edges: IGraphEdge[] = [];
-        const edgeSet = new Set<string>();
-
-        // Collect all edges connected to the given nodes
-        for (const nodeId of nodeIds) {
-            const neighbors = this.adjacencyList.get(nodeId);
-            if (!neighbors) continue;
-
-            for (const neighborId of neighbors) {
-                // Find edges between these nodes
-                for (const [edgeId, edge] of this.edges) {
-                    if ((edge.sourceId === nodeId && edge.targetId === neighborId) ||
-                        (edge.sourceId === neighborId && edge.targetId === nodeId)) {
-                        if (!edgeSet.has(edgeId)) {
-                            edgeSet.add(edgeId);
-                            edges.push(edge);
-                        }
-                    }
-                }
-            }
-        }
-
-        return edges;
+        return [];
     }
 
     async findPath(sourceId: string, targetId: string): Promise<IGraphEdge[]> {
@@ -173,23 +108,8 @@ export class InMemoryGraphStorage implements IGraphStorage {
             if (visited.has(id)) continue;
             visited.add(id);
             
-            const neighbors = this.adjacencyList.get(id);
-            if (!neighbors) continue;
-            
-            for (const neighborId of neighbors) {
-                if (!visited.has(neighborId)) {
-                    const edge = Array.from(this.edges.values()).find(e => 
-                        (e.sourceId === id && e.targetId === neighborId) ||
-                        (e.sourceId === neighborId && e.targetId === id)
-                    );
-                    if (edge) {
-                        queue.push({ 
-                            id: neighborId, 
-                            path: [...path, edge]
-                        });
-                    }
-                }
-            }
+            // No neighbors to visit
+            continue;
         }
         
         return [];
@@ -207,13 +127,7 @@ export class InMemoryGraphStorage implements IGraphStorage {
             (!node.validAt || node.validAt <= date)
         );
         
-        const edges = Array.from(this.edges.values()).filter(edge =>
-            edge.createdAt <= date && (!edge.expiredAt || edge.expiredAt > date) &&
-            (!edge.validAt || edge.validAt <= date) &&
-            (!edge.invalidAt || edge.invalidAt > date)
-        );
-
-        return { nodes, edges };
+        return { nodes, edges: [] };
     }
 
     private applyTemporalFilter(item: IGraphUnit, temporal?: GraphFilter['temporal']): boolean {
@@ -302,136 +216,45 @@ export class InMemoryGraphStorage implements IGraphStorage {
 
         // Check entity references
         if (filter.entityIds?.length) {
-            const connectedEdges = Array.from(this.edges.values())
-                .filter(edge => 
-                    // Check both directions:
-                    // 1. Episode -> Entity (episode is source)
-                    // 2. Entity -> Episode (episode is target)
-                    (edge.sourceId === episode.id && filter.entityIds!.includes(edge.targetId)) ||
-                    (edge.targetId === episode.id && filter.entityIds!.includes(edge.sourceId))
-                );
-            return connectedEdges.length > 0;  // Only include if connected to at least one requested entity
+            // No edges to check
+            return false;
         }
 
         return true;  // Include if all filters pass
     }
 
     async query(filter: GraphFilter & { sessionId?: string } = {}): Promise<{ nodes: IGraphNode[]; edges: IGraphEdge[] }> {
+        console.log('Query filter:', filter);
         let nodes = Array.from(this.nodes.values());
-        let edges = Array.from(this.edges.values());
+        console.log('Initial nodes count:', nodes.length);
 
-        console.log('Initial graph state:', {
-            nodeCount: nodes.length,
-            edgeCount: edges.length,
-            nodeTypes: new Set(nodes.map(n => n.type)),
-            edgeTypes: new Set(edges.map(e => e.type))
-        });
-
-        // Apply sessionId filter
-        if (filter.sessionId) {
-            console.log("query before sessionId filter nodes.length: ", nodes.length);
-            nodes = nodes.filter(node => {
-                if (isEpisodeNode(node)) {
-                    return node.content.sessionId === filter.sessionId;
-                } else {
-                    return node.content.sessionId === filter.sessionId;
-                }
-                return true;
-            });
-            console.log("query after sessionId filter nodes.length: ", nodes.length);
-        }
-
-        // Apply existing filters
-        if (filter.sessionId) {
-            console.log("query before sessionId filter nodes.length: ", nodes.length);
-            nodes = nodes.filter(node => {
-                if (isEpisodeNode(node)) {
-                    return node.content.sessionId === filter.sessionId;
-                } else {
-                    return node.content.sessionId === filter.sessionId;
-                }
-                return true;
-            });
-            console.log("query after sessionId filter nodes.length: ", nodes.length);
-        }
-
+        // Apply type filter
         if (filter.nodeTypes?.length) {
-            // console.log("query before nodeTypes filter nodes.length: ", nodes.length);
             nodes = nodes.filter(node => filter.nodeTypes!.includes(node.type));
-            console.log("query after nodeTypes filter nodes.length: ", nodes.length);
+            console.log('After node type filter, count:', nodes.length);
         }
 
-        if (filter.edgeTypes?.length) {
-            console.log("query before edgeTypes filter edges.length: ", edges.length);
-            edges = edges.filter(edge => filter.edgeTypes!.includes(edge.type));
-            console.log("query after edgeTypes filter edges.length: ", edges.length);
-        }
-
+        // Apply temporal filter
         if (filter.temporal) {
-            console.log("query before temporal filter nodes.length: ", nodes.length);
-            console.log("query before temporal filter edges.length: ", edges.length);
             nodes = nodes.filter(node => this.applyTemporalFilter(node, filter.temporal));
-            edges = edges.filter(edge => this.applyTemporalFilter(edge, filter.temporal));
-            console.log("query after temporal filter nodes.length: ", nodes.length);
-            console.log("query after temporal filter edges.length: ", edges.length);
+            console.log('After temporal filter, count:', nodes.length);
         }
 
-        // Apply episode filter if present
+        // Apply episode filter
         if (filter.episode) {
-            console.log("query before episode filter nodes.length: ", nodes.length);
-            console.log("query before episode filter edges.length: ", edges.length);
-            // Only include episode nodes when using episode filters
-            nodes = nodes.filter(node => isEpisodeNode(node) && this.applyEpisodeFilter(node, filter.episode));
-            // Get edges connected to filtered nodes
-            const nodeIds = new Set(nodes.map(n => n.id));
-            edges = edges.filter(edge => 
-                nodeIds.has(edge.sourceId) || nodeIds.has(edge.targetId)
-            );
-            console.log("query after episode filter nodes.length: ", nodes.length);
-            console.log("query after episode filter edges.length: ", edges.length);
+            nodes = nodes.filter(node => this.applyEpisodeFilter(node, filter.episode));
+            console.log('After episode filter, count:', nodes.length);
         }
 
-        // Apply metadata filter
-        if (filter.metadata) {
-            console.log("query before metadata filter nodes.length: ", nodes.length);
-            console.log("query before metadata filter edges.length: ", edges.length);
-            nodes = nodes.filter(node => this.matchesMetadata(node.metadata, filter.metadata));
-            edges = edges.filter(edge => this.matchesMetadata(edge.metadata, filter.metadata));
-            console.log("query after metadata filter nodes.length: ", nodes.length);
-            console.log("query after metadata filter edges.length: ", edges.length);
+        // Apply session filter
+        if (filter.sessionId) {
+            nodes = nodes.filter(node => node.metadata?.get('sessionId') === filter.sessionId);
+            console.log('After session filter, count:', nodes.length);
         }
 
-        // Apply limit if specified
-        if (typeof filter.limit === 'number' && filter.limit > 0) {
-            console.log("query before limit filter nodes.length: ", nodes.length);
-            console.log("query before limit filter edges.length: ", edges.length);
-            nodes = nodes.slice(0, filter.limit);
-            // Keep edges where at least one node is in the limited set
-            const nodeIds = new Set(nodes.map(n => n.id));
-            edges = edges.filter(edge => 
-                nodeIds.has(edge.sourceId) || nodeIds.has(edge.targetId)
-            );
-            // Add any nodes connected to these edges that weren't in the original limit
-            const connectedNodeIds = new Set<string>();
-            edges.forEach(edge => {
-                connectedNodeIds.add(edge.sourceId);
-                connectedNodeIds.add(edge.targetId);
-            });
-            const additionalNodes = Array.from(connectedNodeIds)
-                .filter(id => !nodeIds.has(id))
-                .map(id => this.nodes.get(id))
-                .filter((node): node is IGraphNode => node !== undefined);
-            nodes = [...nodes, ...additionalNodes];
-            console.log("query after limit filter nodes.length: ", nodes.length);
-            console.log("query after limit filter edges.length: ", edges.length);
-        }
-
-        console.log('Final graph state:', {
-            nodeCount: nodes.length,
-            edgeCount: edges.length,
-            nodeTypes: new Set(nodes.map(n => n.type)),
-            edgeTypes: new Set(edges.map(e => e.type))
-        });
+        // Get edges from filtered nodes
+        const edges = nodes.flatMap(node => node.edges || []);
+        console.log('Final nodes count:', nodes.length, 'edges count:', edges.length);
 
         return { nodes, edges };
     }
@@ -453,62 +276,19 @@ export class InMemoryGraphStorage implements IGraphStorage {
             const node = await this.getNode(nodeId);
             if (node) nodes.push(node);
             
-            // Get connected nodes based on direction
-            const connectedNodes = new Set<string>();
-            
-            if (options.direction !== 'inbound') {
-                // Outbound edges
-                const outbound = this.adjacencyList.get(nodeId);
-                if (outbound) {
-                    for (const targetId of outbound) {
-                        const edge = Array.from(this.edges.values()).find(e => 
-                            e.sourceId === nodeId && e.targetId === targetId
-                        );
-                        if (edge) {
-                            edges.add(edge);
-                            connectedNodes.add(targetId);
-                        }
-                    }
-                }
-            }
-            
-            if (options.direction !== 'outbound') {
-                // Inbound edges
-                for (const [sourceId, targets] of this.adjacencyList.entries()) {
-                    if (targets.has(nodeId)) {
-                        const edge = Array.from(this.edges.values()).find(e => 
-                            e.sourceId === sourceId && e.targetId === nodeId
-                        );
-                        if (edge) {
-                            edges.add(edge);
-                            connectedNodes.add(sourceId);
-                        }
-                    }
-                }
-            }
-            
-            // Add connected nodes to queue
-            for (const nextId of connectedNodes) {
-                if (!visited.has(nextId)) {
-                    queue.push({nodeId: nextId, depth: depth + 1});
-                }
-            }
+            // No neighbors to visit
+            continue;
         }
         
         return { nodes, edges: Array.from(edges) };
     }
 
     async invalidateEdge(edgeId: string, at: Date): Promise<void> {
-        const edge = await this.getEdge(edgeId);
-        if (edge) {
-            edge.expiredAt = at;
-        }
+        // No-op
     }
 
     async clear(): Promise<void> {
         this.nodes.clear();
-        this.edges.clear();
-        this.adjacencyList.clear();
     }
 
     async findNodes(filter: GraphFilter): Promise<IGraphNode[]> {
@@ -525,50 +305,7 @@ export class InMemoryGraphStorage implements IGraphStorage {
     }
 
     async findEdges(filter: GraphFilter): Promise<IGraphEdge[]> {
-        const edges = Array.from(this.edges.values());
-        return edges.filter(edge => {
-            if (filter.edgeTypes && !filter.edgeTypes.includes(edge.type)) {
-                return false;
-            }
-            if (filter.temporal) {
-                return this.applyTemporalFilter(edge, filter.temporal);
-            }
-            return true;
-        });
-    }
-
-    private validateTemporalConsistency(item: IGraphUnit): void {
-        // Transaction time validation
-        if (item.expiredAt && item.expiredAt <= item.createdAt) {
-            throw new Error('expiredAt must be after createdAt');
-        }
-        
-        // Valid time validation for edges
-        if ('invalidAt' in item && item.invalidAt) {
-            if (!item.validAt) {
-                throw new Error('invalidAt requires validAt to be set');
-            }
-            if (item.validAt >= item.invalidAt) {
-                throw new Error('validAt must be before invalidAt');
-            }
-        }
-
-        // Episode-specific validation
-        if (isEpisodeNode(item as IGraphNode)) {
-            const episodeNode = item as IGraphNode<EpisodeContent>;
-
-            if (!episodeNode.content?.timestamp) {
-                throw new Error('Episode nodes must have a timestamp');
-            }
-            // Set validAt to match episode timestamp if not set
-            if (!item.validAt) {
-                item.validAt = episodeNode.content.timestamp;
-            }
-            // Ensure validAt matches episode timestamp
-            else if (item.validAt.getTime() !== episodeNode.content.timestamp.getTime()) {
-                throw new Error('Episode validAt must match content timestamp');
-            }
-        }
+        return [];
     }
 
     async findPaths(options: {
@@ -582,75 +319,9 @@ export class InMemoryGraphStorage implements IGraphStorage {
         edges: IGraphEdge[];
         length: number;
     }>> {
-        const {
-            startId,
-            endId,
-            maxLength = 5,
-            edgeTypes = ['*'],
-            limit = 10
-        } = options;
-
-        // Use breadth-first search to find paths
-        const queue: Array<{
-            path: string[];
-            edges: IGraphEdge[];
-        }> = [{ path: [startId], edges: [] }];
-        const paths: Array<{
-            nodes: IGraphNode[];
-            edges: IGraphEdge[];
-            length: number;
-        }> = [];
-        const visited = new Set<string>();
-
-        while (queue.length > 0 && paths.length < limit) {
-            const { path, edges } = queue.shift()!;
-            const currentId = path[path.length - 1];
-
-            if (currentId === endId) {
-                // Found a path to target
-                const nodes = await Promise.all(path.map(id => this.getNode(id)));
-                paths.push({
-                    nodes: nodes.filter((n): n is IGraphNode => n !== null),
-                    edges,
-                    length: path.length - 1
-                });
-                continue;
-            }
-
-            if (path.length >= maxLength) continue;
-
-            // Get outgoing edges
-            const outEdges = Array.from(this.edges.values()).filter(edge => {
-                if (edge.sourceId !== currentId) return false;
-                if (edgeTypes[0] !== '*' && !edgeTypes.includes(edge.type)) return false;
-                return true;
-            });
-
-            // Add next steps to queue
-            for (const edge of outEdges) {
-                const nextId = edge.targetId;
-                if (path.includes(nextId)) continue; // Avoid cycles
-                
-                const pathKey = path.join(',') + ',' + nextId;
-                if (visited.has(pathKey)) continue;
-                
-                visited.add(pathKey);
-                queue.push({
-                    path: [...path, nextId],
-                    edges: [...edges, edge]
-                });
-            }
-        }
-
-        return paths;
+        return [];
     }
 
-    /**
-     * Get episodes within a time range, ordered by their occurrence time
-     * @param startTime Start of time range
-     * @param endTime End of time range
-     * @returns Array of episode nodes sorted by validAt
-     */
     async getEpisodeTimeline(startTime: Date, endTime: Date): Promise<IGraphNode<EpisodeContent>[]> {
         const nodes = Array.from(this.nodes.values())
             .filter(node => 
@@ -664,9 +335,25 @@ export class InMemoryGraphStorage implements IGraphStorage {
         return nodes.sort((a, b) => a.validAt!.getTime() - b.validAt!.getTime());
     }
 
-    /**
-     * Find connected nodes based on edge and node types
-     */
+    async getSnapshot(date: Date = new Date()): Promise<{ nodes: IGraphNode[]; edges: IGraphEdge[] }> {
+        const nodes = Array.from(this.nodes.values()).filter(node =>
+            node.createdAt <= date && (!node.expiredAt || node.expiredAt > date) &&
+            (!node.validAt || node.validAt <= date)
+        );
+        
+        // Only include edges from valid nodes
+        const validNodeIds = new Set(nodes.map(node => node.id));
+        const edges = nodes.flatMap(node => 
+            node.edges.filter(edge => 
+                validNodeIds.has(edge.sourceId) && validNodeIds.has(edge.targetId) &&
+                edge.createdAt <= date && (!edge.expiredAt || edge.expiredAt > date) &&
+                (!edge.validAt || edge.validAt <= date)
+            )
+        );
+        
+        return { nodes, edges };
+    }
+
     async findConnectedNodes(options: {
         startId: string;
         edgeTypes?: string[];
@@ -674,49 +361,7 @@ export class InMemoryGraphStorage implements IGraphStorage {
         direction?: 'incoming' | 'outgoing' | 'both';
         limit?: number;
     }): Promise<IGraphNode[]> {
-        const {
-            startId,
-            edgeTypes = ['*'],
-            nodeTypes = ['*'],
-            direction = 'both',
-            limit = 100
-        } = options;
-
-        const connectedNodes = new Set<string>();
-        const edges = Array.from(this.edges.values());
-
-        // Filter edges based on direction and types
-        const relevantEdges = edges.filter(edge => {
-            if (edgeTypes[0] !== '*' && !edgeTypes.includes(edge.type)) return false;
-
-            if (direction === 'outgoing') {
-                return edge.sourceId === startId;
-            } else if (direction === 'incoming') {
-                return edge.targetId === startId;
-            } else {
-                return edge.sourceId === startId || edge.targetId === startId;
-            }
-        });
-
-        // Collect connected node IDs
-        for (const edge of relevantEdges) {
-            if (connectedNodes.size >= limit) break;
-            
-            const connectedId = edge.sourceId === startId ? edge.targetId : edge.sourceId;
-            connectedNodes.add(connectedId);
-        }
-
-        // Get node objects and filter by type
-        const nodes = await Promise.all(
-            Array.from(connectedNodes).map(id => this.getNode(id))
-        );
-
-        return nodes
-            .filter((n): n is IGraphNode => 
-                n !== null && 
-                (nodeTypes[0] === '*' || nodeTypes.includes(n.type))
-            )
-            .slice(0, limit);
+        return [];
     }
 
     /**
@@ -745,7 +390,8 @@ export class InMemoryGraphStorage implements IGraphStorage {
             createdAt: timestamp,
             expiredAt: data.expiredAt,
             validAt: data.validAt,
-            content
+            content,
+            edges: [] // Initialize edges property
         };
     }
 

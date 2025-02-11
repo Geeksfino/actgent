@@ -1,6 +1,18 @@
 import { z } from 'zod';
 import { GraphTask, LLMConfig } from '../../types';
 import { OpenAI } from 'openai';
+import * as crypto from 'crypto';
+
+interface Relationship {
+    id: number;
+    sourceId: number;
+    targetId: number;
+    type: string;
+    description: string;
+    isTemporary: boolean;
+    valid_at?: string;
+    invalid_at?: string | null;
+}
 
 /**
  * Semantic graph processor for extracting entities and relationships from text
@@ -46,20 +58,50 @@ Extract entities and relationships from the messages. Follow these rules:
    - DO NOT combine different names into one entity
 
 2. For relationships:
-   - Connect distinct entities
-   - Use ALL_CAPS relationship types
+   - ALWAYS create a relationship when two names refer to the same person
+   - Use ONLY these relationship types (exactly as written):
+     * BIRTH_NAME_OF - Real name to pen name (e.g., Eric Blair -> George Orwell)
+     * ALSO_KNOWN_AS - Alternate names (e.g., Samuel Clemens -> Mark Twain)
+     * MEMBER_OF - Group membership
+     * CREATOR_OF - Authorship
    - Include detailed descriptions
    - Use numeric IDs starting from 1
-   - Consider temporal aspects
-   - DO NOT create self-referential relationships
+   - Set isTemporary: false for permanent facts (like birth names)
+   - Set isTemporary: true only for conversation-specific relationships
 
-Return a complete, well-formed JSON object with:
+3. Required Output Format:
 {
-    "entities": [{"id": number, "name": string, "type": string, "summary": string}],
-    "relationships": [{"id": number, "sourceId": number, "targetId": number, "type": string, "description": string, "isTemporary": boolean}]
+    "entities": [
+        {
+            "id": 1,
+            "name": "George Orwell",
+            "type": "PERSON",
+            "summary": "British author known by this pen name"
+        },
+        {
+            "id": 2,
+            "name": "Eric Blair",
+            "type": "PERSON",
+            "summary": "Birth name of the author known as George Orwell"
+        }
+    ],
+    "relationships": [
+        {
+            "id": 1,
+            "sourceId": 2,
+            "targetId": 1,
+            "type": "BIRTH_NAME_OF",
+            "description": "Eric Blair is the birth name of the author known as George Orwell",
+            "isTemporary": false
+        }
+    ]
 }
 
-Make sure to include all closing braces and brackets.`;
+IMPORTANT:
+1. Use ONLY the relationship types listed above (BIRTH_NAME_OF, ALSO_KNOWN_AS, etc.)
+2. Make sure JSON is complete with all closing braces
+3. Do not include any explanatory text outside the JSON
+4. Return ONLY the JSON object, nothing else`;
                 
                 const factExtractionResult = await this.client.chat.completions.create({
                     model: this.config.model,
@@ -78,21 +120,48 @@ Make sure to include all closing braces and brackets.`;
                     }
                     console.log("\nRaw LLM Response:\n", content);
                     
-                    // Clean the response:
-                    // 1. Remove <think>...</think> sections
-                    // 2. Extract JSON between ```json and ```
-                    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
-                    if (!jsonMatch) {
-                        throw new Error("No JSON block found in response");
+                    // Try to find JSON in various formats:
+                    // 1. First try to extract JSON between ```json and ```
+                    let jsonStr = content.match(/```json\s*([\s\S]*?)\s*```/)?.[1]?.trim();
+                    
+                    // 2. If not found, try between ``` and ```
+                    if (!jsonStr) {
+                        jsonStr = content.match(/```\s*([\s\S]*?)\s*```/)?.[1]?.trim();
+                    }
+                    
+                    // 3. If still not found, try to find JSON-like structure in the content
+                    if (!jsonStr) {
+                        jsonStr = content.match(/\{[\s\S]*\}/)?.[0]?.trim();
+                    }
+                    
+                    // 4. If still nothing found, use the whole content
+                    if (!jsonStr) {
+                        jsonStr = content.trim();
                     }
                     
                     // Verify JSON has matching braces/brackets
-                    const jsonStr = jsonMatch[1].trim();
                     if (!this.hasMatchingBraces(jsonStr)) {
                         throw new Error("JSON has unmatched braces or brackets");
                     }
+
+                    // Parse and validate the structure
+                    const result = JSON.parse(jsonStr);
                     
-                    return JSON.parse(jsonStr);
+                    // Ensure the result has the expected structure
+                    if (!result.entities || !Array.isArray(result.entities)) {
+                        result.entities = [];
+                    }
+                    if (!result.relationships || !Array.isArray(result.relationships)) {
+                        result.relationships = [];
+                    }
+                    
+                    // Normalize relationship types
+                    result.relationships = result.relationships.map((rel: Relationship) => ({
+                        ...rel,
+                        type: this.normalizeRelationType(rel.type)
+                    }));
+                    
+                    return result;
                 } catch (error) {
                     console.error("Failed to parse fact extraction result:", error);
                     return {
@@ -141,15 +210,42 @@ Return a JSON object with:
                     }
                     console.log("\nRaw LLM Response:\n", content);
                     
-                    // Clean the response:
-                    // 1. Remove <think>...</think> sections
-                    // 2. Extract JSON between ```json and ```
-                    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
-                    if (!jsonMatch) {
-                        throw new Error("No JSON block found in response");
+                    // Try to find JSON in various formats:
+                    // 1. First try to extract JSON between ```json and ```
+                    let jsonStr = content.match(/```json\s*([\s\S]*?)\s*```/)?.[1]?.trim();
+                    
+                    // 2. If not found, try between ``` and ```
+                    if (!jsonStr) {
+                        jsonStr = content.match(/```\s*([\s\S]*?)\s*```/)?.[1]?.trim();
                     }
                     
-                    return JSON.parse(jsonMatch[1]);
+                    // 3. If still not found, try to find JSON-like structure in the content
+                    if (!jsonStr) {
+                        jsonStr = content.match(/\{[\s\S]*\}/)?.[0]?.trim();
+                    }
+                    
+                    // 4. If still nothing found, use the whole content
+                    if (!jsonStr) {
+                        jsonStr = content.trim();
+                    }
+                    
+                    // Verify JSON has matching braces/brackets
+                    if (!this.hasMatchingBraces(jsonStr)) {
+                        throw new Error("JSON has unmatched braces or brackets");
+                    }
+
+                    // Parse and validate the structure
+                    const result = JSON.parse(jsonStr);
+                    
+                    // Ensure the result has the expected structure
+                    if (!result.is_duplicate || typeof result.is_duplicate !== 'boolean') {
+                        result.is_duplicate = false;
+                    }
+                    if (!result.uuid || typeof result.uuid !== 'string') {
+                        result.uuid = null;
+                    }
+                    
+                    return result;
                 } catch (error) {
                     console.error("Failed to parse resolve facts result:", error);
                     return {
@@ -159,99 +255,176 @@ Return a JSON object with:
                 }
 
             case GraphTask.EXTRACT_TEMPORAL:
-                console.log("\nRaw LLM Response:\n", data);
-                const temporalExtractionPrompt = `Extract temporal information from the given conversation.
+                return await this.extractTemporal(data);
 
-<PREVIOUS MESSAGES>
-${data.previousMessages}
-</PREVIOUS MESSAGES>
-
-<CURRENT MESSAGE>
-${data.currentMessage}
-</CURRENT MESSAGE>
-
-<ENTITIES>
-${JSON.stringify(data.entities)}
-</ENTITIES>
-
-Add temporal information to the entities and relationships. Follow these rules:
-
-1. For entities:
-   - Keep existing IDs, names, and types
-   - Use ALL_CAPS for types
-   - Temporal info comes from when they're mentioned
-
-2. For relationships:
-   - Keep relationship types in ALL_CAPS
-   - Use EXACTLY the same sourceId/targetId as input
-   - Keep relationship types consistent with previous steps
-   - Add valid_at based on when relationship is mentioned
-   - Add invalid_at only if relationship has a clear end date
-   - If relationship is permanent (like birth names), leave invalid_at as null
-
-Return a JSON object with:
-{
-    "entities": [{"id": number, "name": string, "type": string}],
-    "relationships": [{"sourceId": number, "targetId": number, "type": string, "name": string, "description": string, "valid_at": string, "invalid_at": string | null}]
-}
-
-Example relationship type mapping:
-- BIRTH_NAME_OF -> BIRTH_NAME_OF
-- REAL_NAME_OF -> REAL_NAME_OF
-- Alias -> ALIAS_OF
-- "also known as" -> ALIAS_OF`;
-
-                const temporalExtractionResult = await this.client.chat.completions.create({
-                    model: this.config.model,
-                    temperature: 0.1,
-                    max_tokens: this.config.maxTokens,
-                    messages: [
-                        { role: "system", content: "You are a temporal information extraction system. Only output valid JSON." },
-                        { role: "user", content: temporalExtractionPrompt }
-                    ]
-                });
-
-                try {
-                    const content = temporalExtractionResult.choices[0].message.content;
-                    if (!content) {
-                        throw new Error("No content in response");
-                    }
-                    console.log("\nRaw LLM Response:\n", content);
-                    
-                    // Extract JSON between ```json and ```
-                    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
-                    if (!jsonMatch) {
-                        throw new Error("No JSON block found in response");
-                    }
-                    
-                    // Verify JSON has matching braces/brackets
-                    const jsonStr = jsonMatch[1].trim();
-                    if (!this.hasMatchingBraces(jsonStr)) {
-                        throw new Error("JSON has unmatched braces or brackets");
-                    }
-                    
-                    const result = JSON.parse(jsonStr);
-                    
-                    // Normalize relationship types to ALL_CAPS
-                    if (result.relationships) {
-                        result.relationships = result.relationships.map((rel: any) => ({
-                            ...rel,
-                            type: this.normalizeRelationType(rel.type)
-                        }));
-                    }
-                    
-                    return result;
-                } catch (error) {
-                    console.error("Failed to parse temporal extraction result:", error);
-                    return {
-                        entities: [],
-                        relationships: []
-                    };
-                }
+            case GraphTask.DEDUPE_NODES:
+                return await this.deduplicateEntities(data.nodes);
 
             default:
                 throw new Error(`Task ${task} not supported`);
         }
+    }
+
+    async deduplicateEntities(nodes: Array<any>): Promise<{ entities: Array<any>, mappings: Array<any> }> {
+        const data = {
+            nodes,
+            prompt: this.buildDedupeNodesPrompt(nodes)
+        };
+
+        const result = await this.processWithLLM(GraphTask.DEDUPE_NODES, data);
+        return result;
+    }
+
+    public generateEntityId(name: string, entityType: string): string {
+        const uniqueString = `${name.toLowerCase().trim()}|${entityType.toLowerCase()}`;
+        return crypto.createHash('md5').update(uniqueString).digest('hex');
+    }
+
+    private async extractTemporal(data: { 
+        entities: any[],
+        relationships: any[],
+        conversation: { timestamp: string }[]
+    }): Promise<any> {
+        const prompt = `Add temporal information to the given entities and relationships.
+Use the conversation timestamps to determine valid_at and invalid_at times.
+
+Input:
+${JSON.stringify(data, null, 2)}
+
+Rules:
+1. Keep all existing relationship types EXACTLY as they are (e.g., BIRTH_NAME_OF, ALSO_KNOWN_AS)
+2. Add temporal metadata:
+   - valid_at: When the relationship became valid (use conversation timestamp for new facts)
+   - invalid_at: When the relationship became invalid (null for permanent facts)
+3. DO NOT change relationship types or directions
+4. Return complete JSON with all fields
+
+Example Output:
+{
+    "entities": [
+        {
+            "id": 1,
+            "name": "George Orwell",
+            "type": "PERSON",
+            "summary": "British author known by this pen name"
+        }
+    ],
+    "relationships": [
+        {
+            "sourceId": 2,
+            "targetId": 1,
+            "type": "BIRTH_NAME_OF",
+            "description": "Eric Blair is the birth name of the author known as George Orwell",
+            "valid_at": "2024-01-01T00:00:00Z",
+            "invalid_at": null
+        }
+    ]
+}`;
+
+        return await this.processWithLLM('extract_temporal', { prompt });
+    }
+
+    private async processWithLLM(task: string, data: any): Promise<any> {
+        const llmResult = await this.client.chat.completions.create({
+            model: this.config.model,
+            temperature: 0.1,
+            max_tokens: this.config.maxTokens,
+            messages: [
+                { role: "system", content: `You are a ${task} system. Only output valid JSON.` },
+                { role: "user", content: data.prompt }
+            ]
+        });
+
+        try {
+            const content = llmResult.choices[0].message.content;
+            if (!content) {
+                throw new Error("No content in response");
+            }
+            console.log("\nRaw LLM Response:\n", content);
+            
+            // Try to find JSON in various formats:
+            // 1. First try to extract JSON between ```json and ```
+            let jsonStr = content.match(/```json\s*([\s\S]*?)\s*```/)?.[1]?.trim();
+            
+            // 2. If not found, try between ``` and ```
+            if (!jsonStr) {
+                jsonStr = content.match(/```\s*([\s\S]*?)\s*```/)?.[1]?.trim();
+            }
+            
+            // 3. If still not found, try to find JSON-like structure in the content
+            if (!jsonStr) {
+                jsonStr = content.match(/\{[\s\S]*\}/)?.[0]?.trim();
+            }
+            
+            // 4. If still nothing found, use the whole content
+            if (!jsonStr) {
+                jsonStr = content.trim();
+            }
+            
+            // Verify JSON has matching braces/brackets
+            if (!this.hasMatchingBraces(jsonStr)) {
+                throw new Error("JSON has unmatched braces or brackets");
+            }
+
+            // Parse and validate the structure
+            const parsedResult = JSON.parse(jsonStr);
+            
+            // Ensure the result has the expected structure
+            if (!parsedResult.entities || !Array.isArray(parsedResult.entities)) {
+                parsedResult.entities = [];
+            }
+            if (!parsedResult.relationships || !Array.isArray(parsedResult.relationships)) {
+                parsedResult.relationships = [];
+            }
+            
+            return parsedResult;
+        } catch (error) {
+            console.error("Failed to parse result:", error);
+            return {
+                entities: [],
+                relationships: []
+            };
+        }
+    }
+
+    private buildDedupeNodesPrompt(nodes: Array<any>): string {
+        const prompt = `
+Given a list of nodes representing entities from a conversation, identify and merge nodes that refer to the same entity.
+For each node, consider:
+1. The entity name and type
+2. The context in which it appears
+3. Any aliases or alternative names that might be used
+
+Return a JSON object with:
+1. A list of unique entities
+2. A mapping of which input nodes should be merged into which unique entities
+
+Input nodes:
+${JSON.stringify(nodes, null, 2)}
+
+Return format:
+{
+  "entities": [
+    {
+      "id": "unique_id",
+      "name": "canonical_name",
+      "type": "entity_type",
+      "summary": "brief description"
+    }
+  ],
+  "mappings": [
+    {
+      "source_ids": ["input_node_id1", "input_node_id2"],
+      "target_id": "unique_id"
+    }
+  ]
+}
+
+Example:
+If input nodes contain multiple mentions of "George Orwell" and "Eric Blair", they should be merged into a single entity
+with appropriate mappings to show they refer to the same person.`;
+
+        return prompt;
     }
 
     private hasMatchingBraces(str: string): boolean {
