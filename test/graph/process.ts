@@ -180,49 +180,47 @@ async function main() {
 
     // Get final graph state
     const snapshot = await graphManager.getSnapshot({});
-    const { nodes: entities, edges: relationships } = snapshot;
 
-    // Convert Map objects to plain objects for JSON serialization
-    const serializableEntities = entities.map(entity => ({
-        ...entity,
-        metadata: Object.fromEntries(entity.metadata),
-        // Ensure edges array exists
-        edges: entity.edges?.map(edge => ({
-            ...edge,
-            metadata: Object.fromEntries(edge.metadata || new Map())
-        })) || []
-    }));
+    // Format nodes and edges according to episodic graph spec
+    const output = {
+        nodes: snapshot.nodes
+            .filter(node => node.type !== 'episode')
+            .map(node => ({
+                id: node.id,
+                type: node.type,
+                mention: node.content.mention,
+                episode_id: node.content.episode_id,
+                validAt: node.validAt?.toISOString(),
+                createdAt: node.createdAt?.toISOString()
+            })),
+        edges: snapshot.edges.map(edge => ({
+            id: edge.id,
+            source: edge.sourceId,
+            target: edge.targetId,
+            type: edge.type,
+            episode_id: edge.content.episode_id,
+            validAt: edge.validAt?.toISOString(),
+            createdAt: edge.createdAt?.toISOString()
+        })),
+        episodes: snapshot.nodes
+            .filter(node => node.type === 'episode')
+            .map(node => ({
+                id: node.id,
+                type: node.content.type,
+                actor: node.content.actor,
+                content: node.content.content,
+                metadata: {
+                    session_id: node.content.metadata.session_id,
+                    turn_id: node.content.metadata.turn_id
+                },
+                validAt: node.validAt?.toISOString(),
+                createdAt: node.createdAt?.toISOString()
+            }))
+    };
 
-    // Get all edges, including those stored in nodes
-    const allEdges = new Set<string>();
-    
-    // Add edges from relationships
-    relationships.forEach(rel => {
-        const edgeStr = JSON.stringify({
-            ...rel,
-            metadata: Object.fromEntries(rel.metadata)
-        });
-        if (edgeStr) allEdges.add(edgeStr);
-    });
-
-    // Add edges from nodes
-    serializableEntities.forEach(entity => {
-        entity.edges?.forEach(edge => {
-            const edgeStr = JSON.stringify(edge);
-            if (edgeStr) allEdges.add(edgeStr);
-        });
-    });
-
-    // Convert back from strings and deduplicate
-    const serializableEdges = Array.from(allEdges).map(edge => JSON.parse(edge));
-
-    // Write results to a single file
     await fs.writeFile(
         path.join(outputPath, 'graph.json'),
-        JSON.stringify({
-            nodes: serializableEntities,
-            edges: serializableEdges
-        }, null, 2)
+        JSON.stringify(output, null, 2)
     );
 
     console.log('\nProcessing complete. Results written to:', path.join(outputPath, 'graph.json'));

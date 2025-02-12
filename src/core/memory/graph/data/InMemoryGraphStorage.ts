@@ -23,7 +23,7 @@ export class InMemoryGraphStorage implements IGraphStorage {
         console.log('Adding node to storage:', {
             id,
             type: node.type,
-            name: node.content?.name,
+            content: node.content,
             metadata: Object.fromEntries(node.metadata || new Map()),
             existingNodes: Array.from(this.nodes.keys())
         });
@@ -195,13 +195,13 @@ export class InMemoryGraphStorage implements IGraphStorage {
 
     private applyEpisodeFilter(node: IGraphNode, filter?: EpisodeFilter): boolean {
         if (!filter || !isEpisodeNode(node)) {
-            return true;  // No filter or not an episode node, include it
+            return true;
         }
 
         const episode = node as IGraphNode<EpisodeContent>;
 
-        // Check source filter
-        if (filter.source && episode.content.source !== filter.source) {
+        // Check metadata source filter
+        if (filter.source && episode.content.metadata?.source !== filter.source) {
             return false;
         }
 

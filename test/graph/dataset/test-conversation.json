@@ -14,10 +14,19 @@
             {
               "role": "assistant",
               "content": "George Orwell was a British author."
-            },
+            }
+          ]
+        },
+        {
+          "turn_id": "turn_1",
+          "messages": [
             {
               "role": "user",
               "content": "Tell me more about Eric Blair."
+            },
+            {
+              "role": "assistant",
+              "content": "Eric Blair was actually George Orwell's real name."
             }
           ]
         }

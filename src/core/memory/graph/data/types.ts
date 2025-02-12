@@ -154,12 +154,24 @@ export interface IGraphIndex<N = any, E = any> {
 }
 
 /**
+ * Episode types in the graph
+ */
+export const EpisodeType = {
+    MESSAGE: 'message',
+    TEXT: 'text',
+    JSON: 'json'
+} as const;
+
+export type EpisodeTypeValues = typeof EpisodeType[keyof typeof EpisodeType];
+
+/**
  * Node types in the graph, following a cognitive memory model
  */
 export const GraphNodeType = {
-    // Episodic Memory Layer (experiences and autobiographical events)
-    EPISODE: 'episode',           // Direct experience/interaction (e.g., conversation turn, user action)
-    EXPERIENCE: 'experience',     // Composite experience (e.g., a meeting, a trip)
+    // Episodic Memory Layer
+    EPISODE: 'episode',           // Raw conversation/text data
+    ENTITY_MENTION: 'mention',    // Entity mention in an episode
+    EXPERIENCE: 'experience',     // Composite experience
     
     // Semantic Memory Layer (knowledge and concepts)
     ENTITY: {
@@ -188,6 +200,7 @@ export const GraphNodeType = {
 export type EntityType = typeof GraphNodeType.ENTITY[keyof typeof GraphNodeType.ENTITY];
 export type GraphNodeTypeValues = 
     | typeof GraphNodeType.EPISODE
+    | typeof GraphNodeType.ENTITY_MENTION
     | typeof GraphNodeType.EXPERIENCE
     | typeof GraphNodeType.CONTEXT
     | typeof GraphNodeType.STATE
@@ -198,16 +211,13 @@ export type GraphNodeTypeValues =
     | EntityType;
 
 /**
- * Type guard for episode nodes
- */
-export function isEpisodeNode(node: IGraphNode): node is IGraphNode<EpisodeContent> {
-    return node.type === GraphNodeType.EPISODE;
-}
-
-/**
  * Edge types in the graph, defining allowed relationships
  */
 export const GraphEdgeType = {
+    // Episodic relationships
+    MENTIONED_IN: 'mentioned_in',    // Entity mention appears in episode
+    REFERS_TO: 'refers_to',          // One mention refers to another
+    
     // Temporal relationships
     PRECEDES: 'precedes',           // A happens before B
     CONTAINS: 'contains',           // A includes B in time
@@ -235,7 +245,6 @@ export const GraphEdgeType = {
     USES: 'uses',                  // Utilization
     
     // Reference relationships
-    REFERS_TO: 'refers_to',        // Reference/mention
     DESCRIBES: 'describes'         // Description/elaboration
 } as const;
 
@@ -255,11 +264,23 @@ export interface EntityContent {
  * Content type for episode nodes
  */
 export interface EpisodeContent {
-    body: string;
-    source: string;
-    sourceDescription: string;
-    timestamp: Date;
-    sessionId: string;
+    type: EpisodeTypeValues;
+    actor?: string;          // For message type
+    content: string;         // Raw content
+    metadata?: {
+        session_id?: string;
+        turn_id?: string;
+        [key: string]: any;
+    };
+}
+
+/**
+ * Content type for entity mentions
+ */
+export interface EntityMentionContent {
+    mention: string;         // Raw text as mentioned
+    type: string;           // Entity type (Person, Book, etc.)
+    episode_id: string;     // Reference to source episode
 }
 
 /**
@@ -313,4 +334,11 @@ export enum CoreTemporalMode {
     CURRENT = 'current',
     HISTORICAL = 'historical',
     ALL = 'all'
+}
+
+/**
+ * Type guard for episode nodes
+ */
+export function isEpisodeNode(node: IGraphNode): node is IGraphNode<EpisodeContent> {
+    return node.type === GraphNodeType.EPISODE;
 }

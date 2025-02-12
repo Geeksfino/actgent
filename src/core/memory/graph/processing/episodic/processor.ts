@@ -73,9 +73,9 @@ export class EpisodicGraphProcessor {
             // Define a simple schema for entities
             const EntitySchema = z.object({
                 id: z.number(),
-                name: z.string(),
+                mention: z.string(),
                 type: z.string(),
-                summary: z.string().optional()
+                confidence: z.number().min(0).max(1)
             });
 
             // Validate only the entities part
@@ -92,6 +92,11 @@ export class EpisodicGraphProcessor {
                         // Handle other unexpected errors
                     }
                 }
+            }
+
+            // Add spans for entity extraction tasks
+            if (task === GraphTask.EXTRACT_ENTITIES) {
+                return await this.processEntityExtractionResults(data.text, rawResponse, data.episodeId) as T;
             }
 
             return rawResponse as T;
@@ -112,32 +117,24 @@ export class EpisodicGraphProcessor {
                     functionSchema: z.object({
                         entities: z.array(z.object({
                             id: z.number(),
-                            name: z.string(),
-                            type: z.string(),
-                            summary: z.string().optional()
+                            mention: z.string(),        // The exact text as mentioned
+                            type: z.string(),           // Entity type (Person, Book, etc.)
+                            confidence: z.number().min(0).max(1)
                         }))
                     })
                 };
 
             case GraphTask.EXTRACT_TEMPORAL:
-                // console.log("EXTRACT_TEMPORAL data: ", data);
                 const extractTemporalPrompt = this.buildTemporalExtractionPrompt({ text: data.text, context: data.context, referenceTimestamp: data.metadata?.timestamp?.toISOString(), fact: data.fact });
-                // console.log("EXTRACT_TEMPORAL prompt: ", extractTemporalPrompt);
                 return {
                     prompt: extractTemporalPrompt,
                     functionSchema: z.object({
-                        entities: z.array(z.object({
-                            id: z.number(),
-                            name: z.string(),
-                            type: z.string(),
-                            summary: z.string().optional()
-                        })),
                         relationships: z.array(z.object({
                             sourceId: z.number(),
                             targetId: z.number(),
                             type: z.string(),
-                            name: z.string().optional(),
-                            description: z.string().optional(),
+                            episode_id: z.string(),     // Link to source episode
+                            confidence: z.number().min(0).max(1),
                             valid_at: z.string().nullable(),
                             invalid_at: z.string().nullable()
                         }))
@@ -145,9 +142,7 @@ export class EpisodicGraphProcessor {
                 };
 
             case GraphTask.REFINE_COMMUNITIES:
-                // console.log("REFINE_COMMUNITIES data: ", data);
                 const refineCommunityPrompt = this.buildRefineCommunityPrompt(data);
-                // console.log("REFINE_COMMUNITIES prompt: ", refineCommunityPrompt);
                 return {
                     prompt: refineCommunityPrompt,
                     functionSchema: z.object({
@@ -161,9 +156,7 @@ export class EpisodicGraphProcessor {
                 };
 
             case GraphTask.EVALUATE_SEARCH:
-                // console.log("EVALUATE_SEARCH data: ", data);
                 const evaluateSearchPrompt = this.buildEvaluateSearchPrompt(data);
-                // console.log("EVALUATE_SEARCH prompt: ", evaluateSearchPrompt);
                 return {
                     prompt: evaluateSearchPrompt,
                     functionSchema: z.object({
@@ -174,14 +167,12 @@ export class EpisodicGraphProcessor {
                 };
 
             case GraphTask.SUMMARIZE_NODE:
-                // console.log("SUMMARIZE_NODE data: ", data);
                 const summarizeNodePrompt = this.buildSummarizeNodePrompt({ 
                     nodeName: data.nodeName,
                     previousSummary: data.previousSummary,
                     context: data.context,
                     episodes: data.episodes
                 });
-                // console.log("SUMMARIZE_NODE prompt: ", summarizeNodePrompt);
                 return {
                     prompt: summarizeNodePrompt,
                     functionSchema: z.object({
@@ -192,9 +183,7 @@ export class EpisodicGraphProcessor {
                 };
 
             case GraphTask.INVALIDATE_EDGES:
-                // console.log("INVALIDATE_EDGES data: ", data);   
                 const invalidateEdgesPrompt = this.buildInvalidateEdgesPrompt(data);
-                // console.log("INVALIDATE_EDGES prompt: ", invalidateEdgesPrompt);
                 return {
                     prompt: invalidateEdgesPrompt,
                     functionSchema: z.object({
@@ -204,9 +193,7 @@ export class EpisodicGraphProcessor {
                 };
 
             case GraphTask.EXPAND_QUERY:
-                // console.log("EXPAND_QUERY data: ", data);   
                 const expandQueryPrompt = this.buildExpandQueryPrompt(data);
-                // console.log("EXPAND_QUERY prompt: ", expandQueryPrompt);
                 return {
                     prompt: expandQueryPrompt,
                     functionSchema: z.object({
@@ -278,56 +265,65 @@ Return entities in this format:
   "entities": [
     {
       "id": 1,  // Numeric ID
-      "name": "Entity Name",
+      "mention": "Entity mention",
       "type": "ENTITY_TYPE",
-      "summary": "Optional description"
+      "confidence": 0.8  // Confidence in extraction
     }
   ]
 }`;
     }
 
     private buildTemporalExtractionPrompt(input: { text: string, context: string, referenceTimestamp: string, fact: string }): string {
-        return `Extract entities and their relationships from the following conversation, including temporal information.
+        return `Extract temporal relationships from the conversation. For each turn in the conversation:
+1. Identify relationships between existing entities, including:
+   - ALSO_KNOWN_AS: alternate names or aliases
+   - IS_A: class or category relationships
+   - HAS_PROFESSION: professional relationships
+   - HAS_NATIONALITY: nationality or origin
+   - PART_OF: membership or containment
+   - LOCATED_IN: geographical relationships
+2. For each relationship:
+   - Assign a confidence score (0-1)
+   - Track which turn it appeared in
+   - Note any temporal context
 
-Current conversation:
-${input.text}
-
-${input.context ? `Previous context:\n${input.context}` : ''}
-
-Reference timestamp: ${input.referenceTimestamp || 'Not provided'}
-
-Guidelines:
-1. Extract all important entities (people, products, organizations, etc.)
-2. Identify relationships between entities
-3. For each relationship, determine:
-   - When it was established (valid_at)
-   - When it ended, if applicable (invalid_at)
-   - Use ISO 8601 format (YYYY-MM-DDTHH:MM:SS.SSSSSSZ)
-   - Use the reference timestamp for present tense statements
-   - Calculate actual dates for relative time mentions
-
-Return in this format:
+Example output:
 {
-  "entities": [
-    {
-      "id": 1,  // Numeric ID
-      "name": "Entity Name",
-      "type": "ENTITY_TYPE",
-      "summary": "Optional description"
-    }
-  ],
   "relationships": [
     {
-      "sourceId": 1,  // Numeric ID referencing an entity
-      "targetId": 2,  // Numeric ID referencing an entity
-      "type": "RELATIONSHIP_TYPE",
-      "name": "Optional name",
-      "description": "Optional description",
-      "valid_at": "2024-01-01T00:00:00.000Z",  // When relationship became true
-      "invalid_at": null  // When relationship ended (if applicable)
+      "sourceId": 1,
+      "targetId": 2,
+      "type": "ALSO_KNOWN_AS",
+      "confidence": 0.9,
+      "turn": 0,
+      "temporalContext": {"timestamp": "2024-01-01T00:00:00Z", "type": "MENTION"}
+    },
+    {
+      "sourceId": 1,
+      "targetId": 3,
+      "type": "HAS_PROFESSION",
+      "confidence": 0.85,
+      "turn": 1,
+      "temporalContext": {"timestamp": "2024-01-01T00:00:00Z", "type": "MENTION"}
+    },
+    {
+      "sourceId": 1,
+      "targetId": 4,
+      "type": "HAS_NATIONALITY",
+      "confidence": 0.9,
+      "turn": 1,
+      "temporalContext": {"timestamp": "2024-01-01T00:00:00Z", "type": "MENTION"}
     }
   ]
-}`;
+}
+
+Text to process:
+${input.text}
+
+Context (previous conversation):
+${input.context}
+
+Extract temporal relationships in the exact JSON format shown above:`;
     }
 
     private buildSummarizeNodePrompt(input: { 
@@ -426,7 +422,7 @@ ${data.context ? `Additional Context: ${data.context}` : ''}
 
 Recent Episodes for Context:
 ${data.recentEpisodes.map(episode => 
-    `- ${episode.validAt?.toISOString() || 'unknown'}: ${episode.content.body}`
+    `- ${episode.validAt?.toISOString() || 'unknown'}: ${episode.content.content}`
 ).join('\n')}
 
 Consider:
@@ -580,20 +576,125 @@ Return in this format:
         }
     }
 
-    async extractTemporal(data: any): Promise<{ entities: any[], relationships: any[] }> {
-        try {
-            const { valid_at, invalid_at } = await this.processWithLLM(
-                GraphTask.EXTRACT_TEMPORAL,
-                { text: data.text, context: data.context, referenceTimestamp: data.metadata?.timestamp?.toISOString(), fact: data.fact }
-            );
-
-            console.log("Extracted valid_at:", valid_at);
-            console.log("Extracted invalid_at:", invalid_at);
-
-            return { entities: [], relationships: [] };
-        } catch (error) {
-            console.error("Error in extractTemporal:", error);
-            return { entities: [], relationships: [] };
+    async extractTemporal(data: any): Promise<{ relationships: any[] }> {
+        const result = await this.processWithLLM(GraphTask.EXTRACT_TEMPORAL, data);
+        
+        // Process relationships
+        if (result.relationships) {
+            result.relationships = result.relationships.map((rel: any) => ({
+                ...rel,
+                confidence: parseFloat(rel.confidence) || 0.5  // Ensure numeric confidence
+            }));
         }
+
+        return { relationships: result.relationships };
+    }
+
+    /**
+     * Find all occurrences of a mention in text and return their spans
+     * @param text The text to search in
+     * @param mention The mention to find
+     * @returns Array of spans {start: number, end: number}
+     */
+    private findMentionSpans(text: string, mention: string): Array<{start: number, end: number}> {
+        const spans: Array<{start: number, end: number}> = [];
+        let pos = 0;
+        
+        while ((pos = text.indexOf(mention, pos)) !== -1) {
+            spans.push({
+                start: pos,
+                end: pos + mention.length
+            });
+            pos += mention.length;
+        }
+        
+        return spans;
+    }
+
+    /**
+     * Process entity extraction results and add span information
+     */
+    private async processEntityExtractionResults(text: string, result: any, episodeId: string): Promise<any> {
+        interface ProcessedEntity {
+            id: number;
+            mention: string;
+            type: string;
+            confidence: number;
+            span: { start: number; end: number };
+            metadata: {
+                episodeId: string;
+                turnId: string;
+            };
+        }
+        
+        const processedEntities: ProcessedEntity[] = [];
+        const mentionedEntitiesByTurn = new Map<string, Set<string>>(); // Track mentioned entities per turn
+        
+        // Split text into turns
+        const turns = text.split(/\[Turn \d+\]\n/);
+        turns.shift(); // Remove the empty string before the first turn marker
+        
+        for (const entity of result.entities) {
+            // For each entity, find spans in each turn separately
+            turns.forEach((turnText, turnIndex) => {
+                const turnSpans = this.findMentionSpans(turnText, entity.mention);
+                if (turnSpans.length > 0) { // If the entity is mentioned in this turn
+                    const turnId = `turn_${turnIndex}`;
+                    
+                    // Initialize the Set for this turn if it doesn't exist
+                    if (!mentionedEntitiesByTurn.has(turnId)) {
+                        mentionedEntitiesByTurn.set(turnId, new Set<string>());
+                    }
+                    
+                    // Create a unique key for the entity based on its mention and type
+                    const entityKey = `${entity.mention}-${entity.type}`;
+                    
+                    // Check if the entity has already been mentioned in this turn
+                    const turnEntities = mentionedEntitiesByTurn.get(turnId)!;
+                    if (!turnEntities.has(entityKey)) {
+                        // Adjust span positions to account for the full text
+                        const turnStart = text.indexOf(turnText);
+                        const adjustedSpan = {
+                            start: turnStart + turnSpans[0].start,
+                            end: turnStart + turnSpans[0].end
+                        };
+                        
+                        processedEntities.push({
+                            ...entity,
+                            span: adjustedSpan,
+                            metadata: {
+                                episodeId,
+                                turnId
+                            }
+                        });
+                        turnEntities.add(entityKey);
+                    }
+                }
+            });
+        }
+        
+        return {
+            ...result,
+            entities: processedEntities
+        };
+    }
+
+    /**
+     * Helper function to determine which turn a span belongs to based on its position in the text
+     */
+    private getTurnIdFromSpan(text: string, span: { start: number; end: number }): string {
+        // Split the text into turns based on the turn markers in the text
+        const turns = text.split(/(?=\[Turn \d+\])/);
+        let currentPosition = 0;
+        
+        for (let i = 0; i < turns.length; i++) {
+            const turnLength = turns[i].length;
+            if (span.start >= currentPosition && span.start < currentPosition + turnLength) {
+                return `turn_${i}`;
+            }
+            currentPosition += turnLength;
+        }
+        
+        return `turn_0`; // Default to turn 0 if we can't determine the turn
     }
 }

@@ -1,28 +1,35 @@
+import { OpenAI } from 'openai';
 import {
     IGraphNode,
     IGraphEdge,
     GraphFilter,
     MemoryType,
+    EpisodeContent,
+    EntityContent,
+    EntityMentionContent,
+    ExperienceContent,
+    IGraphMemoryUnit,
+    TemporalMode,
+    isEpisodeNode,
     TraversalOptions,
     IGraphStorage,
-    EpisodeContent,
-    isEpisodeNode
+    IGraphIndex
 } from './data/types';
-import { GraphTask, LLMConfig } from './types';
 import { InMemoryGraphStorage } from './data/InMemoryGraphStorage';
+import { InMemoryGraphIndex } from './data/InMemoryGraphIndex';
 import { MemoryGraph } from './data/operations';
 import { EpisodicGraphProcessor } from './processing/episodic/processor';
-import { TemporalHybridSearch } from './query/hybrid';
-import { EmbeddingSearch } from './query/embedding';
-import { BM25Search } from './query/bm25';
-import { ResultReranker } from './query/reranking';
-import { OpenAI } from 'openai';
 import { IEmbedder, EmbedderProvider } from './embedder/types';
 import { EmbedderFactory } from './embedder/factory';
 import crypto from 'crypto';
 import { IdGenerator } from './id/IdGenerator';
 import { DeterministicIdGenerator } from './id/DeterministicIdGenerator';
 import { SemanticGraphProcessor } from './processing/semantic/processor';
+import { GraphTask, LLMConfig } from './types';
+import { TemporalHybridSearch } from './query/hybrid';
+import { EmbeddingSearch } from './query/embedding';
+import { BM25Search } from './query/bm25';
+import { ResultReranker } from './query/reranking';
 
 /**
  * Configuration for graph operations
@@ -71,9 +78,13 @@ export interface SearchResult {
 interface EntityExtractionResult {
     entities: Array<{
         id: number;
-        name: string;
+        mention: string;
         type: string;
-        summary?: string;
+        span: {
+            start: number;
+            end: number;
+        };
+        confidence: number;
     }>;
 }
 
@@ -194,52 +205,136 @@ export class GraphManager {
         timestamp: Date,
         sessionId: string
     }>, processingLayer: number = 3): Promise<void> {
-        // Layer 1: Create episode nodes and raw entities
+        // Layer 1: Episodic Layer - Raw data capture
+        // Create episode nodes and extract temporal information
         await this.createEpisodeNodes(messages);
         const { currentMessages, prevMessages } = await this.prepareMessageContext(messages);
 
-        // Extract and store raw entities
+        // Extract mentions and their temporal relationships
         const extractionResult = await this.llm.process<EntityExtractionResult>(GraphTask.EXTRACT_ENTITIES, {
             text: currentMessages,
-            context: prevMessages
+            context: prevMessages,
+            episodeId: messages[0].id // Pass the episodeId to track the source
         });
+        console.log("extractionResult.entities:", JSON.stringify(extractionResult.entities, null, 2));
+        // Process temporal relationships in Layer 1
+        // const temporalResult = await this.processTemporalRelationships(
+        //     currentMessages, 
+        //     prevMessages, 
+        //     messages[0].timestamp
+        // );
 
-        // Store raw entities in Layer 1
-        const extractedEntities = [];
+        // Store raw mentions with temporal metadata
+        const extractedMentions = [];
         for (const entity of extractionResult.entities) {
-            const entityId = this.semanticProcessor.generateEntityId(entity.name, entity.type);
-            
-            // Store raw entity with metadata
-            await this.graph.addNode({
-                id: entityId,
-                type: entity.type.toLowerCase(),
+            const node: Partial<IGraphNode> = {
+                type: entity.type.toUpperCase(),
                 content: {
-                    name: entity.name,
-                    summary: entity.summary
+                    mention: entity.mention,
+                    span: entity.span,
+                    entityType: entity.type,  // Include the entity type
+                    confidence: entity.confidence  // Include confidence score
                 },
                 metadata: new Map([
                     ['sessionId', messages[0].sessionId],
                     ['timestamp', messages[0].timestamp.toISOString()],
-                    ['entityType', entity.type],
-                    ['lastUpdateTime', new Date().toISOString()]
+                    ['episodeId', messages[0].id]  // Include episode ID
                 ]),
                 createdAt: new Date(),
                 validAt: messages[0].timestamp,
                 edges: []
-            });
+            };
 
-            extractedEntities.push({
+            const mentionId = this.idGenerator.generateNodeId(node);
+            node.id = mentionId;
+            await this.storage.addNode(node as IGraphNode);
+
+            extractedMentions.push({
                 ...entity,
-                id: entityId
+                id: mentionId
             });
         }
 
+        // Create temporal relationships between mentions
+        // if (temporalResult.relationships) {
+        //     for (const rel of temporalResult.relationships) {
+        //         const sourceMention = extractedMentions.find(m => m.id === rel.sourceId);
+        //         const targetMention = extractedMentions.find(m => m.id === rel.targetId);
+                
+        //         if (sourceMention && targetMention) {
+        //             const edge: Partial<IGraphEdge> = {
+        //                 type: rel.type,
+        //                 sourceId: sourceMention.id,
+        //                 targetId: targetMention.id,
+        //                 content: {
+        //                     episode_id: messages[0].id,
+        //                     confidence: rel.confidence
+        //                 },
+        //                 metadata: new Map([
+        //                     ['confidence', rel.confidence.toString()],
+        //                     ['temporalContext', JSON.stringify({
+        //                         ...rel.temporalContext,
+        //                         timestamp: messages[0].timestamp.toISOString()
+        //                     })]
+        //                 ]),
+        //                 createdAt: new Date(),
+        //                 validAt: messages[0].timestamp
+        //             };
+
+        //             edge.id = this.idGenerator.generateEdgeId(edge);
+        //             await this.storage.addEdge(edge as IGraphEdge);
+        //         }
+        //     }
+        // }
+
         if (processingLayer > 1) {
-            // Layer 2: Process semantic layer
+            // Layer 2: Semantic Layer - Entity Resolution and Fact Extraction
             
             // Step 1: Entity Resolution
-            const deduplicationResult = await this.semanticProcessor.deduplicateEntities(extractedEntities);
+            const deduplicationResult = await this.semanticProcessor.deduplicateEntities(extractedMentions);
             const resolvedEntities = deduplicationResult.entities;
+
+            // Create semantic entities from resolved mentions
+            for (const entity of resolvedEntities) {
+                const entityId = this.semanticProcessor.generateEntityId(entity.name, entity.type);
+                
+                // Store semantic entity
+                await this.graph.addNode({
+                    id: entityId,
+                    type: 'entity',
+                    content: {
+                        name: entity.name,
+                        type: entity.type,
+                        summary: entity.summary || ''
+                    },
+                    metadata: new Map([
+                        ['entityType', entity.type],
+                        ['lastUpdateTime', new Date().toISOString()]
+                    ]),
+                    createdAt: new Date(),
+                    validAt: messages[0].timestamp,
+                    edges: []
+                });
+
+                // Link mentions to semantic entity
+                for (const mentionId of entity.mentionIds) {
+                    const edge: Partial<IGraphEdge> = {
+                        type: 'REFERS_TO',
+                        sourceId: mentionId,
+                        targetId: entityId,
+                        content: {
+                            type: 'REFERS_TO',
+                            description: `Mention reference to entity ${entity.name}`
+                        },
+                        metadata: new Map(),
+                        createdAt: new Date(),
+                        validAt: messages[0].timestamp
+                    };
+                    
+                    edge.id = this.idGenerator.generateEdgeId(edge);
+                    await this.graph.addEdge(edge as IGraphEdge);
+                }
+            }
 
             // Step 2: Extract facts between resolved entities
             const extractedFacts = await this.processWithLLM(
@@ -251,52 +346,130 @@ export class GraphManager {
                 }
             );
 
-            // Get relevant entity IDs from resolved entities
+            // Get existing edges for fact resolution
             const relevantEntityIds = resolvedEntities.map(entity => entity.id);
-
-            // Get existing edges from the graph, filtering by relevant entities
             const existingEdges = await this.graph.getEdges(relevantEntityIds);
-
-            // Resolve facts
             const resolvedFacts = await this.resolveFacts(extractedFacts, existingEdges);
 
-            // Process temporal relationships
-            const temporalResult = await this.processTemporalRelationships(
-                currentMessages, 
-                prevMessages, 
-                messages[0].timestamp
-            );
-
-            // Create graph nodes and edges using resolved entities
-            await this.createGraphStructures(resolvedEntities, temporalResult, messages[0]);
+            // Create semantic relationships from facts
+            for (const fact of resolvedFacts.facts) {
+                const edge: Partial<IGraphEdge> = {
+                    type: fact.type,
+                    sourceId: fact.sourceId,
+                    targetId: fact.targetId,
+                    content: {
+                        type: fact.type,
+                        description: fact.text
+                    },
+                    metadata: new Map([
+                        ['confidence', fact.confidence.toString()],
+                        ['fact', fact.text]
+                    ]),
+                    createdAt: new Date(),
+                    validAt: messages[0].timestamp
+                };
+                
+                edge.id = this.idGenerator.generateEdgeId(edge);
+                await this.graph.addEdge(edge as IGraphEdge);
+            }
         }
 
         if (processingLayer > 2) {
-            // Layer 3: Process community layer
+            // Layer 3: Community Layer - Pattern Analysis
             await this.refineCommunities(messages[0].sessionId);
         }
     }
 
     /**
-     * Refines communities in the graph.
+     * Refines communities in the graph by analyzing mention patterns.
      */
     async refineCommunities(sessionId: string): Promise<void> {
-        console.log("refineCommunities sessionId: ", sessionId);
+        // Get all mentions for this session
+        const { nodes: mentions } = await this.graph.query({ 
+            nodeTypes: ['mention'], 
+            sessionId 
+        });
+
+        // Get episodes connected to these mentions
+        const episodeEdges = await Promise.all(
+            mentions.map((mention: IGraphNode) => 
+                this.storage.getEdges([mention.id])
+                    .then(edges => edges.filter((e: IGraphEdge) => e.type === 'MENTIONED_IN'))
+            )
+        );
+
+        // Group mentions by their connected episodes
+        const episodeToMentions = new Map<string, IGraphNode[]>();
+        mentions.forEach((mention: IGraphNode, index: number) => {
+            const episodeEdge = episodeEdges[index][0]; // Take first MENTIONED_IN edge
+            if (episodeEdge) {
+                const episodeId = episodeEdge.targetId;
+                const mentionsForEpisode = episodeToMentions.get(episodeId) || [];
+                mentionsForEpisode.push(mention);
+                episodeToMentions.set(episodeId, mentionsForEpisode);
+            }
+        });
+
+        // Process communities
         const communityInput = {
-            nodes: (await this.graph.query({ nodeTypes: ['entity'], sessionId })).nodes,
+            episodes: Array.from(episodeToMentions.entries()).map(([episodeId, mentions]) => ({
+                id: episodeId,
+                mentions: mentions.map(m => ({
+                    text: m.content.text,
+                    type: m.content.entityType
+                }))
+            })),
             metadata: {
                 type: 'community',
                 lastUpdateTime: new Date().toISOString()
             }
         };
-        console.log("refineCommunities communityInput: ", communityInput);
-        console.log("refineCommunities nodes: ", communityInput.nodes);
-        const communityResponse = await this.processWithLLM(GraphTask.REFINE_COMMUNITIES, communityInput);
-        if (communityResponse && communityResponse.communities) {
+
+        const communityResponse = await this.processWithLLM(
+            GraphTask.REFINE_COMMUNITIES, 
+            communityInput
+        );
+
+        // Create community nodes and relationships
+        if (communityResponse?.communities) {
             for (const community of communityResponse.communities) {
-                if (community.id) {
-                    // Update community members
-                    await this.updateCommunityMembers(community.id, community.members);
+                const communityNode: Partial<IGraphNode> = {
+                    type: 'community',
+                    content: {
+                        label: community.label,
+                        confidence: community.confidence
+                    },
+                    metadata: new Map([
+                        ['sessionId', sessionId],
+                        ['timestamp', new Date().toISOString()]
+                    ]),
+                    createdAt: new Date(),
+                    validAt: new Date(),
+                    edges: []
+                };
+
+                const communityId = this.idGenerator.generateNodeId(communityNode);
+                communityNode.id = communityId;
+                await this.storage.addNode(communityNode as IGraphNode);
+
+                // Link mentions to community
+                for (const mentionId of community.mentions) {
+                    const edge: Partial<IGraphEdge> = {
+                        type: 'IN_COMMUNITY',
+                        sourceId: mentionId,
+                        targetId: communityId,
+                        content: {
+                            type: 'IN_COMMUNITY',
+                            description: `Mention in community ${community.label}`
+                        },
+                        metadata: new Map(),
+                        createdAt: new Date(),
+                        validAt: new Date()
+                    };
+
+                    const edgeId = this.idGenerator.generateEdgeId(edge);
+                    edge.id = edgeId;
+                    await this.storage.addEdge(edge as IGraphEdge);
                 }
             }
         }
@@ -414,15 +587,6 @@ export class GraphManager {
         }
     }
 
-    private async updateCommunityMembers(communityId: string, members: string[]): Promise<void> {
-        // Update community members in the graph
-        // This implementation is omitted for brevity
-    }
-
-    private log(message: string, data: any) {
-        console.log(message, data);
-    }
-
     private async createEpisodeNodes(messages: Array<{
         id: string,
         body: string,
@@ -432,15 +596,30 @@ export class GraphManager {
     }>): Promise<void> {
         const now = new Date();
         for (const message of messages) {
-            const episodeNode: IGraphNode<EpisodeContent> = {
-                id: `ep_${message.id}`,
+            // Check if an episode-specific node already exists
+            const baseNodeId = `ep_${message.id}`;
+            const episodeNodeId = `${baseNodeId}:${message.sessionId}`;
+            const existingNode = await this.storage.getNode(episodeNodeId);
+
+            if (existingNode) {
+                console.log(`Episode node already exists: ${episodeNodeId}`);
+                return;
+            }
+
+            // Create a new node for this episode
+            const node: IGraphNode<EpisodeContent> = {
+                id: episodeNodeId,
                 type: 'episode',
                 content: {
-                    body: message.body,
-                    timestamp: message.timestamp,
-                    source: message.role,
-                    sourceDescription: message.body,
-                    sessionId: message.sessionId
+                    type: 'message',
+                    actor: message.role,
+                    content: message.body,
+                    metadata: {
+                        session_id: message.sessionId,
+                        turn_id: message.id,
+                        timestamp: message.timestamp,
+                        source: message.role
+                    }
                 },
                 metadata: new Map([
                     ['role', message.role],
@@ -452,8 +631,8 @@ export class GraphManager {
                 validAt: message.timestamp,
                 edges: [] // Initialize edges property
             };
-            this.log('Episode Node:', episodeNode);
-            await this.addNode(episodeNode);
+            this.log('Episode Node:', node);
+            await this.addNode(node);
         }
     }
 
@@ -478,36 +657,213 @@ export class GraphManager {
         const prevMessages = prevNodes
             .slice(0, 4)
             .filter((node: IGraphNode) => !messages.some(msg => msg.id === node.metadata.get('turnId')))
-            .map((node: IGraphNode) => `${node.content.source}: ${node.content.body}`)
+            .map((node: IGraphNode) => `${node.content.actor}: ${node.content.content}`)
             .join('\n');
 
+        // Group messages into turns (user + assistant pairs)
+        let currentTurn = -1;
         const currentMessages = messages
-            .map(msg => `${msg.role}: ${msg.body}`)
-            .join('\n');
+            .reduce((acc: string[], msg, idx) => {
+                if (msg.role === 'user') {
+                    currentTurn++;
+                    acc.push(`[Turn ${currentTurn}]\n${msg.role}: ${msg.body}`);
+                } else {
+                    // Append assistant's message to the current turn
+                    acc[acc.length - 1] += `\n${msg.role}: ${msg.body}`;
+                }
+                return acc;
+            }, [])
+            .join('\n\n');
 
         this.log('Previous Messages:', prevMessages);
         return { currentMessages, prevMessages };
     }
 
-    private async deduplicateEntities(nodes: Array<any>): Promise<{ entities: Array<any>, mappings: Array<any> }> {
-        return await this.semanticProcessor.deduplicateEntities(nodes);
-    }
-
+    /**
+     * Process a task using LLM with proper data handling
+     */
     private async processTemporalRelationships(
         currentMessages: string,
         prevMessages: string,
         timestamp: Date
     ): Promise<any> {
-        const result = await this.processWithLLM(
-            GraphTask.EXTRACT_TEMPORAL,
-            {
-                text: currentMessages,
-                context: prevMessages || undefined,
-                metadata: { timestamp }
+        interface TemporalResult {
+            entities?: Array<{
+                id: number;
+                type: string;
+                mention: string;
+                confidence: number;
+                turn?: number;
+            }>;
+            relationships?: Array<{
+                sourceId: number;
+                targetId: number;
+                type: string;
+                confidence: number;
+                turn?: number;
+                temporalContext?: {
+                    timestamp: string;
+                    type: string;
+                };
+            }>;
+        }
+
+        // Extract temporal information about entities and relationships
+        const temporalResult = await this.llm.process<TemporalResult>(GraphTask.EXTRACT_TEMPORAL, {
+            text: currentMessages,
+            context: prevMessages,
+            referenceTimestamp: timestamp.toISOString()
+        });
+
+        console.log("=== Processing Temporal Relationships ===");
+        console.log("Raw entities from LLM:", JSON.stringify(temporalResult.entities, null, 2));
+
+        if (temporalResult.entities) {
+            // Deduplicate entities within the same turn
+            const uniqueEntities = temporalResult.entities.reduce((acc, entity) => {
+                const key = `${entity.turn}:${entity.type}:${entity.mention}`;
+                if (!acc.has(key)) {
+                    acc.set(key, entity);
+                }
+                return acc;
+            }, new Map<string, any>()).values();
+
+            temporalResult.entities = Array.from(uniqueEntities);
+        }
+
+        // Create mention nodes for each entity, deduplicating within turns
+        const entityIdMap = new Map<number, string>(); // Map LLM entity IDs to node IDs
+        const mentionMap = new Map<string, {
+            type: string;
+            mention: string;
+            confidence: number;
+            turn: number;
+            ids: number[]
+        }>();
+
+        // First pass: identify all unique mentions per turn
+        console.log("\n=== First Pass: Grouping Mentions ===");
+        // Group mentions by turn and text
+        for (const entity of temporalResult.entities || []) {
+            const turn = entity.turn || 0;
+            const mentionKey = `${turn}:${entity.type}:${entity.mention}`;
+            console.log(`\nProcessing entity: ${entity.mention} (turn ${turn})`);
+            console.log(`Generated mention key: ${mentionKey}`);
+            
+            const existing = mentionMap.get(mentionKey);
+            if (existing) {
+                console.log(`Found existing mention for key ${mentionKey}`);
+                console.log(`Existing ids: [${existing.ids}], adding id: ${entity.id}`);
+                // If this mention already exists in this turn, just add the ID to the list
+                existing.ids.push(entity.id);
+                // Keep the highest confidence if we see multiple instances
+                if (entity.confidence > existing.confidence) {
+                    console.log(`Updating confidence from ${existing.confidence} to ${entity.confidence}`);
+                    existing.confidence = entity.confidence;
+                }
+            } else {
+                console.log(`Creating new mention entry for key ${mentionKey}`);
+                // First time seeing this mention in this turn
+                mentionMap.set(mentionKey, {
+                    type: entity.type,
+                    mention: entity.mention,
+                    confidence: entity.confidence,
+                    turn: turn,
+                    ids: [entity.id]
+                });
             }
-        );
-        this.log('Temporal Result:', result);
-        return result;
+        }
+
+        console.log("\n=== Second Pass: Creating Nodes ===");
+        console.log("Unique mentions:", Array.from(mentionMap.entries()));
+
+        // Create nodes for unique mentions
+        for (const [mentionKey, mentionData] of mentionMap.entries()) {
+            console.log(`Creating node for mentionKey: ${mentionKey}`);
+             // Create a node for this unique mention in this turn
+             const node: Partial<IGraphNode> = {
+                type: mentionData.type,
+                content: {
+                    mention: mentionData.mention,
+                    turn: mentionData.turn
+                },
+                metadata: new Map([
+                    ['turn', mentionData.turn.toString()],
+                    ['timestamp', timestamp.toISOString()]
+                ]),
+                createdAt: new Date(),
+                validAt: timestamp,
+                edges: []
+            };
+
+            const nodeId = this.idGenerator.generateNodeId(node);
+            node.id = nodeId;
+
+            await this.storage.addNode(node as IGraphNode);
+            console.log(`Created node: ${nodeId} for mention "${mentionData.mention}" in turn ${mentionData.turn}`);
+
+            // Map all entity IDs for this mention to the same node
+            for (const entityId of mentionData.ids) {
+                entityIdMap.set(entityId, nodeId);
+            }
+        }
+
+        // Process relationships using the mapped node IDs
+        if (temporalResult.relationships) {
+            console.log("\n=== Processing Relationships ===");
+            for (const rel of temporalResult.relationships) {
+                console.log(`\nProcessing relationship: ${rel.type}`);
+                console.log(`Source ID: ${rel.sourceId}, Target ID: ${rel.targetId}`);
+                
+                const sourceNodeId = entityIdMap.get(rel.sourceId);
+                const targetNodeId = entityIdMap.get(rel.targetId);
+
+                console.log(`Mapped to nodes: source=${sourceNodeId}, target=${targetNodeId}`);
+
+                if (!sourceNodeId || !targetNodeId) {
+                    console.error(`Missing node mapping for relationship: source=${rel.sourceId}, target=${rel.targetId}`);
+                    continue;
+                }
+
+                let validAt = timestamp;
+                if (rel.temporalContext?.timestamp) {
+                    if (rel.temporalContext.timestamp === 'CURRENT_TIMESTAMP') {
+                        validAt = timestamp;
+                    } else {
+                        try {
+                            validAt = new Date(rel.temporalContext.timestamp);
+                        } catch (e) {
+                            console.error(`Invalid timestamp format: ${rel.temporalContext.timestamp}`);
+                            validAt = timestamp;
+                        }
+                    }
+                }
+
+                const edge: Partial<IGraphEdge> = {
+                    type: rel.type,
+                    sourceId: sourceNodeId,
+                    targetId: targetNodeId,
+                    content: {
+                        confidence: rel.confidence,
+                        turn: rel.turn || 0
+                    },
+                    metadata: new Map([
+                        ['turn', (rel.turn || 0).toString()],
+                        ['timestamp', validAt.toISOString()]
+                    ]),
+                    createdAt: new Date(), // T' timeline - when we created this edge
+                    validAt: validAt, // Always use conversation timestamp
+                    expiredAt: undefined // No expiration for now
+                };
+
+                const edgeId = this.idGenerator.generateEdgeId(edge);
+                edge.id = edgeId;
+                await this.storage.addEdge(edge as IGraphEdge);
+                console.log(`Created edge: ${edgeId} of type ${rel.type}`);
+            }
+        }
+
+        return temporalResult;
     }
 
     private async createGraphStructures(
@@ -518,409 +874,114 @@ export class GraphManager {
             sessionId: string
         }
     ): Promise<void> {
-        // Create or update entity nodes
-        const createdEntityIds = new Set<string>();
-        const temporalEntities = temporalResult?.entities || [];
+        const temporalEntities = temporalResult.entities || [];
+        const createdMentionIds = new Map<string, string>();
+
+        // Create mention nodes for temporal entities
         if (Array.isArray(temporalEntities)) {
-            for (const entity of temporalEntities) { 
-                const entityId = this.semanticProcessor.generateEntityId(entity.name, entity.type);
-                
-                // Get existing node if any
-                const existingNode = await this.storage.getNode(entityId);
-                
-                // Prepare node data, preserving existing metadata if present
-                const entityNode: IGraphNode = {
-                    id: entityId,
-                    type: entity.type.toLowerCase(),
+            for (const entity of temporalEntities) {
+                // Create mention node with generated ID
+                const mentionNode: Partial<IGraphNode> = {
+                    type: 'mention',
                     content: {
-                        name: entity.name || '',
-                        summary: entity.summary || '',
-                        // Preserve any additional content fields
-                        ...(existingNode?.content || {})
+                        text: entity.mention,
+                        entityType: entity.type
                     },
                     metadata: new Map([
-                        // Preserve existing metadata
-                        ...(existingNode?.metadata || []),
-                        // Update with new metadata
                         ['sessionId', firstMessage.sessionId],
-                        ['timestamp', firstMessage.timestamp.toISOString()],
-                        ['entityType', entity.type],
-                        ['lastUpdateTime', new Date().toISOString()]
-                    ]),
-                    createdAt: existingNode?.createdAt || new Date(),
-                    validAt: firstMessage.timestamp,
-                    // Don't include invalidAt for nodes
-                    expiredAt: existingNode?.expiredAt,
-                    edges: [] // Initialize edges property
-                };
-
-                if (existingNode) {
-                    // Update existing node
-                    await this.storage.updateNode(entityId, entityNode);
-                    this.log('Updated entity node:', { 
-                        entityId, 
-                        type: entity.type,
-                        name: entity.name
-                    });
-                } else {
-                    // Create new node
-                    await this.storage.addNode(entityNode);
-                    this.log('Created entity node:', { 
-                        entityId, 
-                        type: entity.type,
-                        name: entity.name
-                    });
-                }
-                createdEntityIds.add(entityId);
-            }
-        }
-
-        // Create or update relationships
-        if (temporalResult?.relationships && Array.isArray(temporalResult.relationships)) {
-            for (const rel of temporalResult.relationships) {
-                try {
-                    const sourceId = this.semanticProcessor.generateEntityId(rel.sourceName, rel.sourceType);
-                    const targetId = this.semanticProcessor.generateEntityId(rel.targetName, rel.targetType);
-                    
-                    // Verify both nodes exist
-                    const [sourceExists, targetExists] = await Promise.all([
-                        this.storage.getNode(sourceId),
-                        this.storage.getNode(targetId)
-                    ]);
-                    
-                    if (!sourceExists || !targetExists) {
-                        console.error('Cannot create relationship - missing nodes:', {
-                            sourceId,
-                            targetId,
-                            relationship: rel.type
-                        });
-                        continue;
-                    }
-
-                    const relationshipId = `rel_${sourceId}_${targetId}_${rel.type}`;
-                    const validAt = rel.valid_at ? new Date(rel.valid_at) : firstMessage.timestamp;
-                    const invalidAt = rel.invalid_at ? new Date(rel.invalid_at) : undefined;
-
-                    // Get existing relationship if any
-                    const existingEdge = await this.storage.getEdge(relationshipId);
-
-                    const relationshipEdge: IGraphEdge = {
-                        id: relationshipId,
-                        type: rel.type.toLowerCase(),
-                        sourceId,
-                        targetId,
-                        content: {
-                            name: rel.name,
-                            description: rel.description
-                        },
-                        metadata: new Map([
-                            ['temporalStage', 'processed'],
-                            ['sessionId', firstMessage.sessionId],
-                            ['timestamp', firstMessage.timestamp.toISOString()]
-                        ]),
-                        createdAt: existingEdge?.createdAt || new Date(),
-                        validAt,
-                        invalidAt,
-                        expiredAt: existingEdge?.expiredAt
-                    };
-
-                    if (existingEdge) {
-                        // Update existing relationship
-                        await this.storage.updateEdge(relationshipId, relationshipEdge);
-                        this.log('Updated relationship:', { 
-                            id: relationshipId, 
-                            type: rel.type,
-                            source: sourceId,
-                            target: targetId
-                        });
-                    } else {
-                        // Create new relationship
-                        await this.storage.addEdge(relationshipEdge);
-                        this.log('Created relationship:', { 
-                            id: relationshipId, 
-                            type: rel.type,
-                            source: sourceId,
-                            target: targetId
-                        });
-                    }
-                } catch (error) {
-                    console.error('Failed to add/update relationship:', error);
-                }
-            }
-        }
-    }
-
-    private async processMessageBatch(messages: Array<{
-        id: string,
-        body: string,
-        role: string,
-        timestamp: Date,
-        sessionId: string
-    }>): Promise<void> {
-        try {
-            // Stage 1: Initial entity extraction
-            const extractedNodeIds = await this.processEntityExtraction(messages);
-            this.log('Stage 1: Extracted entities', { count: extractedNodeIds.length });
-
-            // Stage 2: Entity deduplication
-            const deduplicatedNodeIds = await this.processEntityDeduplication(extractedNodeIds, messages[0].body);
-            this.log('Stage 2: Deduplicated entities', { count: deduplicatedNodeIds.length });
-
-            // Stage 3: Temporal relationship extraction
-            await this.processTemporalStage(deduplicatedNodeIds, {
-                timestamp: messages[0].timestamp,
-                sessionId: messages[0].sessionId
-            });
-            this.log('Stage 3: Processed temporal relationships', { nodeCount: deduplicatedNodeIds.length });
-        } catch (error) {
-            console.error('Failed to process message batch:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Stage 1: Extract entities and store them with initial metadata
-     */
-    private async processEntityExtraction(messages: Array<{
-        body: string,
-        timestamp: Date,
-        sessionId: string
-    }>): Promise<string[]> {
-        const processStartTime = Date.now();
-
-        const extractedNodeIds: string[] = [];
-        const currentMessages = messages.map(m => m.body).join('\n');
-
-        // Extract entities using LLM
-        const extractEntitiesStartTime = Date.now();
-        const result = await this.llm.process<EntityExtractionResult>(GraphTask.EXTRACT_ENTITIES, {
-            messages: currentMessages
-        });
-        const extractEntitiesEndTime = Date.now();
-        console.log(`Entity extraction took: ${extractEntitiesEndTime - extractEntitiesStartTime}ms`);
-        console.log('Extracted Entities:', result);
-
-        // Store entities and return their IDs
-        const entityIds: string[] = [];
-        if (Array.isArray(result.entities)) {
-            console.log('Processing entities:', result.entities);
-            for (const entity of result.entities) {
-                const entityId = this.semanticProcessor.generateEntityId(entity.name, entity.type);
-                console.log('Generated entity ID:', { name: entity.name, type: entity.type, id: entityId });
-                entityIds.push(entityId);
-
-                // Store entity with metadata
-                await this.graph.addNode({
-                    id: entityId,
-                    type: entity.type.toLowerCase(),
-                    content: {
-                        name: entity.name,
-                        summary: entity.summary
-                    },
-                    metadata: new Map([
-                        ['sessionId', messages[0].sessionId],
-                        ['timestamp', messages[0].timestamp.toISOString()],
-                        ['entityType', entity.type],
-                        ['lastUpdateTime', new Date().toISOString()]
+                        ['timestamp', firstMessage.timestamp.toISOString()]
                     ]),
                     createdAt: new Date(),
-                    validAt: messages[0].timestamp,
+                    validAt: firstMessage.timestamp,
                     edges: []
+                };
+
+                const mentionId = this.idGenerator.generateNodeId(mentionNode);
+                mentionNode.id = mentionId;
+
+                await this.storage.addNode(mentionNode as IGraphNode);
+                createdMentionIds.set(entity.mention, mentionId);
+
+                // Create episode node if it doesn't exist
+                const episodeNode: Partial<IGraphNode> = {
+                    type: 'episode',
+                    content: {
+                        type: 'message',
+                        content: entity.context || '',
+                        metadata: {
+                            sessionId: firstMessage.sessionId,
+                            timestamp: firstMessage.timestamp.toISOString()
+                        }
+                    }
+                };
+                const episodeId = this.idGenerator.generateNodeId(episodeNode);
+                episodeNode.id = episodeId;
+                await this.storage.addNode(episodeNode as IGraphNode);
+
+                // Link mention to episode
+                const mentionToEpisodeEdge: Partial<IGraphEdge> = {
+                    type: 'MENTIONED_IN',
+                    sourceId: mentionId,
+                    targetId: episodeId,
+                    content: {
+                        type: 'MENTIONED_IN',
+                        description: `Mention in episode ${entity.context}`
+                    },
+                    metadata: new Map(),
+                    createdAt: new Date(),
+                    validAt: firstMessage.timestamp
+                };
+
+                const edgeId = this.idGenerator.generateEdgeId(mentionToEpisodeEdge);
+                mentionToEpisodeEdge.id = edgeId;
+                await this.storage.addEdge(mentionToEpisodeEdge as IGraphEdge);
+
+                this.log('Created mention node and edge:', { 
+                    mentionId: mentionNode.id,
+                    episodeId,
+                    type: entity.type
                 });
             }
         }
 
-        const processEndTime = Date.now();
-        console.log(`Entity extraction process took: ${processEndTime - processStartTime}ms`);
-        console.log('Final entity IDs:', entityIds);
-        return entityIds;
-    }
-
-    /**
-     * Stage 2: Deduplicate entities and update storage with merged data
-     */
-    private async processEntityDeduplication(nodeIds: string[], prevMessages: string): Promise<string[]> {
-        const processStartTime = Date.now();
-
-        const deduplicatedIds: string[] = [];
-        const nodes = await Promise.all(nodeIds.map(id => this.storage.getNode(id)));
-        const validNodes = nodes.filter((n): n is NonNullable<typeof n> => n !== null);
-
-        // Get deduplication results from LLM
-        const llmStartTime = Date.now();
-        const dedupeResult = await this.processWithLLM(
-            GraphTask.DEDUPE_NODES,
-            {
-                entities: validNodes,
-                context: prevMessages
-            }
-        );
-        const llmEndTime = Date.now();
-        console.log(`LLM deduplication took: ${llmEndTime - llmStartTime}ms`);
-
-        // Process each merged entity
-        for (const mergedEntity of dedupeResult.entities) {
-            try {
-                const primaryId = mergedEntity.primaryId;
-                const duplicateIds = mergedEntity.duplicateIds;
-
-                // Create merged node
-                const mergedNode: IGraphNode = {
-                    id: primaryId,
-                    type: mergedEntity.type.toLowerCase(),
-                    content: {
-                        name: mergedEntity.name,
-                        summary: mergedEntity.summary,
-                        alternateNames: mergedEntity.alternateNames || []
-                    },
-                    metadata: new Map([
-                        ['deduplicationStage', 'merged'],
-                        ['mergedIds', duplicateIds],
-                        ['lastUpdateTime', new Date().toISOString()]
-                    ]),
-                    createdAt: new Date(),
-                    validAt: new Date(),
-                    edges: [] // Initialize edges property
-                };
-
-                // Update primary node
-                await this.storage.updateNode(primaryId, mergedNode);
-                deduplicatedIds.push(primaryId);
-
-                // Mark duplicates as merged
-                for (const dupId of duplicateIds) {
-                    if (dupId !== primaryId) {
-                        const dupNode = await this.storage.getNode(dupId);
-                        if (dupNode) {
-                            dupNode.metadata.set('mergedInto', primaryId);
-                            dupNode.metadata.set('lastUpdateTime', new Date().toISOString());
-                            await this.storage.updateNode(dupId, dupNode);
-                        }
-                    }
-                }
-
-                this.log('Merged entities:', { primaryId, duplicateIds });
-            } catch (error) {
-                console.error('Failed to merge entities:', error);
-            }
-        }
-
-        const processEndTime = Date.now();
-        console.log(`Entity deduplication process took: ${processEndTime - processStartTime}ms`);
-        return deduplicatedIds;
-    }
-
-    /**
-     * Stage 3: Extract and store temporal relationships
-     */
-    private async processTemporalStage(nodeIds: string[], firstMessage: {
-        timestamp: Date,
-        sessionId: string
-    }): Promise<void> {
-        const processStartTime = Date.now();
-
-        // Get all deduplicated nodes
-        const nodes = await Promise.all(nodeIds.map(id => this.storage.getNode(id)));
-        const validNodes = nodes.filter((n): n is NonNullable<typeof n> => n !== null);
-
-        // Extract temporal relationships
-        const temporalResult = await this.processWithLLM(GraphTask.EXTRACT_TEMPORAL, {
-            nodes: validNodes,
-            metadata: {
-                timestamp: firstMessage.timestamp.toISOString(),
-                sessionId: firstMessage.sessionId
-            }
-        });
-
-        // Update nodes with temporal data
-        if (temporalResult.entities) {
-            for (const entity of temporalResult.entities) {
-                try {
-                    const entityId = this.semanticProcessor.generateEntityId(entity.name, entity.type);
-                    const existingNode = await this.storage.getNode(entityId);
-                    if (existingNode) {
-                        // Merge temporal metadata
-                        const updatedNode: IGraphNode = {
-                            ...existingNode,
-                            metadata: new Map([
-                                ...existingNode.metadata,
-                                ['temporalStage', 'processed'],
-                                ['lastUpdateTime', new Date().toISOString()]
-                            ]),
-                            edges: [] // Initialize edges property
-                        };
-                        await this.storage.updateNode(entityId, updatedNode);
-                    }
-                } catch (error) {
-                    console.error('Failed to update temporal entity data:', error);
-                }
-            }
-        }
-
-        // Create temporal relationships
+        // Create temporal relationships between mentions
         if (temporalResult.relationships) {
             for (const rel of temporalResult.relationships) {
-                try {
-                    const sourceId = this.semanticProcessor.generateEntityId(rel.sourceName, rel.sourceType);
-                    const targetId = this.semanticProcessor.generateEntityId(rel.targetName, rel.targetType);
-                    
-                    // Verify both nodes exist
-                    const [sourceExists, targetExists] = await Promise.all([
-                        this.storage.getNode(sourceId),
-                        this.storage.getNode(targetId)
-                    ]);
-                    
-                    if (!sourceExists || !targetExists) {
-                        console.error('Cannot create relationship - missing nodes:', {
-                            sourceId,
-                            targetId,
-                            relationship: rel.type
-                        });
-                        continue;
-                    }
+                const sourceMentionId = createdMentionIds.get(rel.sourceName);
+                const targetMentionId = createdMentionIds.get(rel.targetName);
 
-                    const relationshipId = `rel_${sourceId}_${targetId}_${rel.type}`;
-                    const edge: IGraphEdge = {
-                        id: relationshipId,
-                        type: rel.type.toLowerCase(),
-                        sourceId,
-                        targetId,
+                if (sourceMentionId && targetMentionId) {
+                    const edge: Partial<IGraphEdge> = {
+                        type: rel.type,
+                        sourceId: sourceMentionId,
+                        targetId: targetMentionId,
                         content: {
-                            name: rel.name,
-                            description: rel.description
+                            type: rel.type,
+                            description: `Temporal relationship between ${rel.sourceName} and ${rel.targetName}`
                         },
                         metadata: new Map([
-                            ['temporalStage', 'processed'],
-                            ['sessionId', firstMessage.sessionId],
-                            ['timestamp', firstMessage.timestamp.toISOString()]
+                            ['confidence', rel.confidence.toString()],
+                            ['episode_id', rel.episode_id || '']
                         ]),
-                        createdAt: new Date(),
-                        validAt: rel.valid_at ? new Date(rel.valid_at) : firstMessage.timestamp,
-                        invalidAt: rel.invalid_at ? new Date(rel.invalid_at) : undefined
+                        createdAt: new Date(), // T' timeline - when we created this edge
+                        validAt: firstMessage.timestamp, // Always use conversation timestamp
+                        expiredAt: undefined // No expiration for now
                     };
 
-                    await this.storage.addEdge(edge);
-                    this.log('Created temporal relationship:', {
-                        id: relationshipId,
-                        type: rel.type,
-                        source: sourceId,
-                        target: targetId
+                    const edgeId = this.idGenerator.generateEdgeId(edge);
+                    edge.id = edgeId;
+                    await this.storage.addEdge(edge as IGraphEdge);
+
+                    this.log('Created relationship:', {
+                        sourceId: sourceMentionId,
+                        targetId: targetMentionId,
+                        type: rel.type
                     });
-                } catch (error) {
-                    console.error('Failed to create temporal relationship:', error);
                 }
             }
         }
-
-        const processEndTime = Date.now();
-        console.log(`Temporal relationship extraction process took: ${processEndTime - processStartTime}ms`);
     }
 
-    /**
-     * Resolve extracted facts against existing edges in the graph
-     * @param fact The extracted fact to resolve
-     * @param existingEdges The existing edges in the graph
-     */
     private async resolveFacts(fact: any, existingEdges: any[]): Promise<any> {
         // Use the RESOLVE_FACTS task to check if the extracted fact is a duplicate of any existing edges
         const resolveFactsResult = await this.processWithLLM(
@@ -932,5 +993,9 @@ export class GraphManager {
         );
 
         return resolveFactsResult;
+    }
+
+    private log(message: string, data: any) {
+        console.log(message, data);
     }
 }
