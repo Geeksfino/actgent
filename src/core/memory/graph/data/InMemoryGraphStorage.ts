@@ -223,38 +223,46 @@ export class InMemoryGraphStorage implements IGraphStorage {
         return true;  // Include if all filters pass
     }
 
-    async query(filter: GraphFilter & { sessionId?: string } = {}): Promise<{ nodes: IGraphNode[]; edges: IGraphEdge[] }> {
+    async query(filter: GraphFilter & { sessionId?: string } = {}): Promise<{
+        nodes: IGraphNode[];
+        edges: IGraphEdge[];
+        episodes?: IGraphNode<EpisodeContent>[];
+    }> {
         console.log('Query filter:', filter);
-        let nodes = Array.from(this.nodes.values());
+        // Filter out episode nodes - only store entity nodes in graph storage
+        let nodes = Array.from(this.nodes.values()).filter(node => node.type !== 'episode');
         console.log('Initial nodes count:', nodes.length);
 
         // Apply type filter
         if (filter.nodeTypes?.length) {
             nodes = nodes.filter(node => filter.nodeTypes!.includes(node.type));
-            console.log('After node type filter, count:', nodes.length);
+            console.log('After type filter:', nodes.length);
         }
 
         // Apply temporal filter
         if (filter.temporal) {
             nodes = nodes.filter(node => this.applyTemporalFilter(node, filter.temporal));
-            console.log('After temporal filter, count:', nodes.length);
+            console.log('After temporal filter:', nodes.length);
         }
 
-        // Apply episode filter
-        if (filter.episode) {
-            nodes = nodes.filter(node => this.applyEpisodeFilter(node, filter.episode));
-            console.log('After episode filter, count:', nodes.length);
+        // Apply metadata filter
+        if (filter.metadata) {
+            nodes = nodes.filter(node => this.matchesMetadata(node.metadata, filter.metadata));
+            console.log('After metadata filter:', nodes.length);
         }
 
-        // Apply session filter
-        if (filter.sessionId) {
-            nodes = nodes.filter(node => node.metadata?.get('sessionId') === filter.sessionId);
-            console.log('After session filter, count:', nodes.length);
-        }
+        // Get edges for these nodes
+        const edges = await this.getEdges(nodes.map(n => n.id));
 
-        // Get edges from filtered nodes
-        const edges = nodes.flatMap(node => node.edges || []);
-        console.log('Final nodes count:', nodes.length, 'edges count:', edges.length);
+        // Log the nodes for debugging
+        console.log('nodes in graph:', nodes.map(n => ({
+            id: n.id,
+            type: n.type,
+            content: n.content,
+            validAt: n.validAt,
+            createdAt: n.createdAt,
+            metadata: Object.fromEntries(n.metadata || new Map())
+        })));
 
         return { nodes, edges };
     }
@@ -335,23 +343,34 @@ export class InMemoryGraphStorage implements IGraphStorage {
         return nodes.sort((a, b) => a.validAt!.getTime() - b.validAt!.getTime());
     }
 
-    async getSnapshot(date: Date = new Date()): Promise<{ nodes: IGraphNode[]; edges: IGraphEdge[] }> {
-        const nodes = Array.from(this.nodes.values()).filter(node =>
-            node.createdAt <= date && (!node.expiredAt || node.expiredAt > date) &&
-            (!node.validAt || node.validAt <= date)
-        );
+    async getSnapshot(date: Date = new Date()): Promise<{
+        nodeCount: number;
+        nodeTypes: Set<string>;
+        nodes: Array<{
+            id: string;
+            type: string;
+            mention: string;
+        }>;
+    }> {
+        const nodes = Array.from(this.nodes.values())
+            .filter(node => node.type !== 'episode')
+            .filter(node => 
+                node.createdAt <= date && 
+                (!node.expiredAt || node.expiredAt > date) &&
+                (!node.validAt || node.validAt <= date)
+            );
+
+        const nodeTypes = new Set(nodes.map(node => node.type));
         
-        // Only include edges from valid nodes
-        const validNodeIds = new Set(nodes.map(node => node.id));
-        const edges = nodes.flatMap(node => 
-            node.edges.filter(edge => 
-                validNodeIds.has(edge.sourceId) && validNodeIds.has(edge.targetId) &&
-                edge.createdAt <= date && (!edge.expiredAt || edge.expiredAt > date) &&
-                (!edge.validAt || edge.validAt <= date)
-            )
-        );
-        
-        return { nodes, edges };
+        return {
+            nodeCount: nodes.length,
+            nodeTypes,
+            nodes: nodes.map(node => ({
+                id: node.id,
+                type: node.type,
+                mention: node.content.mention
+            }))
+        };
     }
 
     async findConnectedNodes(options: {

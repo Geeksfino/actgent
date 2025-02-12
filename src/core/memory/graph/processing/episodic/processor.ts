@@ -623,6 +623,7 @@ Return in this format:
             span: { start: number; end: number };
             metadata: {
                 episodeId: string;
+                sessionId: string;
                 turnId: string;
             };
         }
@@ -639,7 +640,7 @@ Return in this format:
             turns.forEach((turnText, turnIndex) => {
                 const turnSpans = this.findMentionSpans(turnText, entity.mention);
                 if (turnSpans.length > 0) { // If the entity is mentioned in this turn
-                    const turnId = `turn_${turnIndex}`;
+                    const turnId = `turn_${turnIndex}`; // Simple turn ID format
                     
                     // Initialize the Set for this turn if it doesn't exist
                     if (!mentionedEntitiesByTurn.has(turnId)) {
@@ -664,9 +665,12 @@ Return in this format:
                             span: adjustedSpan,
                             metadata: {
                                 episodeId,
+                                sessionId: episodeId, // Add sessionId since it's the same as episodeId
                                 turnId
                             }
                         });
+                        
+                        // Mark this entity as mentioned in this turn
                         turnEntities.add(entityKey);
                     }
                 }

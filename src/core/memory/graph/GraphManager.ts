@@ -80,11 +80,16 @@ interface EntityExtractionResult {
         id: number;
         mention: string;
         type: string;
+        confidence: number;
         span: {
             start: number;
             end: number;
         };
-        confidence: number;
+        metadata: {
+            episodeId: string;
+            turnId: string;
+            sessionId: string;
+        };
     }>;
 }
 
@@ -214,45 +219,40 @@ export class GraphManager {
         const extractionResult = await this.llm.process<EntityExtractionResult>(GraphTask.EXTRACT_ENTITIES, {
             text: currentMessages,
             context: prevMessages,
-            episodeId: messages[0].id // Pass the episodeId to track the source
+            episodeId: messages[0].sessionId // Use sessionId as episodeId since it represents the conversation
         });
         console.log("extractionResult.entities:", JSON.stringify(extractionResult.entities, null, 2));
-        // Process temporal relationships in Layer 1
-        // const temporalResult = await this.processTemporalRelationships(
-        //     currentMessages, 
-        //     prevMessages, 
-        //     messages[0].timestamp
-        // );
 
         // Store raw mentions with temporal metadata
         const extractedMentions = [];
         for (const entity of extractionResult.entities) {
+            // Find the message timestamp based on the session
+            const message = messages.find(m => m.sessionId === entity.metadata.sessionId);
+            if (!message) {
+                console.warn(`No message found for session ${entity.metadata.sessionId}`);
+                continue;
+            }
+
             const node: Partial<IGraphNode> = {
                 type: entity.type.toUpperCase(),
                 content: {
                     mention: entity.mention,
                     span: entity.span,
-                    entityType: entity.type,  // Include the entity type
-                    confidence: entity.confidence  // Include confidence score
+                    confidence: entity.confidence
                 },
                 metadata: new Map([
-                    ['sessionId', messages[0].sessionId],
-                    ['timestamp', messages[0].timestamp.toISOString()],
-                    ['episodeId', messages[0].id]  // Include episode ID
+                    ['sessionId', entity.metadata.sessionId],
+                    ['timestamp', message.timestamp.toISOString()],
+                    ['episodeId', entity.metadata.sessionId],
+                    ['turnId', entity.metadata.turnId]
                 ]),
                 createdAt: new Date(),
-                validAt: messages[0].timestamp,
-                edges: []
+                validAt: message.timestamp // Use the timestamp of the message
             };
 
-            const mentionId = this.idGenerator.generateNodeId(node);
-            node.id = mentionId;
-            await this.storage.addNode(node as IGraphNode);
-
-            extractedMentions.push({
-                ...entity,
-                id: mentionId
-            });
+            // Add node to graph
+            const nodeId = await this.addNode(node as IGraphNode);
+            extractedMentions.push({ ...node, id: nodeId });
         }
 
         // Create temporal relationships between mentions
@@ -541,18 +541,12 @@ export class GraphManager {
      * @param filter Optional filter to get specific nodes (e.g., by type)
      * @returns Promise<{ nodes: IGraphNode[], edges: IGraphEdge[] }>
      */
-    async getSnapshot(filter: GraphFilter & { sessionId?: string }): Promise<{ nodes: IGraphNode[], edges: IGraphEdge[] }> {
-        console.log('Getting snapshot with filter:', filter);
+    async getSnapshot(filter: GraphFilter = {}): Promise<{
+        nodes: IGraphNode[];
+        edges: IGraphEdge[];
+        episodes?: IGraphNode<EpisodeContent>[];
+    }> {
         const result = await this.storage.query(filter);
-        console.log('Snapshot query result:', {
-            nodeCount: result.nodes.length,
-            nodeTypes: new Set(result.nodes.map(n => n.type)),
-            nodes: result.nodes.map(n => ({
-                id: n.id,
-                type: n.type,
-                name: n.content?.name
-            }))
-        });
         return result;
     }
 

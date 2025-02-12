@@ -73,6 +73,7 @@ async function processConversations(
         role: string;
         content: string;
         sessionId: string;
+        timestamp: Date;
     }>,
     batchSize: number,
     processingLayer: number
@@ -80,7 +81,7 @@ async function processConversations(
     console.log('Processing conversations...\n');
 
     // Group messages by session
-    const sessions = new Map<string, Array<{ role: string; content: string }>>();
+    const sessions = new Map<string, Array<{ role: string; content: string; timestamp: Date }>>();
     conversations.forEach(msg => {
         const msgs = sessions.get(msg.sessionId) || [];
         msgs.push(msg);
@@ -93,12 +94,11 @@ async function processConversations(
             console.log(`Processing batch of ${batch.length} messages...`);
 
             // Process episodic layer with specified processing depth
-            const timestamp = new Date('2024-01-01T10:00:00.000Z');
             const episodeNodes = batch.map((msg, index) => ({
                 id: `turn_${sessionId}_${i + index}`,
                 body: msg.content,
                 role: msg.role,
-                timestamp,
+                timestamp: msg.timestamp,
                 sessionId,
             }));
             await graphManager.ingest(episodeNodes, processingLayer);
@@ -171,7 +171,8 @@ async function main() {
             turn.messages.map(message => ({
                 role: message.role,
                 content: message.content,
-                sessionId: session.session_id
+                sessionId: session.session_id,
+                timestamp: new Date(session.timestamp)
             }))
         )
     );
@@ -181,49 +182,25 @@ async function main() {
     // Get final graph state
     const snapshot = await graphManager.getSnapshot({});
 
-    // Format nodes and edges according to episodic graph spec
+    // Write graph state to file
     const output = {
-        nodes: snapshot.nodes
-            .filter(node => node.type !== 'episode')
-            .map(node => ({
-                id: node.id,
-                type: node.type,
-                mention: node.content.mention,
-                episode_id: node.content.episode_id,
-                validAt: node.validAt?.toISOString(),
-                createdAt: node.createdAt?.toISOString()
-            })),
-        edges: snapshot.edges.map(edge => ({
-            id: edge.id,
-            source: edge.sourceId,
-            target: edge.targetId,
-            type: edge.type,
-            episode_id: edge.content.episode_id,
-            validAt: edge.validAt?.toISOString(),
-            createdAt: edge.createdAt?.toISOString()
-        })),
-        episodes: snapshot.nodes
-            .filter(node => node.type === 'episode')
-            .map(node => ({
-                id: node.id,
-                type: node.content.type,
-                actor: node.content.actor,
-                content: node.content.content,
-                metadata: {
-                    session_id: node.content.metadata.session_id,
-                    turn_id: node.content.metadata.turn_id
-                },
-                validAt: node.validAt?.toISOString(),
-                createdAt: node.createdAt?.toISOString()
-            }))
+        nodes: snapshot.nodes.map(node => {
+            const { edges, ...nodeWithoutEdges } = {
+                ...node,
+                metadata: Object.fromEntries(node.metadata || new Map())
+            };
+            return nodeWithoutEdges;
+        }),
+        edges: snapshot.edges,
+        episodes: snapshot.episodes || []
     };
 
-    await fs.writeFile(
-        path.join(outputPath, 'graph.json'),
-        JSON.stringify(output, null, 2)
-    );
+    // Write to output file
+    const outputPathFile = path.join(outputPath, 'graph.json');
+    await fs.mkdir(path.dirname(outputPathFile), { recursive: true });
+    await fs.writeFile(outputPathFile, JSON.stringify(output, null, 2));
 
-    console.log('\nProcessing complete. Results written to:', path.join(outputPath, 'graph.json'));
+    console.log('\nProcessing complete. Results written to:', outputPathFile);
 }
 
 main().catch((err: any) => {
