@@ -28,7 +28,9 @@ export interface IGraphUnit {
  */
 export interface INodeRelationship {
     target: string;  // Target node ID
-    valid_at: string; // ISO timestamp
+    valid_at?: string; // ISO timestamp, optional since not all relationships have temporal context
+    confidence?: number; // Confidence score of the relationship
+    metadata?: Record<string, any>; // Additional metadata about the relationship
 }
 
 /**
@@ -288,28 +290,6 @@ export interface EpisodeContent {
         turn_id?: string;
         [key: string]: any;
     };
-}
-
-/**
- * Content type for entity mentions
- */
-export interface EntityMentionContent {
-    mention: string;         // Raw text as mentioned
-    type: string;           // Entity type (Person, Book, etc.)
-    episode_id: string;     // Reference to source episode
-}
-
-/**
- * Content type for experience nodes (composite episodes)
- */
-export interface ExperienceContent {
-    title: string;
-    description: string;
-    startTime: Date;
-    endTime?: Date;
-    episodeIds: string[];  // References to constituent episodes
-    location?: string;     // Optional location reference
-    participants?: string[]; // Optional participant references
 }
 
 /**

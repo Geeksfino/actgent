@@ -245,29 +245,79 @@ export class EpisodicGraphProcessor {
     }
 
     private buildEntityExtractionPrompt(input: { text: string, context: string }): string {
-        return `Extract entities from the following conversation. For each entity:
-- Generate a numeric ID (starting from 1)
-- Identify the entity type (e.g., PERSON, ORGANIZATION, PRODUCT, LOCATION)
-- Provide a brief summary if relevant
+        return `Extract entities and their relationships from the following conversation. The goal is to create a knowledge graph where entities are nodes and relationships are edges between them.
 
 Current conversation:
 ${input.text}
 
 ${input.context ? `Previous context:\n${input.context}` : ''}
 
-Extract entities that are important to understanding the conversation. Focus on:
-1. People, organizations, and places mentioned
-2. Products, services, or items being discussed
-3. Key concepts or topics that are central to the conversation
+Guidelines:
 
-Return entities in this format:
+** Entity Extraction: **
+
+1. Extract entities that are significant to understanding the conversation. Focus on:
+   - PERSON (people, including aliases and full names)
+   - ORGANIZATION (companies, institutions, groups)
+   - PRODUCT (books, artworks, inventions)
+   - LOCATION (places, regions, countries)
+   - CONCEPT (important ideas, theories, or abstract concepts)
+
+2. For each entity:
+   - Use the most complete and descriptive mention from the text (e.g., "Eric Arthur Blair" instead of just "Eric")
+   - Assign a high confidence (0.9-1.0) for clear, unambiguous mentions
+   - Assign a lower confidence (0.7-0.8) for inferred or ambiguous mentions
+   - Include the span (start and end position) in the text where the entity is mentioned
+
+3. Entity Guidelines:
+   - DO extract entities mentioned in the current message
+   - DO NOT extract entities only mentioned in previous context
+   - DO NOT create nodes for relationships or actions
+   - DO NOT create nodes for temporal information (dates, times)
+   - DO merge multiple mentions of the same entity into a single entity object
+
+** Relationship Extraction: **
+
+1. For each entity, identify its relationships with other entities in the CURRENT message:
+   - Each relationship should have a clear type (e.g., "wrote", "worked_for", "located_in")
+   - Each relationship should point to another entity by its ID
+   - Include a confidence score for the relationship
+   - Add temporal context if present in the text
+
+2. Relationship Structure:
+   {
+     "relationships": {
+       "relationship_type": [{
+         "target": target_entity_id,
+         "confidence": 0.9,
+         "metadata": {
+           "temporal_context": "optional timestamp or period"
+         }
+       }]
+     }
+   }
+
+Return the extracted information in this format:
 {
   "entities": [
     {
-      "id": 1,  // Numeric ID
-      "mention": "Entity mention",
+      "id": 1,
+      "mention": "Entity's full mention text",
       "type": "ENTITY_TYPE",
-      "confidence": 0.8  // Confidence in extraction
+      "confidence": 0.9,
+      "span": {
+        "start": 0,
+        "end": 10
+      },
+      "relationships": {
+        "relationship_type": [{
+          "target": 2,
+          "confidence": 0.9,
+          "metadata": {
+            "temporal_context": "optional"
+          }
+        }]
+      }
     }
   ]
 }`;

@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { GraphManager } from '../../src/core/memory/graph/GraphManager';
-import { GraphConfig, LLMConfig, GraphTask } from '../../src/core/memory/graph/types';
+import { GraphConfig, LLMConfig, GraphTask, MessageEpisode } from '../../src/core/memory/graph/types';
 import { DeterministicIdGenerator } from '../../src/core/memory/graph/id/DeterministicIdGenerator';
 import { OpenAI } from 'openai';
 import * as fs from 'fs/promises';
@@ -93,15 +93,22 @@ async function processConversations(
             const batch = sessionMessages.slice(i, i + batchSize);
             console.log(`Processing batch of ${batch.length} messages...`);
 
-            // Process episodic layer with specified processing depth
-            const episodeNodes = batch.map((msg, index) => ({
-                id: `turn_${sessionId}_${i + index}`,
-                body: msg.content,
-                role: msg.role,
-                timestamp: msg.timestamp,
+            // Create MessageEpisode from batch
+            const episode = new MessageEpisode(
+                `episode_${sessionId}_${i}`,  // episodeId
                 sessionId,
-            }));
-            await graphManager.ingest(episodeNodes, processingLayer);
+                batch[0].timestamp,  // use first message timestamp as reference
+                batch.map((msg, index) => ({
+                    id: `turn_${sessionId}_${i + index}`,
+                    body: msg.content,
+                    role: msg.role,
+                    timestamp: msg.timestamp,
+                    turnId: `turn_${i + index}`
+                }))
+            );
+
+            // Process the episode
+            await graphManager.ingest(episode, processingLayer);
         }
     }
 }

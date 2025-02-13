@@ -3,6 +3,30 @@ import crypto from 'crypto';
 import { IdGenerator } from '../id/IdGenerator';
 
 /**
+ * Serializes a graph node into a JSON-friendly format
+ */
+export function toJSON<T>(node: IGraphNode<T>) {
+    return {
+        id: node.id,
+        type: node.type,
+        content: node.content,
+        metadata: Object.fromEntries(node.metadata),
+        createdAt: node.createdAt.toISOString(),
+        expiredAt: node.expiredAt?.toISOString(),
+        validAt: node.validAt?.toISOString(),
+        embedding: node.embedding ? Array.from(node.embedding) : undefined,
+        edges: node.edges.map(e => ({
+            id: e.id,
+            type: e.type,
+            sourceId: e.sourceId,
+            targetId: e.targetId,
+            content: e.content
+        })),
+        relationships: node.relationships
+    };
+}
+
+/**
  * In-memory implementation of graph storage
  */
 export class InMemoryGraphStorage implements IGraphStorage {
@@ -20,13 +44,7 @@ export class InMemoryGraphStorage implements IGraphStorage {
         node.id = id;
         
         node.edges = [];
-        console.log('Adding node to storage:', {
-            id,
-            type: node.type,
-            content: node.content,
-            metadata: Object.fromEntries(node.metadata || new Map()),
-            existingNodes: Array.from(this.nodes.keys())
-        });
+        console.log('Adding node to storage:', toJSON(node));
         this.nodes.set(id, node);
         return id;
     }
@@ -255,14 +273,7 @@ export class InMemoryGraphStorage implements IGraphStorage {
         const edges = await this.getEdges(nodes.map(n => n.id));
 
         // Log the nodes for debugging
-        console.log('nodes in graph:', nodes.map(n => ({
-            id: n.id,
-            type: n.type,
-            content: n.content,
-            validAt: n.validAt,
-            createdAt: n.createdAt,
-            metadata: Object.fromEntries(n.metadata || new Map())
-        })));
+        console.log('nodes in graph:', nodes.map(n => toJSON(n)));
 
         return { nodes, edges };
     }
@@ -395,51 +406,6 @@ export class InMemoryGraphStorage implements IGraphStorage {
             }
         }
         return true;
-    }
-
-    createNode(data: Partial<IGraphNode>): IGraphNode {
-        const type = data.type ? data.type : 'default';
-        const content = data.content ? data.content : {};
-        const id = data.id || this.idGenerator.generateNodeId({ type, content });
-        const timestamp = new Date();
-        return {
-            id,
-            type,
-            metadata: data.metadata ?? new Map(),
-            createdAt: timestamp,
-            expiredAt: data.expiredAt,
-            validAt: data.validAt,
-            content,
-            edges: [], // Initialize edges property
-            relationships: data.relationships ?? {} // Initialize relationships as empty object if not provided
-        };
-    }
-
-    createEdge(data: Partial<IGraphEdge>): IGraphEdge {
-        const sourceId = data.sourceId ? data.sourceId : '';
-        const targetId = data.targetId ? data.targetId : '';
-        const type = data.type ? data.type : 'default';
-        const fact = data.fact ? data.fact : '';
-        const id = data.id || this.idGenerator.generateEdgeId({
-            sourceId,
-            targetId,
-            type,
-            content: data.content
-        });
-        const timestamp = new Date();
-        return {
-            id,
-            sourceId,
-            targetId,
-            type,
-            metadata: data.metadata ?? new Map(),
-            createdAt: timestamp,
-            expiredAt: data.expiredAt,
-            validAt: data.validAt,
-            invalidAt: data.invalidAt,
-            fact,
-            content: data.content ?? {}
-        };
     }
 
     private deepCloneWithMaps<T>(obj: T): T {

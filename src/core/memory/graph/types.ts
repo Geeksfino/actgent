@@ -91,3 +91,122 @@ export enum GraphTask {
     EVALUATE_SEARCH = 'evaluate_search',
     EXPAND_QUERY = 'expand_query'
 }
+
+/**
+ * Type of episode content
+ */
+export type EpisodeType = 'message' | 'text' | 'json';
+
+/**
+ * Base class for all episodes in the graph memory system.
+ * Episodes are the fundamental units of information that can be stored and processed.
+ */
+export class Episode {
+    /**
+     * Unique identifier for this episode
+     */
+    episodeId: string;
+
+    /**
+     * Type of episode content
+     */
+    type: EpisodeType;
+
+    /**
+     * ID of the session this episode belongs to
+     */
+    sessionId: string;
+
+    /**
+     * Reference time for this episode, used for temporal ordering
+     */
+    referenceTime: Date;
+
+    /**
+     * Optional metadata associated with this episode
+     */
+    metadata?: Record<string, any>;
+
+    constructor(episodeId: string, type: EpisodeType, sessionId: string, referenceTime: Date, metadata?: Record<string, any>) {
+        this.episodeId = episodeId;
+        this.type = type;
+        this.sessionId = sessionId;
+        this.referenceTime = referenceTime;
+        this.metadata = metadata;
+    }
+}
+
+/**
+ * Episode containing message-based content (e.g. conversation turns)
+ */
+export class MessageEpisode extends Episode {
+    /**
+     * Array of messages that make up this episode
+     */
+    content: Array<{
+        id: string;
+        role: string;
+        body: string;
+        timestamp: Date;
+        turnId: string;
+    }>;
+
+    constructor(
+        episodeId: string,
+        sessionId: string,
+        referenceTime: Date,
+        content: Array<{
+            id: string;
+            role: string;
+            body: string;
+            timestamp: Date;
+            turnId: string;
+        }>,
+        metadata?: Record<string, any>
+    ) {
+        super(episodeId, 'message', sessionId, referenceTime, metadata);
+        this.content = content;
+    }
+}
+
+/**
+ * Episode containing text content
+ */
+export class TextEpisode extends Episode {
+    /**
+     * Text content of this episode
+     */
+    content: string;
+
+    constructor(
+        episodeId: string,
+        sessionId: string,
+        referenceTime: Date,
+        content: string,
+        metadata?: Record<string, any>
+    ) {
+        super(episodeId, 'text', sessionId, referenceTime, metadata);
+        this.content = content;
+    }
+}
+
+/**
+ * Episode containing JSON content
+ */
+export class JsonEpisode extends Episode {
+    /**
+     * JSON content of this episode
+     */
+    content: Record<string, any>;
+
+    constructor(
+        episodeId: string,
+        sessionId: string,
+        referenceTime: Date,
+        content: Record<string, any>,
+        metadata?: Record<string, any>
+    ) {
+        super(episodeId, 'json', sessionId, referenceTime, metadata);
+        this.content = content;
+    }
+}
