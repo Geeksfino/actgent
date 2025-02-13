@@ -410,7 +410,8 @@ export class InMemoryGraphStorage implements IGraphStorage {
             expiredAt: data.expiredAt,
             validAt: data.validAt,
             content,
-            edges: [] // Initialize edges property
+            edges: [], // Initialize edges property
+            relationships: data.relationships ?? {} // Initialize relationships as empty object if not provided
         };
     }
 

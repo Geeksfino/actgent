@@ -24,12 +24,28 @@ export interface IGraphUnit {
 }
 
 /**
+ * Relationship between nodes with timestamp
+ */
+export interface INodeRelationship {
+    target: string;  // Target node ID
+    valid_at: string; // ISO timestamp
+}
+
+/**
+ * Collection of relationships grouped by type
+ */
+export interface INodeRelationships {
+    [key: string]: INodeRelationship[]; // Dynamic relationship types as keys
+}
+
+/**
  * Graph node with generic content type
  */
 export interface IGraphNode<T = any> extends IGraphUnit {
     content: T;
     embedding?: Float32Array | number[];  // Support both Float32Array and number[] for embeddings
     edges: IGraphEdge[];
+    relationships?: INodeRelationships;  // Optional relationships field
 }
 
 /**
