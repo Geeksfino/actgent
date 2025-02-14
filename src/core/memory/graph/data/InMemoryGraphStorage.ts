@@ -6,23 +6,18 @@ import { IdGenerator } from '../id/IdGenerator';
  * Serializes a graph node into a JSON-friendly format
  */
 export function toJSON<T>(node: IGraphNode<T>) {
+    // Remove edges from node before serializing
+    const { edges: _, ...nodeWithoutEdges } = node;
     return {
-        id: node.id,
-        type: node.type,
-        content: node.content,
-        metadata: Object.fromEntries(node.metadata),
-        createdAt: node.createdAt.toISOString(),
-        expiredAt: node.expiredAt?.toISOString(),
-        validAt: node.validAt?.toISOString(),
-        embedding: node.embedding ? Array.from(node.embedding) : undefined,
-        edges: node.edges.map(e => ({
-            id: e.id,
-            type: e.type,
-            sourceId: e.sourceId,
-            targetId: e.targetId,
-            content: e.content
-        })),
-        relationships: node.relationships
+        id: nodeWithoutEdges.id,
+        type: nodeWithoutEdges.type,
+        content: nodeWithoutEdges.content,
+        metadata: Object.fromEntries(nodeWithoutEdges.metadata),
+        createdAt: nodeWithoutEdges.createdAt.toISOString(),
+        expiredAt: nodeWithoutEdges.expiredAt?.toISOString(),
+        validAt: nodeWithoutEdges.validAt?.toISOString(),
+        embedding: nodeWithoutEdges.embedding ? Array.from(nodeWithoutEdges.embedding) : undefined,
+        relationships: nodeWithoutEdges.relationships
     };
 }
 
@@ -31,11 +26,13 @@ export function toJSON<T>(node: IGraphNode<T>) {
  */
 export class InMemoryGraphStorage implements IGraphStorage {
     private nodes: Map<string, IGraphNode>;
+    private edges: Map<string, IGraphEdge>;
     private idGenerator: IdGenerator;
 
     constructor(idGenerator: IdGenerator, maxCapacity: number = 1000) {
         this.idGenerator = idGenerator;
         this.nodes = new Map();
+        this.edges = new Map();
     }
 
     // Graph-specific operations
@@ -43,9 +40,14 @@ export class InMemoryGraphStorage implements IGraphStorage {
         const id = node.id || this.idGenerator.generateNodeId({ type: node.type, content: node.content });
         node.id = id;
         
-        node.edges = [];
-        console.log('Adding node to storage:', toJSON(node));
-        this.nodes.set(id, node);
+        // Initialize with empty edges array for backward compatibility
+        const nodeWithEmptyEdges = {
+            ...node,
+            edges: []
+        };
+        
+        console.log('Adding node to storage:', toJSON(nodeWithEmptyEdges));
+        this.nodes.set(id, nodeWithEmptyEdges);
         return id;
     }
 
@@ -57,14 +59,23 @@ export class InMemoryGraphStorage implements IGraphStorage {
         const node = await this.getNode(id);
         if (!node) throw new Error(`Node ${id} not found`);
         
-        Object.assign(node, updates);
+        // Remove edges from updates
+        const { edges: _, ...updatesWithoutEdges } = updates;
+        Object.assign(node, updatesWithoutEdges);
         
         this.nodes.set(id, node);
     }
 
     async deleteNode(id: string): Promise<void> {
-        // Remove from main storage
+        // Remove the node
         this.nodes.delete(id);
+        
+        // Remove any edges connected to this node
+        for (const [edgeId, edge] of this.edges.entries()) {
+            if (edge.sourceId === id || edge.targetId === id) {
+                this.edges.delete(edgeId);
+            }
+        }
     }
 
     async addEdge(edge: IGraphEdge): Promise<string> {
@@ -87,65 +98,203 @@ export class InMemoryGraphStorage implements IGraphStorage {
             throw new Error(`Target node ${edge.targetId} not found`);
         }
 
-        // Add edge to source node's edges array
-        sourceNode.edges.push(edge);
-        this.nodes.set(sourceNode.id, sourceNode);
-
+        // Store edge in edges map
+        this.edges.set(id, edge);
         return id;
     }
 
     async getEdge(id: string): Promise<IGraphEdge | null> {
-        return null;
+        return this.edges.get(id) || null;
     }
 
     async updateEdge(id: string, updates: Partial<IGraphEdge>): Promise<void> {
-        throw new Error('Method not implemented.');
+        const edge = await this.getEdge(id);
+        if (!edge) throw new Error(`Edge ${id} not found`);
+        
+        Object.assign(edge, updates);
+        this.edges.set(id, edge);
     }
 
     async deleteEdge(id: string): Promise<void> {
-        // No-op
+        this.edges.delete(id);
     }
 
     async getNeighbors(nodeId: string): Promise<IGraphNode[]> {
-        return [];
+        const edges = Array.from(this.edges.values());
+        const neighborIds = new Set<string>();
+        
+        // Find all edges connected to this node
+        edges.forEach(edge => {
+            if (edge.sourceId === nodeId) {
+                neighborIds.add(edge.targetId);
+            }
+            if (edge.targetId === nodeId) {
+                neighborIds.add(edge.sourceId);
+            }
+        });
+
+        // Get all neighbor nodes
+        const neighbors: IGraphNode[] = [];
+        for (const id of neighborIds) {
+            const node = await this.getNode(id);
+            if (node) neighbors.push(node);
+        }
+
+        return neighbors;
     }
 
     async getEdges(nodeIds: string[]): Promise<IGraphEdge[]> {
-        return [];
+        return Array.from(this.edges.values()).filter(edge => 
+            nodeIds.includes(edge.sourceId) || nodeIds.includes(edge.targetId)
+        );
     }
 
-    async findPath(sourceId: string, targetId: string): Promise<IGraphEdge[]> {
-        // Simple BFS to find shortest path
+    async query(filter: GraphFilter = {}): Promise<{ nodes: IGraphNode[]; edges: IGraphEdge[] }> {
+        const nodes = Array.from(this.nodes.values());
+        const edges = Array.from(this.edges.values());
+        
+        return {
+            nodes: nodes.filter(node => this.matchesFilter(node, filter)),
+            edges: edges.filter(edge => this.matchesEdgeFilter(edge, filter))
+        };
+    }
+
+    async traverse(startNodeId: string, options: TraversalOptions): Promise<{nodes: IGraphNode[], edges: IGraphEdge[]}> {
         const visited = new Set<string>();
-        const queue: Array<{ id: string; path: IGraphEdge[] }> = [{ id: sourceId, path: [] }];
+        const nodes: IGraphNode[] = [];
+        const edges: Set<IGraphEdge> = new Set(); // Use Set to prevent duplicate edges
+        const queue: {nodeId: string; depth: number}[] = [{nodeId: startNodeId, depth: 0}];
         
         while (queue.length > 0) {
-            const { id, path } = queue.shift()!;
-            if (id === targetId) return path;
+            const {nodeId, depth} = queue.shift()!;
             
-            if (visited.has(id)) continue;
-            visited.add(id);
+            if (visited.has(nodeId) || (options.maxDepth !== undefined && depth > options.maxDepth)) {
+                continue;
+            }
             
-            // No neighbors to visit
-            continue;
+            visited.add(nodeId);
+            const node = await this.getNode(nodeId);
+            if (node) nodes.push(node);
+            
+            // Get all edges connected to this node
+            const connectedEdges = await this.getEdges([nodeId]);
+            connectedEdges.forEach(edge => {
+                edges.add(edge);
+                if (edge.sourceId === nodeId) {
+                    queue.push({ nodeId: edge.targetId, depth: depth + 1 });
+                } else {
+                    queue.push({ nodeId: edge.sourceId, depth: depth + 1 });
+                }
+            });
         }
         
+        return { nodes, edges: Array.from(edges) };
+    }
+
+    async invalidateEdge(edgeId: string, at: Date): Promise<void> {
+        // No-op
+    }
+
+    async clear(): Promise<void> {
+        this.nodes.clear();
+        this.edges.clear();
+    }
+
+    async findNodes(filter: GraphFilter): Promise<IGraphNode[]> {
+        const nodes = Array.from(this.nodes.values());
+        return nodes.filter(node => this.matchesFilter(node, filter));
+    }
+
+    async findEdges(filter: GraphFilter): Promise<IGraphEdge[]> {
+        const edges = Array.from(this.edges.values());
+        return edges.filter(edge => this.matchesEdgeFilter(edge, filter));
+    }
+
+    async findPaths(options: {
+        startId: string;
+        endId: string;
+        maxLength?: number;
+        edgeTypes?: string[];
+        limit?: number;
+    }): Promise<Array<{
+        nodes: IGraphNode[];
+        edges: IGraphEdge[];
+        length: number;
+    }>> {
         return [];
     }
 
-    async search(embedding: number[], limit: number = 10): Promise<IGraphNode[]> {
-        // TODO: Implement vector similarity search if needed
-        // For now, just return an empty array since we removed the embedding search dependency
-        return [];
-    }
-
-    async findValidAt(date: Date): Promise<{nodes: IGraphNode[], edges: IGraphEdge[]}> {
-        const nodes = Array.from(this.nodes.values()).filter(node => 
-            node.createdAt <= date && (!node.expiredAt || node.expiredAt > date) &&
-            (!node.validAt || node.validAt <= date)
-        );
+    async getEpisodeTimeline(startTime: Date, endTime: Date): Promise<IGraphNode<EpisodeContent>[]> {
+        const nodes = Array.from(this.nodes.values())
+            .filter(node => 
+                isEpisodeNode(node) &&
+                node.validAt &&
+                node.validAt >= startTime &&
+                node.validAt <= endTime &&
+                (!node.expiredAt || node.expiredAt > new Date())  // Exclude expired nodes
+            ) as IGraphNode<EpisodeContent>[];
         
-        return { nodes, edges: [] };
+        return nodes.sort((a, b) => a.validAt!.getTime() - b.validAt!.getTime());
+    }
+
+    async getSnapshot(date: Date = new Date()): Promise<{
+        nodeCount: number;
+        nodeTypes: Set<string>;
+        nodes: Array<{
+            id: string;
+            type: string;
+            mention: string;
+        }>;
+    }> {
+        const nodes = Array.from(this.nodes.values())
+            .filter(node => node.type !== 'episode')
+            .filter(node => 
+                node.createdAt <= date && 
+                (!node.expiredAt || node.expiredAt > date) &&
+                (!node.validAt || node.validAt <= date)
+            );
+
+        const nodeTypes = new Set(nodes.map(node => node.type));
+        
+        return {
+            nodeCount: nodes.length,
+            nodeTypes,
+            nodes: nodes.map(node => ({
+                id: node.id,
+                type: node.type,
+                mention: node.content.mention
+            }))
+        };
+    }
+
+    async findConnectedNodes(options: {
+        startId: string;
+        edgeTypes?: string[];
+        nodeTypes?: string[];
+        direction?: 'incoming' | 'outgoing' | 'both';
+        limit?: number;
+    }): Promise<IGraphNode[]> {
+        return [];
+    }
+
+    private matchesFilter(node: IGraphNode, filter: GraphFilter): boolean {
+        if (filter.nodeTypes && !filter.nodeTypes.includes(node.type)) {
+            return false;
+        }
+        if (filter.temporal) {
+            return this.applyTemporalFilter(node, filter.temporal);
+        }
+        return true;
+    }
+
+    private matchesEdgeFilter(edge: IGraphEdge, filter: GraphFilter): boolean {
+        if (filter.edgeTypes && !filter.edgeTypes.includes(edge.type)) {
+            return false;
+        }
+        if (filter.temporal) {
+            return this.applyTemporalFilter(edge, filter.temporal);
+        }
+        return true;
     }
 
     private applyTemporalFilter(item: IGraphUnit, temporal?: GraphFilter['temporal']): boolean {
@@ -239,173 +388,6 @@ export class InMemoryGraphStorage implements IGraphStorage {
         }
 
         return true;  // Include if all filters pass
-    }
-
-    async query(filter: GraphFilter & { sessionId?: string } = {}): Promise<{
-        nodes: IGraphNode[];
-        edges: IGraphEdge[];
-        episodes?: IGraphNode<EpisodeContent>[];
-    }> {
-        console.log('Query filter:', filter);
-        // Filter out episode nodes - only store entity nodes in graph storage
-        let nodes = Array.from(this.nodes.values()).filter(node => node.type !== 'episode');
-        console.log('Initial nodes count:', nodes.length);
-
-        // Apply type filter
-        if (filter.nodeTypes?.length) {
-            nodes = nodes.filter(node => filter.nodeTypes!.includes(node.type));
-            console.log('After type filter:', nodes.length);
-        }
-
-        // Apply temporal filter
-        if (filter.temporal) {
-            nodes = nodes.filter(node => this.applyTemporalFilter(node, filter.temporal));
-            console.log('After temporal filter:', nodes.length);
-        }
-
-        // Apply metadata filter
-        if (filter.metadata) {
-            nodes = nodes.filter(node => this.matchesMetadata(node.metadata, filter.metadata));
-            console.log('After metadata filter:', nodes.length);
-        }
-
-        // Get edges for these nodes
-        const edges = await this.getEdges(nodes.map(n => n.id));
-
-        // Log the nodes for debugging
-        console.log('nodes in graph:', nodes.map(n => toJSON(n)));
-
-        return { nodes, edges };
-    }
-
-    async traverse(startNodeId: string, options: TraversalOptions): Promise<{nodes: IGraphNode[], edges: IGraphEdge[]}> {
-        const visited = new Set<string>();
-        const nodes: IGraphNode[] = [];
-        const edges: Set<IGraphEdge> = new Set(); // Use Set to prevent duplicate edges
-        const queue: {nodeId: string; depth: number}[] = [{nodeId: startNodeId, depth: 0}];
-        
-        while (queue.length > 0) {
-            const {nodeId, depth} = queue.shift()!;
-            
-            if (visited.has(nodeId) || (options.maxDepth !== undefined && depth > options.maxDepth)) {
-                continue;
-            }
-            
-            visited.add(nodeId);
-            const node = await this.getNode(nodeId);
-            if (node) nodes.push(node);
-            
-            // No neighbors to visit
-            continue;
-        }
-        
-        return { nodes, edges: Array.from(edges) };
-    }
-
-    async invalidateEdge(edgeId: string, at: Date): Promise<void> {
-        // No-op
-    }
-
-    async clear(): Promise<void> {
-        this.nodes.clear();
-    }
-
-    async findNodes(filter: GraphFilter): Promise<IGraphNode[]> {
-        const nodes = Array.from(this.nodes.values());
-        return nodes.filter(node => {
-            if (filter.nodeTypes && !filter.nodeTypes.includes(node.type)) {
-                return false;
-            }
-            if (filter.temporal) {
-                return this.applyTemporalFilter(node, filter.temporal);
-            }
-            return true;
-        });
-    }
-
-    async findEdges(filter: GraphFilter): Promise<IGraphEdge[]> {
-        return [];
-    }
-
-    async findPaths(options: {
-        startId: string;
-        endId: string;
-        maxLength?: number;
-        edgeTypes?: string[];
-        limit?: number;
-    }): Promise<Array<{
-        nodes: IGraphNode[];
-        edges: IGraphEdge[];
-        length: number;
-    }>> {
-        return [];
-    }
-
-    async getEpisodeTimeline(startTime: Date, endTime: Date): Promise<IGraphNode<EpisodeContent>[]> {
-        const nodes = Array.from(this.nodes.values())
-            .filter(node => 
-                isEpisodeNode(node) &&
-                node.validAt &&
-                node.validAt >= startTime &&
-                node.validAt <= endTime &&
-                (!node.expiredAt || node.expiredAt > new Date())  // Exclude expired nodes
-            ) as IGraphNode<EpisodeContent>[];
-        
-        return nodes.sort((a, b) => a.validAt!.getTime() - b.validAt!.getTime());
-    }
-
-    async getSnapshot(date: Date = new Date()): Promise<{
-        nodeCount: number;
-        nodeTypes: Set<string>;
-        nodes: Array<{
-            id: string;
-            type: string;
-            mention: string;
-        }>;
-    }> {
-        const nodes = Array.from(this.nodes.values())
-            .filter(node => node.type !== 'episode')
-            .filter(node => 
-                node.createdAt <= date && 
-                (!node.expiredAt || node.expiredAt > date) &&
-                (!node.validAt || node.validAt <= date)
-            );
-
-        const nodeTypes = new Set(nodes.map(node => node.type));
-        
-        return {
-            nodeCount: nodes.length,
-            nodeTypes,
-            nodes: nodes.map(node => ({
-                id: node.id,
-                type: node.type,
-                mention: node.content.mention
-            }))
-        };
-    }
-
-    async findConnectedNodes(options: {
-        startId: string;
-        edgeTypes?: string[];
-        nodeTypes?: string[];
-        direction?: 'incoming' | 'outgoing' | 'both';
-        limit?: number;
-    }): Promise<IGraphNode[]> {
-        return [];
-    }
-
-    /**
-     * Check if metadata matches the filter criteria
-     */
-    private matchesMetadata(metadata: Map<string, any>, filter: Record<string, any> | undefined): boolean {
-        if (!filter) return true;
-        for (const [key, value] of Object.entries(filter)) {
-            const metaValue = metadata.get(key);
-            if (metaValue !== value) {
-                return false;
-            }
-        }
-        return true;
     }
 
     private deepCloneWithMaps<T>(obj: T): T {

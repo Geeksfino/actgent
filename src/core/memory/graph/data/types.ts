@@ -46,7 +46,7 @@ export interface INodeRelationships {
 export interface IGraphNode<T = any> extends IGraphUnit {
     content: T;
     embedding?: Float32Array | number[];  // Support both Float32Array and number[] for embeddings
-    edges: IGraphEdge[];
+    edges?: IGraphEdge[];  // Make edges optional since they are stored separately
     relationships?: INodeRelationships;  // Optional relationships field
 }
 
@@ -232,38 +232,30 @@ export type GraphNodeTypeValues =
  * Edge types in the graph, defining allowed relationships
  */
 export const GraphEdgeType = {
-    // Episodic relationships
-    MENTIONED_IN: 'mentioned_in',    // Entity mention appears in episode
-    REFERS_TO: 'refers_to',          // One mention refers to another
-    
-    // Temporal relationships
-    PRECEDES: 'precedes',           // A happens before B
-    CONTAINS: 'contains',           // A includes B in time
-    
-    // Semantic relationships
-    IS_A: 'is_a',                   // Type hierarchy
-    PART_OF: 'part_of',            // Composition
-    RELATED_TO: 'related_to',      // Generic semantic relation
-    SIMILAR_TO: 'similar_to',      // Semantic similarity
-    
-    // Causal relationships
-    CAUSES: 'causes',               // A leads to B
-    INFLUENCES: 'influences',       // A affects B
-    
-    // Social relationships
-    KNOWS: 'knows',                 // Social connection
-    MEMBER_OF: 'member_of',        // Group membership
-    
-    // Spatial relationships
-    LOCATED_IN: 'located_in',      // Physical/virtual location
-    NEAR: 'near',                  // Spatial proximity
-    
-    // Procedural relationships
-    REQUIRES: 'requires',           // Dependency
-    USES: 'uses',                  // Utilization
-    
-    // Reference relationships
-    DESCRIBES: 'describes'         // Description/elaboration
+    // Entity relationships
+    SAME_AS: 'SAME_AS',
+    ALIAS_OF: 'ALIAS_OF',
+    REFERS_TO: 'REFERS_TO',
+    CONTAINS: 'CONTAINS',
+    PART_OF: 'PART_OF',
+    RELATED_TO: 'RELATED_TO',
+    TEMPORAL: 'TEMPORAL',
+    LOCATION: 'LOCATION',
+    ATTRIBUTE: 'ATTRIBUTE',
+    INSTANCE_OF: 'INSTANCE_OF',
+    SUBCLASS_OF: 'SUBCLASS_OF',
+    PROPERTY_OF: 'PROPERTY_OF',
+    ACTION_ON: 'ACTION_ON',
+    ACTION_BY: 'ACTION_BY',
+    AFFECTS: 'AFFECTS',
+    CAUSES: 'CAUSES',
+    PRECEDES: 'PRECEDES',
+    FOLLOWS: 'FOLLOWS',
+    APPEARS_IN: 'APPEARS_IN',
+    MENTIONS: 'MENTIONS',
+    NEXT_EPISODE: 'NEXT_EPISODE',
+    PREV_EPISODE: 'PREV_EPISODE',
+    MENTIONED_IN: 'MENTIONED_IN'
 } as const;
 
 export type GraphEdgeTypeValues = typeof GraphEdgeType[keyof typeof GraphEdgeType];

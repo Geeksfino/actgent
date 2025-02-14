@@ -209,9 +209,10 @@ export class GraphManager {
     }
 
     /**
-     * Process the semantic layer of the graph, handling entity resolution and fact extraction
-     * @param messages Array of messages to process
-     * @param extractedMentions Array of extracted mention nodes
+     * Process the semantic layer of the graph (Layer 2)
+     * Adds canonical entities and relationships while preserving all episodic nodes from Layer 1
+     * @param messages Array of messages that were processed
+     * @param extractedMentions Array of nodes representing extracted mentions from Layer 1
      * @private
      */
     private async processSemanticGraph(
@@ -222,19 +223,158 @@ export class GraphManager {
             timestamp: Date,
             sessionId: string
         }>,
-        extractedMentions: Array<IGraphNode>
+        extractedMentions: IGraphNode[]
     ): Promise<void> {
-        // Step 1: Entity Resolution
-        const deduplicationResult = await this.semanticProcessor.deduplicateEntities(extractedMentions);
-        const resolvedEntities = deduplicationResult.entities;
-
-        // Create semantic entities
-        for (const entity of resolvedEntities) {
-            await this.processSemanticEntity(entity, messages[0].timestamp);
+        // Step 1: Entity Resolution - Get canonical entities and mappings
+        const { entities: uniqueEntities, mappings } = await this.semanticProcessor.deduplicateEntities(extractedMentions);
+        
+        // Step 2: Create canonical entities while preserving all mention nodes
+        const entityIdMap = new Map<string, string>(); // Maps source ID to canonical ID
+        
+        for (const entity of uniqueEntities) {
+            // Generate deterministic ID for the canonical entity
+            const canonicalId = this.semanticProcessor.generateEntityId(entity.name, entity.type);
+            
+            // Find all mentions that map to this canonical entity
+            const relatedMentions = mappings
+                .find(m => m.target_id === entity.id)
+                ?.source_ids
+                .map((id: string) => extractedMentions.find(m => m.id === id))
+                .filter((m: IGraphNode | undefined): m is IGraphNode => m !== undefined) ?? [];
+            
+            // Collect all known names and their contexts
+            const aliases = {
+                primary_name: entity.name,
+                birth_name: null as string | null,
+                other_names: [] as Array<{name: string, context: string}>
+            };
+            
+            // Extract name variants from mentions
+            for (const mention of relatedMentions) {
+                const name = mention.content.mention;
+                if (name !== entity.name) {
+                    aliases.other_names.push({
+                        name,
+                        context: `Mentioned in ${mention.metadata.get('episodeId')}`
+                    });
+                }
+            }
+            
+            // Create or update the canonical entity node
+            const canonicalNode: IGraphNode = {
+                id: canonicalId,
+                type: entity.type,
+                content: {
+                    name: entity.name,
+                    summary: entity.summary,
+                    aliases
+                },
+                metadata: new Map([
+                    ['isCanonical', 'true'],
+                    ['layer', '2'],
+                    ['lastUpdated', new Date().toISOString()]
+                ]),
+                createdAt: new Date(),
+                validAt: new Date(),
+                relationships: {},
+                edges: []
+            };
+            
+            // Add or update the canonical node
+            await this.storage.addNode(canonicalNode);
+            
+            // Store mapping from source to canonical ID
+            entityIdMap.set(entity.id, canonicalId);
         }
-
-        // Step 2: Fact Extraction and Processing
-        await this.processSemanticFacts(messages, resolvedEntities);
+        
+        // Step 3: Create SAME_AS relationships between mentions and canonical entities
+        for (const mapping of mappings) {
+            const canonicalId = entityIdMap.get(mapping.target_id);
+            if (!canonicalId) continue;
+            
+            for (const sourceId of mapping.source_ids) {
+                const mention = extractedMentions.find(m => m.id === sourceId);
+                if (!mention) continue;
+                
+                // Create SAME_AS edge from mention to canonical
+                const edgeData = {
+                    type: 'SAME_AS',
+                    sourceId: sourceId,
+                    targetId: canonicalId,
+                    content: {
+                        confidence: 1.0,
+                        description: `Entity mention resolved to canonical entity`,
+                        temporal_context: mention.metadata.get('timestamp')
+                    },
+                    metadata: new Map([
+                        ['layer', '2'],
+                        ['timestamp', new Date().toISOString()]
+                    ]),
+                    createdAt: new Date(),
+                    validAt: mention.validAt // Use mention's temporal context
+                };
+                
+                // Generate deterministic ID based on edge data
+                const edgeId = this.idGenerator.generateEdgeId(edgeData);
+                
+                const edge: IGraphEdge = {
+                    ...edgeData,
+                    id: edgeId
+                };
+                
+                // Add or update the edge
+                await this.storage.addEdge(edge);
+            }
+        }
+        
+        // Step 4: Transfer relationships from mentions to canonical entities
+        for (const mention of extractedMentions) {
+            const canonicalId = entityIdMap.get(
+                mappings.find(m => m.source_ids.includes(mention.id))?.target_id ?? ''
+            );
+            if (!canonicalId) continue;
+            
+            // Get the canonical node
+            const canonicalNode = await this.storage.getNode(canonicalId);
+            if (!canonicalNode) continue;
+            
+            // Initialize relationships if undefined
+            if (!canonicalNode.relationships) {
+                canonicalNode.relationships = {};
+            }
+            
+            // Transfer each relationship
+            if (mention.relationships) {
+                for (const [relType, relations] of Object.entries(mention.relationships)) {
+                    if (!Array.isArray(relations)) continue;
+                    
+                    // Initialize relationship array if it doesn't exist
+                    if (!canonicalNode.relationships[relType]) {
+                        canonicalNode.relationships[relType] = [];
+                    }
+                    
+                    for (const rel of relations) {
+                        // Find the canonical ID for the target if it exists
+                        const targetCanonicalId = entityIdMap.get(
+                            mappings.find(m => m.source_ids.includes(rel.target))?.target_id ?? ''
+                        ) ?? rel.target;
+                        
+                        // Add relationship to canonical node
+                        canonicalNode.relationships[relType].push({
+                            ...rel,
+                            target: targetCanonicalId,
+                            metadata: {
+                                ...rel.metadata,
+                                source_mention: mention.id
+                            }
+                        });
+                    }
+                }
+            }
+            
+            // Update the canonical node with new relationships
+            await this.storage.updateNode(canonicalId, canonicalNode);
+        }
     }
 
     /**
@@ -359,113 +499,6 @@ export class GraphManager {
     }
 
     /**
-     * Internal method to process messages in the graph memory system (Layer 1)
-     * @param messages Array of messages to process
-     * @returns Array of extracted mention nodes
-     * @private
-     */
-    private async processEpisodicGraph(messages: Array<{
-        id: string,
-        body: string,
-        role: string,
-        timestamp: Date,
-        sessionId: string
-    }>): Promise<IGraphNode[]> {
-        // Layer 1: Episodic Layer - Raw data capture
-        // Create episode nodes and extract temporal information
-        await this.createEpisodeNodes(messages);
-        const { currentMessages, prevMessages } = await this.prepareMessageContext(messages);
-
-        // Extract mentions and their temporal relationships
-        const extractionResult = await this.llm.process<EntityExtractionResult>(GraphTask.EXTRACT_ENTITIES, {
-            text: currentMessages,
-            context: prevMessages,
-            episodeId: messages[0].sessionId
-        });
-        console.log("extractionResult.entities:", JSON.stringify(extractionResult.entities, null, 2));
-
-        // Store raw mentions with temporal metadata
-        const extractedMentions: IGraphNode[] = [];
-        const llmIdToNodeId = new Map<number, string>();
-        const relationshipUpdates = new Map<string, any>();
-
-        // First pass: create all nodes and build ID mapping
-        for (const entity of extractionResult.entities) {
-            const message = messages.find(m => m.sessionId === entity.metadata.sessionId);
-            if (!message) {
-                console.warn(`No message found for session ${entity.metadata.sessionId}`);
-                continue;
-            }
-
-            const node: IGraphNode = {
-                id: '', // Will be set by addNode
-                type: entity.type.toUpperCase(),
-                content: {
-                    mention: entity.mention,
-                    span: entity.span,
-                    confidence: entity.confidence
-                },
-                metadata: new Map([
-                    ['sessionId', entity.metadata.sessionId],
-                    ['timestamp', message.timestamp.toISOString()],
-                    ['episodeId', entity.metadata.sessionId],
-                    ['turnId', entity.metadata.turnId]
-                ]),
-                createdAt: new Date(),
-                validAt: message.timestamp,
-                relationships: {},
-                edges: [] // Required by IGraphNode interface
-            };
-
-            const nodeId = await this.addNode(node);
-            node.id = nodeId; // Set the ID after adding to storage
-            llmIdToNodeId.set(entity.id, nodeId);
-            extractedMentions.push(node);
-
-            if (entity.relationships) {
-                relationshipUpdates.set(nodeId, {
-                    entityId: entity.id,
-                    relationships: entity.relationships
-                });
-            }
-        }
-
-        // Second pass: update all relationships using correct node IDs
-        for (const [sourceNodeId, data] of relationshipUpdates.entries()) {
-            const { entityId, relationships } = data;
-            const sourceNode = await this.getNode(sourceNodeId);
-            if (!sourceNode) {
-                console.warn(`No node found for ID ${sourceNodeId}`);
-                continue;
-            }
-
-            const updatedRelationships: any = {};
-            for (const [relType, relations] of Object.entries(relationships)) {
-                updatedRelationships[relType] = (relations as any[])
-                    .map(rel => {
-                        const targetNodeId = llmIdToNodeId.get(rel.target);
-                        if (!targetNodeId) return null;
-
-                        return {
-                            ...rel,
-                            target: targetNodeId
-                        };
-                    })
-                    .filter(rel => rel !== null);
-            }
-
-            if (Object.keys(updatedRelationships).length > 0) {
-                await this.storage.updateNode(sourceNodeId, {
-                    ...sourceNode,
-                    relationships: updatedRelationships
-                });
-            }
-        }
-
-        return extractedMentions;
-    }
-
-    /**
      * Search for relevant messages/episodes/entities using hybrid search
      * Combines embeddings, LLM, and temporal aspects
      */
@@ -527,17 +560,50 @@ export class GraphManager {
     }
 
     /**
-     * Get a snapshot of the graph with optional filters
-     * @param filter Optional filter to get specific nodes (e.g., by type)
-     * @returns Promise<{ nodes: IGraphNode[], edges: IGraphEdge[] }>
+     * Get a snapshot of the graph with optional filtering
+     * @param filter Optional filter to apply to the snapshot
      */
     async getSnapshot(filter: GraphFilter = {}): Promise<{
-        nodes: IGraphNode[];
-        edges: IGraphEdge[];
-        episodes?: IGraphNode<EpisodeContent>[];
+        nodes: {
+            episodes: IGraphNode[];
+            mentions: IGraphNode[];
+            canonicals: IGraphNode[];
+        };
+        edges: {
+            episode_sequence: IGraphEdge[];
+            mention_to_episode: IGraphEdge[];
+            mention_to_canonical: IGraphEdge[];
+        };
     }> {
         const result = await this.storage.query(filter);
-        return result;
+        
+        // Organize nodes by type
+        const nodes = {
+            episodes: result.nodes.filter(node => node.type === 'episode'),
+            mentions: result.nodes.filter(node => 
+                !node.metadata.get('isCanonical') && node.type !== 'episode'
+            ),
+            canonicals: result.nodes.filter(node => 
+                node.metadata.get('isCanonical') === 'true'
+            )
+        };
+
+        // Organize edges by relationship type
+        const edges = {
+            episode_sequence: result.edges.filter(edge => 
+                edge.type === 'NEXT_EPISODE' || 
+                edge.type === 'PREV_EPISODE'
+            ),
+            mention_to_episode: result.edges.filter(edge => 
+                edge.type === 'MENTIONED_IN'
+            ),
+            mention_to_canonical: result.edges.filter(edge => 
+                edge.type === 'SAME_AS' || 
+                edge.type === 'ALIAS_OF'
+            )
+        };
+
+        return { nodes, edges };
     }
 
     // Private methods for internal use
@@ -571,6 +637,132 @@ export class GraphManager {
         }
     }
 
+    /**
+     * Internal method to process messages in the graph memory system (Layer 1)
+     * @param messages Array of messages to process
+     * @returns Array of extracted mention nodes
+     * @private
+     */
+    private async processEpisodicGraph(messages: Array<{
+        id: string,
+        body: string,
+        role: string,
+        timestamp: Date,
+        sessionId: string
+    }>): Promise<IGraphNode[]> {
+        // Layer 1: Episodic Layer - Raw data capture
+        // Create episode nodes and extract temporal information
+        await this.createEpisodeNodes(messages);
+        const { currentMessages, prevMessages } = await this.prepareMessageContext(messages);
+
+        // Extract mentions and their temporal relationships
+        const extractionResult = await this.llm.process<EntityExtractionResult>(GraphTask.EXTRACT_ENTITIES, {
+            text: currentMessages,
+            context: prevMessages,
+            episodeId: messages[0].sessionId
+        });
+        console.log("extractionResult.entities:", JSON.stringify(extractionResult.entities, null, 2));
+
+        // Store raw mentions with temporal metadata
+        const extractedMentions: IGraphNode[] = [];
+        const llmIdToNodeId = new Map<number, string>();
+        const relationshipUpdates = new Map<string, any>();
+
+        // First pass: create all nodes and build ID mapping
+        for (const entity of extractionResult.entities) {
+            const message = messages.find(m => m.sessionId === entity.metadata.sessionId);
+            if (!message) {
+                console.warn(`No message found for session ${entity.metadata.sessionId}`);
+                continue;
+            }
+
+            const node: IGraphNode = {
+                id: '', // Will be set by addNode
+                type: entity.type.toUpperCase(),
+                content: {
+                    mention: entity.mention,
+                    confidence: entity.confidence
+                },
+                metadata: new Map([
+                    ['sessionId', entity.metadata.sessionId],
+                    ['timestamp', message.timestamp.toISOString()],
+                    ['episodeId', entity.metadata.episodeId],
+                    ['turnId', entity.metadata.turnId]
+                ]),
+                createdAt: new Date(),
+                validAt: message.timestamp,
+                edges: []  // Leave edges empty for now
+            };
+
+            const nodeId = await this.addNode(node);
+            node.id = nodeId; // Set the ID after adding to storage
+            llmIdToNodeId.set(entity.id, nodeId);
+            extractedMentions.push(node);
+
+            // Create MENTIONED_IN edge from mention to its episode
+            const mentionToEpisodeEdge: IGraphEdge = {
+                id: this.idGenerator.generateEdgeId({
+                    type: 'MENTIONED_IN',
+                    sourceId: nodeId,
+                    targetId: entity.metadata.episodeId
+                }),
+                type: 'MENTIONED_IN',
+                sourceId: nodeId,
+                targetId: entity.metadata.episodeId,
+                content: {
+                    confidence: entity.confidence,
+                    description: "Entity mentioned in episode",
+                    temporal_context: message.timestamp.toISOString()
+                },
+                metadata: new Map(),
+                createdAt: new Date(),
+                validAt: message.timestamp
+            };
+            await this.storage.addEdge(mentionToEpisodeEdge);
+
+            if (entity.relationships) {
+                relationshipUpdates.set(nodeId, {
+                    entityId: entity.id,
+                    relationships: entity.relationships
+                });
+            }
+        }
+
+        // Second pass: update all relationships using correct node IDs
+        for (const [sourceNodeId, data] of relationshipUpdates.entries()) {
+            const { entityId, relationships } = data;
+            const sourceNode = await this.getNode(sourceNodeId);
+            if (!sourceNode) {
+                console.warn(`No node found for ID ${sourceNodeId}`);
+                continue;
+            }
+
+            const updatedRelationships: any = {};
+            for (const [relType, relations] of Object.entries(relationships)) {
+                updatedRelationships[relType] = (relations as any[])
+                    .map(rel => {
+                        const targetNodeId = llmIdToNodeId.get(rel.target);
+                        if (!targetNodeId) return null;
+
+                        return {
+                            ...rel,
+                            target: targetNodeId
+                        };
+                    })
+                    .filter(rel => rel !== null);
+            }
+
+            if (Object.keys(updatedRelationships).length > 0) {
+                await this.storage.updateNode(sourceNodeId, {
+                    ...sourceNode,
+                    relationships: updatedRelationships
+                });
+            }
+        }
+
+        return extractedMentions;
+    }
+
     private async createEpisodeNodes(messages: Array<{
         id: string,
         body: string,
@@ -579,44 +771,127 @@ export class GraphManager {
         sessionId: string
     }>): Promise<void> {
         const now = new Date();
-        for (const message of messages) {
-            // Check if an episode-specific node already exists
-            const baseNodeId = `ep_${message.id}`;
-            const episodeNodeId = `${baseNodeId}:${message.sessionId}`;
+        let previousEpisodeId: string | null = null;
+        const BATCH_SIZE = 4; // Each episode contains 4 messages (2 turns)
+
+        // First get all existing episode nodes for this session
+        const existingEpisodes = await this.storage.query({
+            nodeTypes: ['episode'],
+            metadata: {
+                sessionId: messages[0].sessionId
+            }
+        });
+
+        // Sort existing episodes by timestamp
+        const sortedExistingEpisodes = existingEpisodes.nodes
+            .filter(node => node.metadata.get('sessionId') === messages[0].sessionId)
+            .sort((a, b) => {
+                const aTime = new Date(a.metadata.get('timestamp') as string).getTime();
+                const bTime = new Date(b.metadata.get('timestamp') as string).getTime();
+                return aTime - bTime;
+            });
+
+        // Get the ID of the last episode in the sequence
+        previousEpisodeId = sortedExistingEpisodes.length > 0 
+            ? sortedExistingEpisodes[sortedExistingEpisodes.length - 1].id 
+            : null;
+
+        // Sort messages by timestamp to ensure correct sequence
+        const sortedMessages = [...messages].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+
+        // Process messages in batches
+        for (let i = 0; i < sortedMessages.length; i += BATCH_SIZE) {
+            const batch = sortedMessages.slice(i, i + BATCH_SIZE);
+            const batchIndex = Math.floor(i / BATCH_SIZE);
+            
+            // Check if an episode node already exists for this batch
+            const episodeNodeId = `${messages[0].sessionId}::${batchIndex}`;
             const existingNode = await this.storage.getNode(episodeNodeId);
 
             if (existingNode) {
                 console.log(`Episode node already exists: ${episodeNodeId}`);
-                return;
+                continue;
             }
 
-            // Create a new node for this episode
+            // Create a new node for this episode batch
             const node: IGraphNode<EpisodeContent> = {
                 id: episodeNodeId,
                 type: 'episode',
                 content: {
                     type: 'message',
-                    actor: message.role,
-                    content: message.body,
+                    content: batch.map(msg => ({
+                        id: `${msg.sessionId}::turn_${msg.id.split('_').pop()}::${i + batch.indexOf(msg)}`,
+                        role: msg.role,
+                        body: msg.body,
+                        timestamp: msg.timestamp.toISOString(),
+                        turnId: `turn_${msg.id.split('_').pop()}`
+                    })).map(msg => JSON.stringify(msg)).join('\n'),
                     metadata: {
-                        session_id: message.sessionId,
-                        turn_id: message.id,
-                        timestamp: message.timestamp,
-                        source: message.role
+                        session_id: messages[0].sessionId,
+                        turn_id: batch.map(msg => msg.id).join(','),
+                        batch_index: batchIndex.toString(),
+                        timestamp: batch[0].timestamp.toISOString()
                     }
                 },
                 metadata: new Map([
-                    ['role', message.role],
-                    ['turnId', message.id],
-                    ['sessionId', message.sessionId],
-                    ['timestamp', message.timestamp.toISOString()]
+                    ['sessionId', messages[0].sessionId],
+                    ['batchIndex', batchIndex.toString()],
+                    ['timestamp', batch[0].timestamp.toISOString()],
+                    ['messageIds', batch.map((msg, idx) => `${msg.sessionId}::turn_${msg.id.split('_').pop()}::${i + idx}`).join(',')]
                 ]),
                 createdAt: now,
-                validAt: message.timestamp,
-                edges: [] // Initialize edges property
+                validAt: batch[0].timestamp,
+                edges: []
             };
+
             this.log('Episode Node:', node);
             await this.addNode(node);
+
+            // Create sequence edges if there is a previous episode
+            if (previousEpisodeId) {
+                // Create NEXT_EPISODE edge from previous to current
+                const nextEdge: IGraphEdge = {
+                    id: this.idGenerator.generateEdgeId({
+                        type: 'NEXT_EPISODE',
+                        sourceId: previousEpisodeId,
+                        targetId: episodeNodeId
+                    }),
+                    type: 'NEXT_EPISODE',
+                    sourceId: previousEpisodeId,
+                    targetId: episodeNodeId,
+                    content: {
+                        type: 'NEXT_EPISODE',
+                        description: 'Next episode in sequence'
+                    },
+                    metadata: new Map(),
+                    createdAt: now,
+                    validAt: batch[0].timestamp
+                };
+                await this.storage.addEdge(nextEdge);
+
+                // Create PREV_EPISODE edge from current to previous
+                const prevEdge: IGraphEdge = {
+                    id: this.idGenerator.generateEdgeId({
+                        type: 'PREV_EPISODE',
+                        sourceId: episodeNodeId,
+                        targetId: previousEpisodeId
+                    }),
+                    type: 'PREV_EPISODE',
+                    sourceId: episodeNodeId,
+                    targetId: previousEpisodeId,
+                    content: {
+                        type: 'PREV_EPISODE',
+                        description: 'Previous episode in sequence'
+                    },
+                    metadata: new Map(),
+                    createdAt: now,
+                    validAt: batch[0].timestamp
+                };
+                await this.storage.addEdge(prevEdge);
+            }
+
+            // Update previousEpisodeId for next iteration
+            previousEpisodeId = episodeNodeId;
         }
     }
 

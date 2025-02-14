@@ -267,7 +267,7 @@ Guidelines:
    - Use the most complete and descriptive mention from the text (e.g., "Eric Arthur Blair" instead of just "Eric")
    - Assign a high confidence (0.9-1.0) for clear, unambiguous mentions
    - Assign a lower confidence (0.7-0.8) for inferred or ambiguous mentions
-   - Include the span (start and end position) in the text where the entity is mentioned
+
 
 3. Entity Guidelines:
    - DO extract entities mentioned in the current message
@@ -305,10 +305,6 @@ Return the extracted information in this format:
       "mention": "Entity's full mention text",
       "type": "ENTITY_TYPE",
       "confidence": 0.9,
-      "span": {
-        "start": 0,
-        "end": 10
-      },
       "relationships": {
         "relationship_type": [{
           "target": 2,
@@ -628,49 +624,15 @@ Return in this format:
 
     async extractTemporal(data: any): Promise<{ relationships: any[] }> {
         const result = await this.processWithLLM(GraphTask.EXTRACT_TEMPORAL, data);
-        
-        // Process relationships
-        if (result.relationships) {
-            result.relationships = result.relationships.map((rel: any) => ({
-                ...rel,
-                confidence: parseFloat(rel.confidence) || 0.5  // Ensure numeric confidence
-            }));
-        }
-
         return { relationships: result.relationships };
     }
 
-    /**
-     * Find all occurrences of a mention in text and return their spans
-     * @param text The text to search in
-     * @param mention The mention to find
-     * @returns Array of spans {start: number, end: number}
-     */
-    private findMentionSpans(text: string, mention: string): Array<{start: number, end: number}> {
-        const spans: Array<{start: number, end: number}> = [];
-        let pos = 0;
-        
-        while ((pos = text.indexOf(mention, pos)) !== -1) {
-            spans.push({
-                start: pos,
-                end: pos + mention.length
-            });
-            pos += mention.length;
-        }
-        
-        return spans;
-    }
-
-    /**
-     * Process entity extraction results and add span information
-     */
-    private async processEntityExtractionResults(text: string, result: any, episodeId: string): Promise<any> {
+    private async processEntityExtractionResults(text: string, result: any, sessionId: string): Promise<any> {
         interface ProcessedEntity {
             id: number;
             mention: string;
             type: string;
             confidence: number;
-            span: { start: number; end: number };
             metadata: {
                 episodeId: string;
                 sessionId: string;
@@ -679,50 +641,46 @@ Return in this format:
         }
         
         const processedEntities: ProcessedEntity[] = [];
-        const mentionedEntitiesByTurn = new Map<string, Set<string>>(); // Track mentioned entities per turn
+        const mentionedEntitiesByTurn = new Map<string, Set<string>>();
         
         // Split text into turns
         const turns = text.split(/\[Turn \d+\]\n/);
         turns.shift(); // Remove the empty string before the first turn marker
         
+        const BATCH_SIZE = 4; // Each episode contains 4 messages (2 turns)
+        
         for (const entity of result.entities) {
-            // For each entity, find spans in each turn separately
+            // For each entity, process it once per turn it appears in
             turns.forEach((turnText, turnIndex) => {
-                const turnSpans = this.findMentionSpans(turnText, entity.mention);
-                if (turnSpans.length > 0) { // If the entity is mentioned in this turn
-                    const turnId = `turn_${turnIndex}`; // Simple turn ID format
+                // Calculate episode batch index
+                const episodeBatchIndex = Math.floor(turnIndex / 2); // 2 turns per episode
+                
+                // Generate IDs using new :: separator format
+                const turnId = `${sessionId}::turn_${turnIndex}::${turnIndex * 2}`; // Simple turn ID format
+                const episodeId = `${sessionId}::${episodeBatchIndex}`;
+                
+                // Initialize the Set for this turn if it doesn't exist
+                if (!mentionedEntitiesByTurn.has(turnId)) {
+                    mentionedEntitiesByTurn.set(turnId, new Set<string>());
+                }
+                
+                // Create a unique key for the entity based on its mention and type
+                const entityKey = `${entity.mention}-${entity.type}`;
+                
+                // Check if the entity has already been mentioned in this turn
+                const turnEntities = mentionedEntitiesByTurn.get(turnId)!;
+                if (!turnEntities.has(entityKey)) {
+                    processedEntities.push({
+                        ...entity,
+                        metadata: {
+                            episodeId,
+                            sessionId,
+                            turnId
+                        }
+                    });
                     
-                    // Initialize the Set for this turn if it doesn't exist
-                    if (!mentionedEntitiesByTurn.has(turnId)) {
-                        mentionedEntitiesByTurn.set(turnId, new Set<string>());
-                    }
-                    
-                    // Create a unique key for the entity based on its mention and type
-                    const entityKey = `${entity.mention}-${entity.type}`;
-                    
-                    // Check if the entity has already been mentioned in this turn
-                    const turnEntities = mentionedEntitiesByTurn.get(turnId)!;
-                    if (!turnEntities.has(entityKey)) {
-                        // Adjust span positions to account for the full text
-                        const turnStart = text.indexOf(turnText);
-                        const adjustedSpan = {
-                            start: turnStart + turnSpans[0].start,
-                            end: turnStart + turnSpans[0].end
-                        };
-                        
-                        processedEntities.push({
-                            ...entity,
-                            span: adjustedSpan,
-                            metadata: {
-                                episodeId,
-                                sessionId: episodeId, // Add sessionId since it's the same as episodeId
-                                turnId
-                            }
-                        });
-                        
-                        // Mark this entity as mentioned in this turn
-                        turnEntities.add(entityKey);
-                    }
+                    // Mark this entity as mentioned in this turn
+                    turnEntities.add(entityKey);
                 }
             });
         }

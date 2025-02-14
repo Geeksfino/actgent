@@ -380,3 +380,5 @@ Let's illustrate how `validAt` timestamps work with a concrete example:
    - This is always the current system time when ingestion occurs
 
 This example illustrates how the episodic graph captures the temporal flow of the conversation itself, rather than the historical timeline of events being discussed. Historical dates and durations are handled by the semantic layer, not the episodic layer.
+
+

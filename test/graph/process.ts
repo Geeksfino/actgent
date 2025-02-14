@@ -191,15 +191,25 @@ async function main() {
 
     // Write graph state to file
     const output = {
-        nodes: snapshot.nodes.map(node => {
-            const { edges, ...nodeWithoutEdges } = {
+        nodes: {
+            episodes: snapshot.nodes.episodes.map(node => ({
                 ...node,
                 metadata: Object.fromEntries(node.metadata || new Map())
-            };
-            return nodeWithoutEdges;
-        }),
-        edges: snapshot.edges,
-        episodes: snapshot.episodes || []
+            })),
+            mentions: snapshot.nodes.mentions.map(node => ({
+                ...node,
+                metadata: Object.fromEntries(node.metadata || new Map())
+            })),
+            canonicals: snapshot.nodes.canonicals.map(node => ({
+                ...node,
+                metadata: Object.fromEntries(node.metadata || new Map())
+            }))
+        },
+        edges: {
+            episode_sequence: snapshot.edges.episode_sequence,
+            mention_to_episode: snapshot.edges.mention_to_episode,
+            mention_to_canonical: snapshot.edges.mention_to_canonical
+        }
     };
 
     // Write to output file
