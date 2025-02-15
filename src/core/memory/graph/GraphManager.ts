@@ -4,7 +4,6 @@ import {
     IGraphEdge,
     GraphFilter,
     IGraphStorage,
-    EpisodeContent
 } from './data/types';
 import { InMemoryGraphStorage } from './data/InMemoryGraphStorage';
 import { EpisodicGraphProcessor } from './processing/episodic/processor';
@@ -22,7 +21,8 @@ import {
     GraphConfig,
     GraphTask,
     Episode,
-    MessageEpisode
+    MessageEpisode,
+    EpisodeContent
 } from './types';
 
 /**
@@ -296,14 +296,18 @@ export class GraphManager {
                 const mention = extractedMentions.find(m => m.id === sourceId);
                 if (!mention) continue;
                 
-                // Create SAME_AS edge from mention to canonical
+                // Get the canonical entity to include its name in the description
+                const canonical = await this.storage.getNode(canonicalId);
+                if (!canonical) continue;
+
+                // Create SAME_AS edge from mention to canonical with detailed description
                 const edgeData = {
                     type: 'SAME_AS',
                     sourceId: sourceId,
                     targetId: canonicalId,
                     content: {
-                        confidence: 1.0,
-                        description: `Entity mention resolved to canonical entity`,
+                        confidence: mention.content.confidence || 1.0,
+                        description: `${mention.type} mention "${mention.content.mention}" resolved to canonical entity "${canonical.content.name}"`,
                         temporal_context: mention.metadata.get('timestamp')
                     },
                     metadata: new Map([
@@ -423,7 +427,8 @@ export class GraphManager {
                 targetId: entityId,
                 content: {
                     type: 'REFERS_TO',
-                    description: `Mention reference to entity ${entity.name}`
+                    description: `Mention reference to entity ${entity.name}`,
+                    temporal_context: timestamp.toISOString()
                 },
                 metadata: new Map(),
                 createdAt: new Date(),
@@ -606,6 +611,16 @@ export class GraphManager {
         return { nodes, edges };
     }
 
+    // Add public method to get stats
+    public getProcessingStats() {
+        const semanticStats = this.semanticProcessor.getStats();
+        const episodicStats = this.llm.getStats();
+        
+        return {
+            llmCalls: [...episodicStats.llmCalls, ...semanticStats.llmCalls]
+        };
+    }
+
     // Private methods for internal use
     private async addNode<T>(node: IGraphNode<T>): Promise<string> {
         return this.graph.addNode(node);
@@ -661,7 +676,7 @@ export class GraphManager {
             context: prevMessages,
             episodeId: messages[0].sessionId
         });
-        console.log("extractionResult.entities:", JSON.stringify(extractionResult.entities, null, 2));
+        //console.log("extractionResult.entities:", JSON.stringify(extractionResult.entities, null, 2));
 
         // Store raw mentions with temporal metadata
         const extractedMentions: IGraphNode[] = [];
@@ -711,7 +726,7 @@ export class GraphManager {
                 targetId: entity.metadata.episodeId,
                 content: {
                     confidence: entity.confidence,
-                    description: "Entity mentioned in episode",
+                    description: `${entity.type} "${entity.mention}" mentioned in turn ${entity.metadata.turnId} of episode ${entity.metadata.episodeId}`,
                     temporal_context: message.timestamp.toISOString()
                 },
                 metadata: new Map(),
@@ -771,7 +786,6 @@ export class GraphManager {
         sessionId: string
     }>): Promise<void> {
         const now = new Date();
-        let previousEpisodeId: string | null = null;
         const BATCH_SIZE = 4; // Each episode contains 4 messages (2 turns)
 
         // First get all existing episode nodes for this session
@@ -782,27 +796,31 @@ export class GraphManager {
             }
         });
 
-        // Sort existing episodes by timestamp
-        const sortedExistingEpisodes = existingEpisodes.nodes
-            .filter(node => node.metadata.get('sessionId') === messages[0].sessionId)
-            .sort((a, b) => {
-                const aTime = new Date(a.metadata.get('timestamp') as string).getTime();
-                const bTime = new Date(b.metadata.get('timestamp') as string).getTime();
-                return aTime - bTime;
-            });
-
-        // Get the ID of the last episode in the sequence
-        previousEpisodeId = sortedExistingEpisodes.length > 0 
-            ? sortedExistingEpisodes[sortedExistingEpisodes.length - 1].id 
-            : null;
-
-        // Sort messages by timestamp to ensure correct sequence
+        // Sort all episodes (existing + new) by timestamp to ensure proper sequencing
         const sortedMessages = [...messages].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+        const newEpisodeTimestamps = new Set(
+            sortedMessages.map(msg => msg.timestamp.getTime())
+        );
+
+        // Create a timeline of all episodes (existing + new) sorted by timestamp
+        const episodeTimeline = [
+            ...existingEpisodes.nodes.map(node => ({
+                id: node.id,
+                timestamp: new Date(node.metadata.get('timestamp') as string).getTime(),
+                isExisting: true
+            })),
+            ...Array.from(newEpisodeTimestamps).map(timestamp => ({
+                id: '', // Will be set when node is created
+                timestamp,
+                isExisting: false
+            }))
+        ].sort((a, b) => a.timestamp - b.timestamp);
 
         // Process messages in batches
         for (let i = 0; i < sortedMessages.length; i += BATCH_SIZE) {
             const batch = sortedMessages.slice(i, i + BATCH_SIZE);
             const batchIndex = Math.floor(i / BATCH_SIZE);
+            const batchTimestamp = batch[0].timestamp.getTime();
             
             // Check if an episode node already exists for this batch
             const episodeNodeId = `${messages[0].sessionId}::${batchIndex}`;
@@ -819,13 +837,14 @@ export class GraphManager {
                 type: 'episode',
                 content: {
                     type: 'message',
-                    content: batch.map(msg => ({
-                        id: `${msg.sessionId}::turn_${msg.id.split('_').pop()}::${i + batch.indexOf(msg)}`,
-                        role: msg.role,
-                        body: msg.body,
-                        timestamp: msg.timestamp.toISOString(),
-                        turnId: `turn_${msg.id.split('_').pop()}`
-                    })).map(msg => JSON.stringify(msg)).join('\n'),
+                    content: {
+                        messages: batch.map(msg => ({
+                            role: msg.role,
+                            body: msg.body,
+                            timestamp: msg.timestamp.toISOString(),
+                            turnId: `turn_${msg.id.split('_').pop()}`
+                        }))
+                    },
                     metadata: {
                         session_id: messages[0].sessionId,
                         turn_id: batch.map(msg => msg.id).join(','),
@@ -847,17 +866,26 @@ export class GraphManager {
             this.log('Episode Node:', node);
             await this.addNode(node);
 
-            // Create sequence edges if there is a previous episode
-            if (previousEpisodeId) {
+            // Find this episode's position in the timeline
+            const timelineIndex = episodeTimeline.findIndex(e => e.timestamp === batchTimestamp);
+            if (timelineIndex === -1) continue;
+
+            // Update timeline with the new node's ID
+            episodeTimeline[timelineIndex].id = episodeNodeId;
+
+            // Create sequence edges with previous episode if it exists
+            if (timelineIndex > 0 && episodeTimeline[timelineIndex - 1].id) {
+                const prevId = episodeTimeline[timelineIndex - 1].id;
+                
                 // Create NEXT_EPISODE edge from previous to current
                 const nextEdge: IGraphEdge = {
                     id: this.idGenerator.generateEdgeId({
                         type: 'NEXT_EPISODE',
-                        sourceId: previousEpisodeId,
+                        sourceId: prevId,
                         targetId: episodeNodeId
                     }),
                     type: 'NEXT_EPISODE',
-                    sourceId: previousEpisodeId,
+                    sourceId: prevId,
                     targetId: episodeNodeId,
                     content: {
                         type: 'NEXT_EPISODE',
@@ -874,11 +902,11 @@ export class GraphManager {
                     id: this.idGenerator.generateEdgeId({
                         type: 'PREV_EPISODE',
                         sourceId: episodeNodeId,
-                        targetId: previousEpisodeId
+                        targetId: prevId
                     }),
                     type: 'PREV_EPISODE',
                     sourceId: episodeNodeId,
-                    targetId: previousEpisodeId,
+                    targetId: prevId,
                     content: {
                         type: 'PREV_EPISODE',
                         description: 'Previous episode in sequence'
@@ -890,8 +918,50 @@ export class GraphManager {
                 await this.storage.addEdge(prevEdge);
             }
 
-            // Update previousEpisodeId for next iteration
-            previousEpisodeId = episodeNodeId;
+            // Create sequence edges with next episode if it exists
+            if (timelineIndex < episodeTimeline.length - 1 && episodeTimeline[timelineIndex + 1].id) {
+                const nextId = episodeTimeline[timelineIndex + 1].id;
+                
+                // Create NEXT_EPISODE edge from current to next
+                const nextEdge: IGraphEdge = {
+                    id: this.idGenerator.generateEdgeId({
+                        type: 'NEXT_EPISODE',
+                        sourceId: episodeNodeId,
+                        targetId: nextId
+                    }),
+                    type: 'NEXT_EPISODE',
+                    sourceId: episodeNodeId,
+                    targetId: nextId,
+                    content: {
+                        type: 'NEXT_EPISODE',
+                        description: 'Next episode in sequence'
+                    },
+                    metadata: new Map(),
+                    createdAt: now,
+                    validAt: batch[0].timestamp
+                };
+                await this.storage.addEdge(nextEdge);
+
+                // Create PREV_EPISODE edge from next to current
+                const prevEdge: IGraphEdge = {
+                    id: this.idGenerator.generateEdgeId({
+                        type: 'PREV_EPISODE',
+                        sourceId: nextId,
+                        targetId: episodeNodeId
+                    }),
+                    type: 'PREV_EPISODE',
+                    sourceId: nextId,
+                    targetId: episodeNodeId,
+                    content: {
+                        type: 'PREV_EPISODE',
+                        description: 'Previous episode in sequence'
+                    },
+                    metadata: new Map(),
+                    createdAt: now,
+                    validAt: batch[0].timestamp
+                };
+                await this.storage.addEdge(prevEdge);
+            }
         }
     }
 
@@ -906,6 +976,34 @@ export class GraphManager {
         prevMessages: string
     }> {
         const currentSessionId = messages[0].sessionId;
+
+        // Create episode nodes from messages
+        const episodeNodes: IGraphNode<EpisodeContent>[] = messages.map(msg => ({
+            id: `episode_${msg.id}`,
+            type: 'episode',
+            content: {
+                type: 'message',
+                content: {
+                    messages: [{
+                        role: msg.role,
+                        body: msg.body,
+                        timestamp: msg.timestamp.toISOString(),
+                        turnId: `turn_${msg.id.split('_').pop()}`
+                    }]
+                },
+                metadata: {
+                    session_id: msg.sessionId,
+                    turn_id: msg.id
+                }
+            },
+            metadata: new Map([
+                ['sessionId', msg.sessionId],
+                ['timestamp', msg.timestamp.toISOString()]
+            ]),
+            createdAt: new Date(),
+            validAt: msg.timestamp,
+            edges: []
+        }));
 
         // Group current messages into turns (user + assistant pairs)
         let currentTurn = -1;

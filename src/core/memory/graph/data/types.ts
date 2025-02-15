@@ -1,4 +1,4 @@
-import { GraphTask } from '../types';
+import { GraphTask, EpisodeContent, EpisodeTypeValues, TextContent, MessageContent, JsonContent } from '../types';
 
 /**
  * Base interface for graph storage and indexing operations
@@ -180,8 +180,6 @@ export const EpisodeType = {
     JSON: 'json'
 } as const;
 
-export type EpisodeTypeValues = typeof EpisodeType[keyof typeof EpisodeType];
-
 /**
  * Node types in the graph, following a cognitive memory model
  */
@@ -271,17 +269,14 @@ export interface EntityContent {
 }
 
 /**
- * Content type for episode nodes
+ * Interface for a memory unit in the graph memory system
  */
-export interface EpisodeContent {
-    type: EpisodeTypeValues;
-    actor?: string;          // For message type
-    content: string;         // Raw content
-    metadata?: {
-        session_id?: string;
-        turn_id?: string;
-        [key: string]: any;
-    };
+export interface IGraphMemoryUnit extends IGraphNode {
+    memoryType: MemoryType;
+    importance: number;
+    lastAccessed?: Date;
+    accessCount: number;
+    episodeIds?: string[];
 }
 
 /**
@@ -292,17 +287,6 @@ export enum MemoryType {
     SEMANTIC = 'semantic',      // Knowledge and facts
     WORKING = 'working',       // Current context
     PROCEDURAL = 'procedural'  // Skills and procedures
-}
-
-/**
- * Interface for a memory unit in the graph memory system
- */
-export interface IGraphMemoryUnit extends IGraphNode {
-    memoryType: MemoryType;
-    importance: number;
-    lastAccessed?: Date;
-    accessCount: number;
-    episodeIds?: string[];
 }
 
 /**

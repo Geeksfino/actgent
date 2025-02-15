@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { GraphTask, LLMConfig } from '../../types';
-import { IGraphNode, IGraphEdge, EpisodeContent } from '../../data/types';
+import { GraphTask, LLMConfig, LLMCallStats, ProcessingStats, EpisodeContent } from '../../types';
+import { IGraphNode, IGraphEdge } from '../../data/types';
 import OpenAI from 'openai';
 import { retry } from "/Users/cliang/repos/clipforge/actgent/src/core/utils/retry";
 
@@ -19,91 +19,131 @@ interface Message {
 export class EpisodicGraphProcessor {
     private llm: OpenAI;
     private config: LLMConfig;
+    private stats: ProcessingStats = {
+        llmCalls: []
+    };
 
     constructor(config: LLMConfig & { client: OpenAI }) {
         this.llm = config.client;
         this.config = config;
     }
 
+    getStats(): ProcessingStats {
+        return this.stats;
+    }
+
+    private async collectStats<T>(
+        task: string,
+        operation: () => Promise<T>,
+        metadata?: { inputEntities?: number, outputEntities?: number }
+    ): Promise<T> {
+        const startTime = Date.now();
+        let duration = 0;
+        const statEntry: LLMCallStats = {
+            task,
+            duration,
+            success: false,
+            metadata
+        };
+        this.stats.llmCalls.push(statEntry);
+        
+        try {
+            const result = await operation();
+            statEntry.success = true;
+            if (result && typeof result === 'object' && 'entities' in result) {
+                statEntry.metadata = {
+                    ...statEntry.metadata,
+                    outputEntities: (result as any).entities?.length
+                };
+            }
+            return result;
+        } finally {
+            duration = Date.now() - startTime;
+            statEntry.duration = duration;
+        }
+    }
+
     /**
      * Process a graph task using LLM
      */
     async process<T>(task: GraphTask, data: any): Promise<T> {
-        const request = this.prepareRequest(task, data);
+        return this.collectStats(task.toString(), async () => {
+            const request = this.prepareRequest(task, data);
 
-        // Use retry logic with exponential backoff
-        const llmCall = async () => {
-            const baseConfig: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
-                model: this.config.model,
-                messages: [
-                    { role: 'system', content: 'You are a helpful assistant that processes graph operations. Always use the provided function to return your response.' },
-                    { role: 'user', content: request.prompt }
-                ],
-                tools: [{
-                    type: 'function',
-                    function: {
-                        name: this.getFunctionName(task),
-                        parameters: this.convertZodToJsonSchema(request.functionSchema)
-                    }
-                }],
-                tool_choice: { type: 'function', function: { name: this.getFunctionName(task) } },
-                stream: false
+            // Use retry logic with exponential backoff
+            const llmCall = async () => {
+                const baseConfig: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
+                    model: this.config.model,
+                    messages: [
+                        { role: 'system', content: 'You are a helpful assistant that processes graph operations. Always use the provided function to return your response.' },
+                        { role: 'user', content: request.prompt }
+                    ],
+                    tools: [{
+                        type: 'function',
+                        function: {
+                            name: this.getFunctionName(task),
+                            parameters: this.convertZodToJsonSchema(request.functionSchema)
+                        }
+                    }],
+                    tool_choice: { type: 'function', function: { name: this.getFunctionName(task) } },
+                    stream: false
+                };
+
+                const response = await this.llm.chat.completions.create(baseConfig);
+                const message = response.choices[0].message;
+                const finishReason = response.choices[0].finish_reason;
+                const isToolCalls = finishReason === 'tool_calls';
+
+                if (!isToolCalls || !message.tool_calls) {
+                    throw new Error('No tool calls in response');
+                }
+
+                const toolCall = message.tool_calls[0];
+                // Pretty print the raw LLM response
+                console.log('\nRaw LLM Response:');
+                console.log(JSON.stringify(JSON.parse(toolCall.function.arguments), null, 2));
+
+                return JSON.parse(toolCall.function.arguments);
             };
 
-            const response = await this.llm.chat.completions.create(baseConfig);
-            const message = response.choices[0].message;
-            const finishReason = response.choices[0].finish_reason;
-            const isToolCalls = finishReason === 'tool_calls';
+            try {
+                const rawResponse = await retry(llmCall, 3, 1000);
 
-            if (!isToolCalls || !message.tool_calls) {
-                throw new Error('No tool calls in response');
-            }
+                // Define a simple schema for entities
+                const EntitySchema = z.object({
+                    id: z.number(),
+                    mention: z.string(),
+                    type: z.string(),
+                    confidence: z.number().min(0).max(1)
+                });
 
-            const toolCall = message.tool_calls[0];
-            // Pretty print the raw LLM response
-            console.log('\nRaw LLM Response:');
-            console.log(JSON.stringify(JSON.parse(toolCall.function.arguments), null, 2));
-
-            return JSON.parse(toolCall.function.arguments);
-        };
-
-        try {
-            const rawResponse = await retry(llmCall, 3, 1000);
-
-            // Define a simple schema for entities
-            const EntitySchema = z.object({
-                id: z.number(),
-                mention: z.string(),
-                type: z.string(),
-                confidence: z.number().min(0).max(1)
-            });
-
-            // Validate only the entities part
-            if (task === GraphTask.EXTRACT_TEMPORAL) {
-                const entities = rawResponse.entities;
-                try {
-                    EntitySchema.array().parse(entities);
-                } catch (error) {
-                    if (error instanceof z.ZodError) {
-                        console.error("Entity validation failed:", error.errors);
-                        // Handle the validation error
-                    } else {
-                        console.error("Unexpected error during validation:", error);
-                        // Handle other unexpected errors
+                // Validate only the entities part
+                if (task === GraphTask.EXTRACT_TEMPORAL) {
+                    const entities = rawResponse.entities;
+                    try {
+                        EntitySchema.array().parse(entities);
+                    } catch (error) {
+                        if (error instanceof z.ZodError) {
+                            console.error("Entity validation failed:", error.errors);
+                            // Handle the validation error
+                        } else {
+                            console.error("Unexpected error during validation:", error);
+                            // Handle other unexpected errors
+                        }
                     }
                 }
-            }
 
-            // Add spans for entity extraction tasks
-            if (task === GraphTask.EXTRACT_ENTITIES) {
-                return await this.processEntityExtractionResults(data.text, rawResponse, data.episodeId) as T;
-            }
+                // Add spans for entity extraction tasks
+                if (task === GraphTask.EXTRACT_ENTITIES) {
+                    return await this.processEntityExtractionResults(data.text, rawResponse, data.episodeId) as T;
+                }
 
-            return rawResponse as T;
-        } catch (error) {
-            console.error("LLM call failed after multiple retries:", error);
-            throw error;
-        }
+                return rawResponse as T;
+            } catch (error) {
+                console.error("LLM call failed after multiple retries:", error);
+                throw error;
+            }
+        });
     }
 
     private prepareRequest(task: GraphTask, data: any): { prompt: string; functionSchema: z.ZodType<any> } {

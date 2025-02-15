@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { GraphTask, LLMConfig } from '../../types';
+import { GraphTask, LLMConfig, LLMCallStats, ProcessingStats } from '../../types';
 import { IGraphNode } from '../../data/types';
 import { OpenAI } from 'openai';
 import * as crypto from 'crypto';
@@ -70,10 +70,71 @@ const FactExtractionSchema = z.object({
 export class SemanticGraphProcessor {
     private config: LLMConfig;
     private client: OpenAI;
+    
+    // Add stats collector
+    private stats: ProcessingStats = {
+        llmCalls: []
+    };
+
+    private async collectStats<T>(
+        task: string,
+        operation: () => Promise<T>,
+        metadata?: { inputEntities?: number, outputEntities?: number }
+    ): Promise<T> {
+        const startTime = Date.now();
+        let duration = 0;
+        const statEntry: LLMCallStats = {
+            task,
+            duration,
+            success: false,
+            metadata
+        };
+        this.stats.llmCalls.push(statEntry);
+        
+        try {
+            const result = await operation();
+            statEntry.success = true;
+            if (result && typeof result === 'object' && 'entities' in result) {
+                statEntry.metadata = {
+                    ...statEntry.metadata,
+                    outputEntities: (result as any).entities?.length
+                };
+            }
+            return result;
+        } finally {
+            duration = Date.now() - startTime;
+            statEntry.duration = duration;
+        }
+    }
+
+    getStats(): ProcessingStats {
+        return this.stats;
+    }
 
     constructor(config: LLMConfig & { client: OpenAI }) {
         this.config = config;
         this.client = config.client;
+    }
+
+    async processWithLLM(task: string, data: { prompt: string }): Promise<{ content: string }> {
+        const response = await this.client.chat.completions.create({
+            model: this.config.model,
+            temperature: 0.1,
+            max_tokens: this.config.maxTokens,
+            messages: [
+                { role: "system", content: `You are a ${task} system. Only output valid JSON.` },
+                { role: "user", content: data.prompt }
+            ]
+        });
+
+        const content = response.choices[0].message.content;
+        if (!content) {
+            throw new Error("No content in response");
+        }
+
+        console.log("\nRaw LLM Response:\n", content);
+
+        return { content };
     }
 
     /**
@@ -153,21 +214,22 @@ IMPORTANT:
 3. Do not include any explanatory text outside the JSON
 4. Return ONLY the JSON object, nothing else`;
                 
-                const factExtractionResult = await this.client.chat.completions.create({
-                    model: this.config.model,
-                    temperature: 0.1,
-                    max_tokens: this.config.maxTokens,
-                    messages: [
-                        { role: "system", content: "You are a fact extraction system that extracts entities and relationships from text. Only output complete, valid JSON." },
-                        { role: "user", content: factExtractionPrompt }
-                    ]
-                });
+                const factExtractionResult = await this.collectStats('fact_extraction', async () => {
+                    const response = await this.client.chat.completions.create({
+                        model: this.config.model,
+                        temperature: 0.1,
+                        max_tokens: this.config.maxTokens,
+                        messages: [
+                            { role: "system", content: "You are a fact extraction system that extracts entities and relationships from text. Only output complete, valid JSON." },
+                            { role: "user", content: factExtractionPrompt }
+                        ]
+                    });
 
-                try {
-                    const content = factExtractionResult.choices[0].message.content;
+                    const content = response.choices[0].message.content;
                     if (!content) {
                         throw new Error("No content in response");
                     }
+
                     console.log("\nRaw LLM Response:\n", content);
                     
                     let jsonStr = ''; // Declare outside try block
@@ -224,13 +286,7 @@ IMPORTANT:
                             relationships: []
                         };
                     }
-                } catch (error) {
-                    console.error("Failed to parse fact extraction result:", error);
-                    return {
-                        entities: [],
-                        relationships: []
-                    };
-                }
+                });
 
             case GraphTask.RESOLVE_FACTS:
                 console.log("RESOLVE_FACTS data: ", data);
@@ -255,21 +311,22 @@ Return a JSON object with:
     "uuid": string (only if is_duplicate is true)
 }`;
 
-                const resolveFactsResult = await this.client.chat.completions.create({
-                    model: this.config.model,
-                    temperature: 0.1,
-                    max_tokens: this.config.maxTokens,
-                    messages: [
-                        { role: "system", content: "You are a fact resolution system that determines if facts are duplicates. Only output valid JSON." },
-                        { role: "user", content: resolveFactsPrompt }
-                    ]
-                });
+                const resolveFactsResult = await this.collectStats('resolve_facts', async () => {
+                    const response = await this.client.chat.completions.create({
+                        model: this.config.model,
+                        temperature: 0.1,
+                        max_tokens: this.config.maxTokens,
+                        messages: [
+                            { role: "system", content: "You are a fact resolution system that determines if facts are duplicates. Only output valid JSON." },
+                            { role: "user", content: resolveFactsPrompt }
+                        ]
+                    });
 
-                try {
-                    const content = resolveFactsResult.choices[0].message.content;
+                    const content = response.choices[0].message.content;
                     if (!content) {
                         throw new Error("No content in response");
                     }
+
                     console.log("\nRaw LLM Response:\n", content);
                     
                     let jsonStr = ''; // Declare outside try block
@@ -310,13 +367,7 @@ Return a JSON object with:
                     }
                     
                     return result;
-                } catch (error) {
-                    console.error("Failed to parse resolve facts result:", error);
-                    return {
-                        is_duplicate: false,
-                        uuid: null
-                    };
-                }
+                });
 
             case GraphTask.EXTRACT_TEMPORAL:
                 return await this.extractTemporal(data);
@@ -329,194 +380,105 @@ Return a JSON object with:
         }
     }
 
-    private logDebug(task: string, prompt: string, response: string | null = null) {
-        if (!response) {
-            // Before LLM call
-            console.log(`\n=== ${task.toUpperCase()} - SENDING REQUEST ===\n`);
-            console.log(`Prompt:\n${prompt}`);
-        } else {
-            // After LLM call
-            console.log(`\n=== ${task.toUpperCase()} - RECEIVED RESPONSE ===\n`);
-            console.log(`Response:\n${response}`);
-        }
-    }
-
-    async processWithLLM(task: string, data: { prompt: string }): Promise<{ content: string }> {
-        // Log the prompt before sending to LLM
-        this.logDebug(task, data.prompt);
-
-        const llmResult = await this.client.chat.completions.create({
-            model: this.config.model,
-            temperature: 0.1,
-            max_tokens: this.config.maxTokens,
-            messages: [
-                { role: "system", content: `You are a ${task} system. Only output valid JSON.` },
-                { role: "user", content: data.prompt }
-            ]
-        });
-
-        const content = llmResult.choices[0].message.content;
-        if (!content) {
-            throw new Error("No content in response");
-        }
-
-        // Log the raw response
-        this.logDebug(task, data.prompt, content);
-
-        return { content };
-    }
-
     async deduplicateEntities(nodes: Array<IGraphNode>): Promise<{ 
         entities: Array<{ id: string; name: string; type: string; summary: string; confidence?: number }>;
         mappings: Array<{ source_ids: string[]; target_id: string; confidence: number }>;
     }> {
-        try {
-            // Build the prompt with node information
-            const data = {
-                nodes,
-                prompt: this.buildDedupeNodesPrompt(nodes)
-            };
+        return this.collectStats('deduplicateEntities', async () => {
+            const prompt = this.getEntityDeduplicationPrompt(nodes);
+            const response = await this.processWithLLM('DEDUPLICATE_ENTITIES', { prompt });
+            try {
+                // Extract JSON from response
+                let jsonStr = ''; // Declare outside try block
 
-            // Get response from LLM with retries
-            let attempts = 0;
-            const maxAttempts = 3;
-            let response: { content: string } | null = null;
-
-            while (attempts < maxAttempts) {
-                try {
-                    response = await this.processWithLLM(GraphTask.DEDUPE_NODES, data);
-                    break;
-                } catch (error) {
-                    attempts++;
-                    if (attempts === maxAttempts) throw error;
-                    await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
+                // Extract JSON from response
+                if (response.content.includes('```json')) {
+                    jsonStr = response.content.split('```json')[1].split('```')[0].trim();
+                } else {
+                    jsonStr = response.content.trim();
                 }
-            }
 
-            if (!response || !response.content) {
-                throw new Error("No content in LLM response");
-            }
-
-            let jsonStr = ''; // Declare outside try block
-
-            // Extract JSON from response
-            if (response.content.includes('```json')) {
-                jsonStr = response.content.split('```json')[1].split('```')[0].trim();
-            } else {
-                jsonStr = response.content.trim();
-            }
-
-            // Verify JSON has matching braces/brackets
-            if (!this.hasMatchingBraces(jsonStr)) {
-                console.error("Invalid JSON response:", jsonStr);
-                throw new Error("JSON has unmatched braces or brackets");
-            }
-
-            // Parse and validate the response
-            const result = JSON.parse(jsonStr);
-            
-            // Validate with Zod schema
-            const validatedResult = DeduplicationResultSchema.parse(result);
-
-            // Additional validation and filtering
-            validatedResult.entities = validatedResult.entities.filter((entity) => {
-                // Ensure entity type is valid
-                const validTypes = ['PERSON', 'ORGANIZATION', 'PLACE', 'CONCEPT', 'OBJECT'];
-                if (!validTypes.includes(entity.type)) {
-                    console.warn(`Invalid entity type: ${entity.type} for entity:`, entity);
-                    return false;
+                // Verify JSON has matching braces/brackets
+                if (!this.hasMatchingBraces(jsonStr)) {
+                    console.error("Invalid JSON response:", jsonStr);
+                    throw new Error("JSON has unmatched braces or brackets");
                 }
-                return true;
-            });
 
-            // Filter out low confidence mappings
-            validatedResult.mappings = validatedResult.mappings.filter((mapping) => {
-                if (mapping.confidence < 0.6) {
-                    console.warn("Low confidence mapping filtered out:", mapping);
-                    return false;
-                }
-                return true;
-            });
+                // Parse and validate the response
+                const result = JSON.parse(jsonStr);
+                
+                // Validate with Zod schema
+                const validatedResult = DeduplicationResultSchema.parse(result);
 
-            return validatedResult;
-        } catch (error) {
-            console.error("Error in deduplicateEntities:", error);
-            // Return empty result on error to allow graceful degradation
-            return {
-                entities: [],
-                mappings: []
-            };
-        }
+                // Filter out low confidence mappings
+                validatedResult.mappings = validatedResult.mappings.filter((mapping) => {
+                    if (mapping.confidence < 0.6) {
+                        console.warn("Low confidence mapping filtered out:", mapping);
+                        return false;
+                    }
+                    return true;
+                });
+
+                return validatedResult;
+            } catch (error) {
+                console.error("Error in deduplicateEntities:", error);
+                // Return empty result on error to allow graceful degradation
+                return {
+                    entities: [],
+                    mappings: []
+                };
+            }
+        }, { inputEntities: nodes.length });
     }
 
-    private buildDedupeNodesPrompt(nodes: Array<IGraphNode>): string {
-        const prompt = `
-Given a list of nodes representing entities from a conversation, identify and merge nodes that refer to the same entity.
-For each node, consider:
-1. The entity name and type
-2. The context in which it appears
-3. Any aliases or alternative names that might be used
-4. The confidence level of the match (0.0 to 1.0)
+    private getEntityDeduplicationPrompt(entities: any[]): string {
+        const prompt = `Given these entity mentions, identify which ones refer to the same entity and map them to a canonical form.
+Return a JSON response with:
+1. "entities": Array of unique canonical entities with id, name, type, and summary
+2. "mappings": Array of mappings showing which mentions map to which canonical, with confidence scores
 
-Important Rules:
-1. Only merge nodes if you are confident they refer to the same entity
-2. Assign a confidence score to each mapping:
-   - 1.0: Exact match (e.g., identical names)
-   - 0.8-0.9: Very likely the same (e.g., "George Orwell" and "Eric Blair")
-   - 0.6-0.7: Probably the same with some uncertainty
-   - < 0.6: Don't merge, keep as separate entities
-3. Preserve the most informative name as the canonical name
-4. Include detailed summaries that capture key information from all merged nodes
-
-Input nodes:
-${JSON.stringify(nodes, null, 2)}
-
-Return format:
+Example response format:
 {
   "entities": [
     {
-      "id": "unique_id",
-      "name": "canonical_name",
-      "type": "entity_type",
-      "summary": "comprehensive description",
-      "confidence": 0.95 // Optional overall confidence score
+      "id": "PERSON_123",
+      "name": "George Orwell",
+      "type": "PERSON", 
+      "summary": "British author known as George Orwell"
     }
   ],
   "mappings": [
     {
-      "source_ids": ["input_node_id1", "input_node_id2"],
-      "target_id": "unique_id",
-      "confidence": 0.9 // Required confidence score for this mapping
+      "source_ids": ["MENTION_1", "MENTION_2"],
+      "target_id": "PERSON_123",
+      "confidence": 0.95
     }
   ]
-}`;
+}
+
+Entities to deduplicate:
+${JSON.stringify(entities, null, 2)}`;
 
         return prompt;
     }
 
-    private isValidISODate(dateStr: string): boolean {
-        const isoDateRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/;
-        if (!isoDateRegex.test(dateStr)) return false;
-        
-        const date = new Date(dateStr);
-        return date instanceof Date && !isNaN(date.getTime());
-    }
-
-    private hasMatchingBraces(str: string): boolean {
+    private hasMatchingBraces(jsonStr: string): boolean {
         const stack: string[] = [];
         const openBraces = "{[";
         const closeBraces = "}]";
-        const pairs: { [key: string]: string } = { "}": "{", "]": "[" };
-
-        for (const char of str) {
+        const pairs = new Map([["{", "}"], ["[", "]"]]);
+        
+        for (const char of jsonStr) {
             if (openBraces.includes(char)) {
                 stack.push(char);
             } else if (closeBraces.includes(char)) {
-                if (stack.length === 0) return false;
-                if (stack.pop() !== pairs[char]) return false;
+                const lastOpen = stack.pop();
+                if (!lastOpen || pairs.get(lastOpen) !== char) {
+                    return false;
+                }
             }
         }
-
+        
         return stack.length === 0;
     }
 
@@ -607,7 +569,18 @@ Example Output:
 
             while (attempts < maxAttempts) {
                 try {
-                    result = await this.processWithLLM('extract_temporal', { prompt });
+                    result = await this.collectStats('extract_temporal', async () => {
+                        const response = await this.client.chat.completions.create({
+                            model: this.config.model,
+                            temperature: 0.1,
+                            max_tokens: this.config.maxTokens,
+                            messages: [
+                                { role: "system", content: "You are a temporal extraction system that adds temporal information to entities and relationships. Only output valid JSON." },
+                                { role: "user", content: prompt }
+                            ]
+                        });
+                        return { content: response.choices[0].message.content || '' };
+                    });
                     break;
                 } catch (error) {
                     attempts++;
@@ -661,5 +634,13 @@ Example Output:
                 }))
             };
         }
+    }
+
+    private isValidISODate(dateStr: string): boolean {
+        const isoDateRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/;
+        if (!isoDateRegex.test(dateStr)) return false;
+        
+        const date = new Date(dateStr);
+        return date instanceof Date && !isNaN(date.getTime());
     }
 }

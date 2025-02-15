@@ -98,6 +98,55 @@ export enum GraphTask {
 export type EpisodeType = 'message' | 'text' | 'json';
 
 /**
+ * Type of episode content values
+ */
+export type EpisodeTypeValues = 'text' | 'message' | 'json';
+
+/**
+ * Text content
+ */
+export interface TextContent {
+    data: string;
+}
+
+/**
+ * Message
+ */
+export interface Message {
+    role: "user" | "assistant" | string;
+    body: string;
+    timestamp: string;
+    turnId: string;
+}
+
+/**
+ * Message content
+ */
+export interface MessageContent {
+    messages: Message[];
+}
+
+/**
+ * Json content
+ */
+export interface JsonContent {
+    jsonData: any;
+}
+
+/**
+ * Episode content
+ */
+export interface EpisodeContent {
+    type: EpisodeTypeValues;
+    content: TextContent | MessageContent | JsonContent;
+    metadata?: {
+        session_id?: string;
+        turn_id?: string;
+        [key: string]: any;
+    };
+}
+
+/**
  * Base class for all episodes in the graph memory system.
  * Episodes are the fundamental units of information that can be stored and processed.
  */
@@ -209,4 +258,24 @@ export class JsonEpisode extends Episode {
         super(episodeId, 'json', sessionId, referenceTime, metadata);
         this.content = content;
     }
+}
+
+/**
+ * LLM call statistics
+ */
+export interface LLMCallStats {
+    task: string;
+    duration: number;
+    success: boolean;
+    metadata?: {
+        inputEntities?: number;
+        outputEntities?: number;
+    };
+}
+
+/**
+ * Processing statistics
+ */
+export interface ProcessingStats {
+    llmCalls: LLMCallStats[];
 }

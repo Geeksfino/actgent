@@ -113,6 +113,37 @@ async function processConversations(
     }
 }
 
+async function displayStats(graphManager: GraphManager) {
+    const stats = graphManager.getProcessingStats();
+    
+    console.log('\n=== Processing Statistics ===');
+    console.log(`Total LLM Calls: ${stats.llmCalls.length}`);
+    
+    console.log('\nLLM Call Details:');
+    stats.llmCalls.forEach((call, index) => {
+        console.log(`\nCall #${index + 1}:`);
+        console.log(`  Task: ${call.task}`);
+        console.log(`  Duration: ${call.duration}ms`);
+        console.log(`  Success: ${call.success}`);
+        if (call.metadata?.inputEntities !== undefined) {
+            console.log(`  Input Entities: ${call.metadata.inputEntities}`);
+        }
+        if (call.metadata?.outputEntities !== undefined) {
+            console.log(`  Output Entities: ${call.metadata.outputEntities}`);
+        }
+    });
+    
+    const successfulCalls = stats.llmCalls.filter(call => call.success);
+    const totalDuration = successfulCalls.reduce((sum, call) => sum + call.duration, 0);
+    
+    console.log('\nSummary:');
+    console.log(`Successful Calls: ${successfulCalls.length}/${stats.llmCalls.length}`);
+    console.log(`Total Processing Time: ${totalDuration}ms`);
+    if (successfulCalls.length > 0) {
+        console.log(`Average Call Duration: ${Math.round(totalDuration / successfulCalls.length)}ms`);
+    }
+}
+
 async function main() {
     const datasetPath = expandPath(options.dataset);
     const outputPath = expandPath(options.output);
@@ -169,55 +200,60 @@ async function main() {
     // Initialize graph manager
     const graphManager = new GraphManager(graphConfig, new DeterministicIdGenerator());
 
-    // Process conversations
-    console.log('Processing conversations...');
-    const batchSize = parseInt(options.batchSize);
+    try {
+        // Process conversations
+        console.log('Processing conversations...');
+        const batchSize = parseInt(options.batchSize);
 
-    const conversations = dataset.conversations.flatMap(session =>
-        session.turns.flatMap(turn =>
-            turn.messages.map(message => ({
-                role: message.role,
-                content: message.content,
-                sessionId: session.session_id,
-                timestamp: new Date(session.timestamp)
-            }))
-        )
-    );
+        const conversations = dataset.conversations.flatMap(session =>
+            session.turns.flatMap(turn =>
+                turn.messages.map(message => ({
+                    role: message.role,
+                    content: message.content,
+                    sessionId: session.session_id,
+                    timestamp: new Date(session.timestamp)
+                }))
+            )
+        );
 
-    await processConversations(graphManager, conversations, batchSize, parseInt(options.layer));
+        await processConversations(graphManager, conversations, batchSize, parseInt(options.layer));
 
-    // Get final graph state
-    const snapshot = await graphManager.getSnapshot({});
+        // Get final graph state
+        const snapshot = await graphManager.getSnapshot({});
 
-    // Write graph state to file
-    const output = {
-        nodes: {
-            episodes: snapshot.nodes.episodes.map(node => ({
-                ...node,
-                metadata: Object.fromEntries(node.metadata || new Map())
-            })),
-            mentions: snapshot.nodes.mentions.map(node => ({
-                ...node,
-                metadata: Object.fromEntries(node.metadata || new Map())
-            })),
-            canonicals: snapshot.nodes.canonicals.map(node => ({
-                ...node,
-                metadata: Object.fromEntries(node.metadata || new Map())
-            }))
-        },
-        edges: {
-            episode_sequence: snapshot.edges.episode_sequence,
-            mention_to_episode: snapshot.edges.mention_to_episode,
-            mention_to_canonical: snapshot.edges.mention_to_canonical
-        }
-    };
+        // Write graph state to file
+        const output = {
+            nodes: {
+                episodes: snapshot.nodes.episodes.map(node => ({
+                    ...node,
+                    metadata: Object.fromEntries(node.metadata || new Map())
+                })),
+                mentions: snapshot.nodes.mentions.map(node => ({
+                    ...node,
+                    metadata: Object.fromEntries(node.metadata || new Map())
+                })),
+                canonicals: snapshot.nodes.canonicals.map(node => ({
+                    ...node,
+                    metadata: Object.fromEntries(node.metadata || new Map())
+                }))
+            },
+            edges: {
+                episode_sequence: snapshot.edges.episode_sequence,
+                mention_to_episode: snapshot.edges.mention_to_episode,
+                mention_to_canonical: snapshot.edges.mention_to_canonical
+            }
+        };
 
-    // Write to output file
-    const outputPathFile = path.join(outputPath, 'graph.json');
-    await fs.mkdir(path.dirname(outputPathFile), { recursive: true });
-    await fs.writeFile(outputPathFile, JSON.stringify(output, null, 2));
+        // Write to output file
+        const outputPathFile = path.join(outputPath, 'graph.json');
+        await fs.mkdir(path.dirname(outputPathFile), { recursive: true });
+        await fs.writeFile(outputPathFile, JSON.stringify(output, null, 2));
 
-    console.log('\nProcessing complete. Results written to:', outputPathFile);
+        console.log('\nProcessing complete. Results written to:', outputPathFile);
+    } finally {
+        // Always show stats, even if processing failed
+        await displayStats(graphManager);
+    }
 }
 
 main().catch((err: any) => {

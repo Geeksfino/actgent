@@ -1,4 +1,5 @@
-import { IGraphStorage, IGraphNode, IGraphEdge, GraphFilter, MemoryType, TraversalOptions, IGraphUnit, EpisodeContent, isEpisodeNode, EpisodeFilter } from './types';
+import { IGraphStorage, IGraphNode, IGraphEdge, GraphFilter, MemoryType, TraversalOptions, IGraphUnit, isEpisodeNode, EpisodeFilter } from './types';
+import { EpisodeContent } from '../types';
 import crypto from 'crypto';
 import { IdGenerator } from '../id/IdGenerator';
 
@@ -46,7 +47,7 @@ export class InMemoryGraphStorage implements IGraphStorage {
             edges: []
         };
         
-        console.log('Adding node to storage:', toJSON(nodeWithEmptyEdges));
+        //console.log('Adding node to storage:', toJSON(nodeWithEmptyEdges));
         this.nodes.set(id, nodeWithEmptyEdges);
         return id;
     }
