@@ -27,9 +27,9 @@ export class WorkingContextManager {
     private currentContext: WorkingMemoryContext;
     private contextChanges$ = new Subject<WorkingMemoryContext>();
     private emotionalContext: EmotionalContext;
-    private workingMemory: WorkingMemory;
+    private workingMemory?: WorkingMemory;
 
-    constructor(workingMemory: WorkingMemory) {
+    constructor(workingMemory?: WorkingMemory) {
         this.workingMemory = workingMemory;
         this.contextCache = new Map();
 
@@ -115,17 +115,19 @@ export class WorkingContextManager {
         // Store updated context in working memory
         const now = new Date();
         const contextDomain = this.currentContext && 'domain' in this.currentContext ? this.currentContext.domain : 'general';
-        await this.workingMemory.store({
-            id: crypto.randomUUID(),
-            content: this.currentContext,
-            metadata: new Map([
-                ['type', 'working_context'],
-                ['domain', contextDomain]
-            ]),
-            timestamp: now,
-            createdAt: now,
-            validAt: now
-        });
+        if (this.workingMemory) {
+            await this.workingMemory.store({
+                id: crypto.randomUUID(),
+                content: this.currentContext,
+                metadata: new Map([
+                    ['type', 'working_context'],
+                    ['domain', contextDomain]
+                ]),
+                timestamp: now,
+                createdAt: now,
+                validAt: now
+            });
+        }
 
         // Emit context change event
         this.contextChanges$.next(this.currentContext);
