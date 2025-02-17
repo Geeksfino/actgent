@@ -347,8 +347,8 @@ export class AgentCore {
       const formattedHistory = AgentCore.formatHistory(history);
       this.promptLogger.debug(`History:\n${formattedHistory}`);
 
-      const systemPrompt = await this.promptTemplate.getSystemPrompt(sessionContext);
-      const assistantPrompt = await this.promptTemplate.getAssistantPrompt(sessionContext);
+      const systemPrompt = await this.promptManager.getSystemPrompt(sessionContext);
+      const assistantPrompt = await this.promptManager.getAssistantPrompt(sessionContext);
 
       const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
         { role: "system", content: systemPrompt },
