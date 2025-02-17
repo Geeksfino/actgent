@@ -38,10 +38,27 @@ export class MultiLevelClassifier<T extends readonly ClassificationTypeConfig[]>
         firstChars: response.substring(0, 50)
       });
 
-      const parsed = JSON.parse(response);
-      classifierLogger.debug("Successfully parsed response into JSON",
-        withTags(['multi-level'])
-      );
+      // First try to parse as JSON
+      let parsed;
+      try {
+        parsed = JSON.parse(response);
+        classifierLogger.debug("Successfully parsed response into JSON",
+          withTags(['multi-level'])
+        );
+      } catch (error) {
+        // Not JSON, treat as conversation
+        classifierLogger.debug("Non-JSON response, treating as conversation",
+          withTags(['multi-level'])
+        );
+        return {
+          type: ResponseType.CONVERSATION,
+          structuredData: {
+            messageType: 'CONVERSATION',
+            response: response
+          } as InferClassificationUnion<T>,
+          textData: response
+        };
+      }
 
       // Case 1: Multi-level intent format
       if (parsed.top_level_intent) {

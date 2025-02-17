@@ -160,6 +160,7 @@ Your capabilities: {capabilities}
 
     if (msg.metadata?.sender === "agent") {
       try {
+        this.logger.warning(`From assistant:: Current message is: ${msg.payload.input}`);
         const m = JSON.parse(msg.payload.input);
         this.logger.debug(`From assistant: Top-level intent is: ${msg.payload.input}`);
         if (m.data.top_level_intent === "ACTION") {
@@ -172,7 +173,7 @@ Your capabilities: {capabilities}
                 try {
                   schema = JSON.parse(instruction.schemaTemplate);
                 } catch (error) {
-                  console.warn(`Failed to parse schema for ${instruction.name}: ${error}`,
+                  this.logger.warn(`Failed to parse schema for ${instruction.name}: ${error}`,
                     withTags(["multi-level"])
                   );
                 }
