@@ -1,23 +1,23 @@
 import { IMemoryUnit, MemoryFilter, MemoryType } from './base';
 import { WorkingMemoryContext } from './context';
 import { WorkingContextManager } from './WorkingContextManager';
-// import { WorkingMemory } from './modules/working/WorkingMemory';
-// import { EpisodicMemory } from './modules/episodic/EpisodicMemory';
-// import { SemanticMemory } from './modules/semantic/SemanticMemory';
-// import { ProceduralMemory } from './modules/procedural/ProceduralMemory';
+import { WorkingMemory } from './modules/working/WorkingMemory';
+import { EpisodicMemory } from './modules/episodic/EpisodicMemory';
+import { SemanticMemory } from './modules/semantic/SemanticMemory';
+import { ProceduralMemory } from './modules/procedural/ProceduralMemory';
 import { EphemeralMemory } from './modules/ephemeral/EphemeralMemory';
 import { MemoryTransitionManager } from './MemoryTransitionManager';
 import { loggers } from './logging';
 
 // Import storage factories
-// import { WorkingMemoryStorageFactory } from './modules/working/WorkingMemoryStorageFactory';
-// import { EpisodicMemoryStorageFactory } from './modules/episodic/EpisodicMemoryStorageFactory';
-// import { SemanticMemoryStorageFactory } from './modules/semantic/SemanticMemoryStorageFactory';
-// import { ProceduralMemoryStorageFactory } from './modules/procedural/ProceduralMemoryStorageFactory';
+import { WorkingMemoryStorageFactory } from './modules/working/WorkingMemoryStorageFactory';
+import { EpisodicMemoryStorageFactory } from './modules/episodic/EpisodicMemoryStorageFactory';
+import { SemanticMemoryStorageFactory } from './modules/semantic/SemanticMemoryStorageFactory';
+import { ProceduralMemoryStorageFactory } from './modules/procedural/ProceduralMemoryStorageFactory';
 
 // Import monitors and handlers
 import { EphemeralMemoryCapacityMonitor } from './modules/ephemeral/EphemeralMemoryCapacityMonitor';
-// import { WorkingMemoryEventHandler } from './modules/working/WorkingMemoryEventHandler';
+import { WorkingMemoryEventHandler } from './modules/working/WorkingMemoryEventHandler';
 
 import { z } from 'zod';
 
@@ -27,10 +27,10 @@ import { z } from 'zod';
  * while handling the complexity of memory management internally.
  */
 export class AgentMemorySystem {
-    // private workingMemory: WorkingMemory;
-    // private episodicMemory: EpisodicMemory;
-    // private semanticMemory: SemanticMemory;
-    // private proceduralMemory: ProceduralMemory;
+    private workingMemory: WorkingMemory;
+    private episodicMemory: EpisodicMemory;
+    private semanticMemory: SemanticMemory;
+    private proceduralMemory: ProceduralMemory;
     private ephemeralMemory: EphemeralMemory;
 
     private transitionManager: MemoryTransitionManager;
@@ -39,16 +39,16 @@ export class AgentMemorySystem {
 
     constructor() {
         // Create memories with their module-specific storage
-        // this.workingMemory = WorkingMemoryStorageFactory.create();
-        // this.episodicMemory = EpisodicMemoryStorageFactory.create();
-        // this.semanticMemory = SemanticMemoryStorageFactory.create();
-        // this.proceduralMemory = ProceduralMemoryStorageFactory.create();
+        this.workingMemory = WorkingMemoryStorageFactory.create();
+        this.episodicMemory = EpisodicMemoryStorageFactory.create();
+        this.semanticMemory = SemanticMemoryStorageFactory.create();
+        this.proceduralMemory = ProceduralMemoryStorageFactory.create();
         
         // Keep items for 30 seconds in ephemeral memory
         this.ephemeralMemory = new EphemeralMemory(-1, 500);  // Non-expiring items, max 5 items
 
         this.transitionManager = new MemoryTransitionManager();
-        this.contextManager = new WorkingContextManager();
+        this.contextManager = new WorkingContextManager(this.workingMemory);
 
         this.setupEventHandlers();
         this.transitionManager.startMonitoring();
@@ -61,7 +61,7 @@ export class AgentMemorySystem {
             'ephemeral-capacity',
             this.ephemeralMemory,
             {
-                maxItems: this.ephemeralMemory.capacity(),
+                maxItems: this.ephemeralMemory.capacity(),  // Fixed method name
                 warningThreshold: 0.8  // Trigger at 80% capacity
             }
         );
@@ -69,12 +69,12 @@ export class AgentMemorySystem {
         this.logger.debug('Registered ephemeral memory capacity monitor');
 
         // Register working memory event handler
-        // const workingHandler = new WorkingMemoryEventHandler(
-        //     this.workingMemory,
-        //     0.9  // Consolidate at 90% capacity
-        // );
-        // this.transitionManager.registerHandler(workingHandler);
-        // this.logger.debug('Registered working memory event handler');
+        const workingHandler = new WorkingMemoryEventHandler(
+            this.workingMemory,
+            0.9  // Consolidate at 90% capacity
+        );
+        this.transitionManager.registerHandler(workingHandler);
+        this.logger.debug('Registered working memory event handler');
     }
 
     /**
@@ -109,12 +109,7 @@ export class AgentMemorySystem {
             filter = query;
         }
 
-        // Search only in ephemeral memory for now
-        const ephemeralResults = await this.ephemeralMemory.query(filter);
-        return this.rankMemories(ephemeralResults, this.contextManager.getCurrentContext());
-
-        // Original code commented out:
-        /*
+        // Search in each memory store
         const [workingResults, episodicResults, semanticResults, proceduralResults, ephemeralResults] = await Promise.all([
             this.workingMemory.query(filter),
             this.episodicMemory.query(filter),
@@ -122,9 +117,10 @@ export class AgentMemorySystem {
             this.proceduralMemory.query(filter),
             this.ephemeralMemory.query(filter)
         ]);
+
+        // Combine and rank results
         const allResults = [...workingResults, ...episodicResults, ...semanticResults, ...proceduralResults, ...ephemeralResults];
         return this.rankMemories(allResults, this.contextManager.getCurrentContext());
-        */
     }
 
     /**
@@ -192,16 +188,12 @@ export class AgentMemorySystem {
      */
     public async forget(idOrFilter: string | MemoryFilter): Promise<void> {
         if (typeof idOrFilter === 'string') {
-            await this.ephemeralMemory.delete(idOrFilter);
-            // Comment out other memory deletes:
-            /*
             await Promise.all([
                 this.workingMemory.delete(idOrFilter),
                 this.episodicMemory.delete(idOrFilter),
                 this.semanticMemory.delete(idOrFilter),
                 this.proceduralMemory.delete(idOrFilter)
             ]);
-            */
         } else {
             const memories = await this.recall(idOrFilter);
             await Promise.all(
@@ -283,4 +275,5 @@ export class AgentMemorySystem {
         this.transitionManager.stopMonitoring();
         this.contextManager.dispose();
     }
+
 }

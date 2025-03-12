@@ -59,8 +59,7 @@ export class WorkingMemory implements IMemory<IMemoryUnit> {
             memoryType: MemoryType.WORKING,
             accessCount: 0,
             lastAccessed: now,
-            priority: metadata?.get('priority') as number || 0.5,
-            createdAt: now
+            priority: metadata?.get('priority') as number || 0.5
         };
     }
 

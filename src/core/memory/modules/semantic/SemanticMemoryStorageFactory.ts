@@ -1,15 +1,16 @@
+import { InMemoryStorage } from '../../storage/InMemoryStorage';
+import { InMemoryIndex } from '../../storage/InMemoryIndex';
 import { SemanticMemory } from './SemanticMemory';
-import { InMemoryGraphStorage } from '../../graph/data/InMemoryGraphStorage';
-import { InMemoryGraphIndex } from '../../graph/data/InMemoryGraphIndex';
-import { DeterministicIdGenerator } from '../../graph/id/DeterministicIdGenerator';
 
 /**
- * Factory for creating semantic memory instances with appropriate storage
+ * Factory for creating semantic memory with appropriate storage
  */
 export class SemanticMemoryStorageFactory {
-    static create(): SemanticMemory {
-        const storage = new InMemoryGraphStorage(new DeterministicIdGenerator());
-        const index = new InMemoryGraphIndex();
+    static create(options: { maxCapacity?: number } = {}): SemanticMemory {
+        const { maxCapacity = 1000 } = options;
+        const storage = new InMemoryStorage(maxCapacity);
+        const index = new InMemoryIndex();
+        
         return new SemanticMemory(storage, index);
     }
 }
