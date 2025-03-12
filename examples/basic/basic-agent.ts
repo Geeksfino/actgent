@@ -67,7 +67,7 @@ program
   .option('-n, --network', 'enable network mode with HTTP and streaming servers', false)
   .option('--http-port <port>', 'HTTP server port (network mode only)', '5678')
   .option('--stream-port <port>', 'streaming server port (network mode only)', '5679')
-  .option('--description <text>', 'Input description for local mode')
+  .option('--description <text>', 'Input description for local mode (optional)')
   .option('--event-source', 'Use EventSource-based implementation for streaming')
   .option('--use-simple', 'Use Simple implementation instead of ReAct', false)
   .option('--use-bare', 'Use Bare implementation instead of ReAct', false);
@@ -91,7 +91,7 @@ const coreConfig: AgentCoreConfig = {
 };
 
 // Define service config with networking enabled
-const svcConfig = await AgentServiceConfigurator.getAgentConfiguration("test/basic");
+const svcConfig = await AgentServiceConfigurator.getAgentConfiguration("examples/basic");
 
 // Configure communication based on mode
 if (options.network) {
@@ -106,8 +106,9 @@ if (options.network) {
 } else {
   // In local mode, we disable HTTP/network features but LLM streaming is still controlled by LLM_STREAM_MODE
   if (!options.description) {
-    console.error("Error: --description is required in local mode");
-    process.exit(1);
+    // Make description optional - use a default if not provided
+    options.description = "Please help me understand how this agent works.";
+    console.log("Using default description in local mode:", options.description);
   }
   console.log("Running in local mode (no network services)");
   svcConfig.communicationConfig = {
@@ -254,16 +255,57 @@ async function main() {
     if (!options.network) {
       // Create session with command line description
       const startTime = Date.now();
+      console.log("Creating session with description:", options.description);
       const session = await testAgent.createSession("test", options.description);
       metrics.checkpoint('session_created');
 
       // Listen for the first token
+      let responseComplete = false;
       session.onConversation((message) => {
-        const firstTokenTime = Date.now();
-        const duration = firstTokenTime - startTime;
-        console.log(`Time to first token: ${duration} ms`);
-        // Unregister the handler after the first token is received
-        session.onConversation(() => {});
+        if (!responseComplete) {
+          const firstTokenTime = Date.now();
+          const duration = firstTokenTime - startTime;
+          console.log(`Time to first token: ${duration} ms`);
+          responseComplete = true;
+        }
+        // Print the message content if it's a string
+        if (message && typeof message.content === 'string') {
+          process.stdout.write(message.content);
+        } else if (message) {
+          // If it's not a string, stringify it first
+          process.stdout.write(JSON.stringify(message, null, 2));
+        }
+      });
+      
+      // Wait for the response to complete
+      let responseReceived = false;
+      
+      // Set up a conversation handler to detect when responses are received
+      session.onConversation((message) => {
+        responseReceived = true;
+      });
+      
+      // Wait for the response to complete
+      await new Promise<void>((resolve) => {
+        // Set a reasonable timeout to ensure we don't wait forever
+        const maxWaitTime = 60000; // 60 seconds
+        const startWaitTime = Date.now();
+        
+        const checkInterval = setInterval(() => {
+          // If we've received a response and there's been a pause, consider it complete
+          if (responseReceived && Date.now() - startWaitTime > 5000) {
+            clearInterval(checkInterval);
+            console.log('\n\nAgent response complete.');
+            resolve();
+          }
+          
+          // Safety timeout to prevent hanging
+          if (Date.now() - startWaitTime > maxWaitTime) {
+            clearInterval(checkInterval);
+            console.log('\n\nTimeout reached, assuming agent response is complete.');
+            resolve();
+          }
+        }, 1000); // Check every second
       });
 
       metrics.start();
@@ -279,14 +321,24 @@ async function main() {
       metrics.end();
     }
 
-    // Keep the process alive
-    await new Promise((resolve) => {
-      process.on('SIGINT', async () => {
-        console.log('\nShutting down...');
-        await testAgent.shutdown();
-        resolve(null);
-      });
+    // Set up a handler for graceful shutdown
+    process.on('SIGINT', async () => {
+      console.log('\nShutting down...');
+      await testAgent.shutdown();
+      process.exit(0);
     });
+    
+    // If running in non-local mode with a server, we'll keep the process alive
+    // Otherwise, we'll exit after the agent has completed its tasks
+    if (!options.local) {
+      console.log('Server running. Press Ctrl+C to stop.');
+      // Keep the process alive with a never-resolving promise
+      await new Promise(() => {});
+    } else {
+      // In local mode, we can exit after the agent has done its work
+      console.log('Agent tasks completed, exiting.');
+      process.exit(0);
+    }
   } catch (error) {
     console.error('Error:', error);
     process.exit(1);
