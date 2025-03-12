@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { WeatherTool } from '../weather';
+import { createMockFetch } from './testUtils';
 
 // Mock fetch globally
-const mockFetch = vi.fn();
+const mockFetch = createMockFetch();
 global.fetch = mockFetch;
 
 describe('WeatherTool', () => {

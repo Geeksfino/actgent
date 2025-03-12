@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { GoogleSearchTool } from '../googleSearch';
+import { createMockFetch } from './testUtils';
 
-const mockFetch = vi.fn();
+const mockFetch = createMockFetch();
 global.fetch = mockFetch;
 
 describe('GoogleSearchTool', () => {

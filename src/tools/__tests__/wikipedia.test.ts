@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
 import { WikipediaTool } from '../wikipedia';
 import wiki from 'wikipedia';
 import { Page } from 'wikipedia/dist/page';
+import { createMockFetch } from './testUtils';
 
 describe('WikipediaTool', () => {
   let wikiTool: WikipediaTool;
@@ -12,7 +13,7 @@ describe('WikipediaTool', () => {
     vi.clearAllMocks();
 
     // Mock fetch globally with proper search results structure
-    const mockFetch = vi.fn();
+    const mockFetch = createMockFetch();
     
     // First call - search results
     mockFetch.mockResolvedValueOnce({

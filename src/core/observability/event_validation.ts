@@ -1,5 +1,5 @@
 import { z } from "zod";
-import eventSchema from './event_schema.json' assert { type: 'json' };
+import eventSchema from './event_schema';
 
 // Helper function to convert JSON Schema enum to Zod enum
 const createZodEnum = (enumValues: string[]): z.ZodEnum<[string, ...string[]]> => {
