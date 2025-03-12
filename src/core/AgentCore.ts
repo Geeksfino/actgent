@@ -337,6 +337,25 @@ export class AgentCore {
           (tool) => !Object.values(this.instructionToolMap).includes(tool.name)
         )
         .map((tool) => tool.getFunctionDescription());
+      
+      // Debug logging for tools being sent to LLM
+      this.promptLogger.debug(`Tools being sent to LLM:`, 
+        withTags(['tools', 'llm-request']), {
+        toolCount: unmappedTools.length,
+        toolNames: Array.from(this.toolRegistry.values())
+          .filter(tool => !Object.values(this.instructionToolMap).includes(tool.name))
+          .map(tool => tool.name),
+        toolDefinitions: unmappedTools
+      });
+
+      // Debug logging for instruction-mapped tools
+      this.promptLogger.debug(`Instruction-mapped tools:`, 
+        withTags(['tools', 'llm-request']), {
+        mappings: this.instructionToolMap,
+        excludedFromLLM: Array.from(this.toolRegistry.values())
+          .filter(tool => Object.values(this.instructionToolMap).includes(tool.name))
+          .map(tool => tool.name)
+      });
 
       const messageRecords = await this.memories.recallRecentMessages();
       const history: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [

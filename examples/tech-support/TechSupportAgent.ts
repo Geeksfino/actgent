@@ -15,7 +15,12 @@ const agentConfig = await AgentCoreConfigurator.loadMarkdownConfig(configPath);
 
 // Load the agent runtime environment from the project root
 const svcConfig = await AgentServiceConfigurator.getAgentConfiguration(__dirname);
+
+// Path to MCP configuration file
+const mcpConfigPath = runtime.path.join(__dirname, 'conf', 'mcp_config.json');
+
 const TechSupportAgent = new AgentBuilder(agentConfig, svcConfig)
+    .withMcpTools(mcpConfigPath)
     .create(MultiLevelClassifier, MultiLevelPromptTemplate);
 
 

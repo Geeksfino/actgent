@@ -8,3 +8,4 @@ export * from './appleScript';
 export * from './bingSearch';
 export * from './serp';
 export * from './sql';
+export * from './mcpTool';
