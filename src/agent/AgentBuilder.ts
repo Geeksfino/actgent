@@ -86,7 +86,7 @@ export class AgentBuilder {
     );
   }
 
-  private build<
+  public build<
     T extends readonly ClassificationTypeConfig[],
     C extends AbstractClassifier<T>,
     P extends IAgentPromptTemplate
