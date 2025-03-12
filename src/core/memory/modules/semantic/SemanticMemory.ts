@@ -72,7 +72,8 @@ export class SemanticMemory extends DeclarativeMemory {
             content: validatedContent,
             metadata: memoryMetadata,
             timestamp: now,
-            memoryType: MemoryType.SEMANTIC
+            memoryType: MemoryType.SEMANTIC,
+            createdAt: now
         };
     }
 

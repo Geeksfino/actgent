@@ -61,7 +61,8 @@ export class EpisodicMemory extends DeclarativeMemory {
             timestamp: now,
             memoryType: MemoryType.EPISODIC,
             accessCount: 0,
-            lastAccessed: now
+            lastAccessed: now,
+            createdAt: now
         };
     }
 

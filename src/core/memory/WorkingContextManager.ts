@@ -113,11 +113,13 @@ export class WorkingContextManager {
         }
 
         // Store updated context in working memory
+        const now = new Date();
         await this.workingMemory.store({
             id: 'current_context',
             content: this.currentContext,
             metadata: new Map([['type', 'context']]),
-            timestamp: new Date()
+            timestamp: now,
+            createdAt: now
         });
 
         // Emit context change event

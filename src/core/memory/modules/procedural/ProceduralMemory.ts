@@ -63,7 +63,8 @@ export class ProceduralMemory extends LongTermMemory<IProceduralMemoryUnit> {
             memoryType: MemoryType.PROCEDURAL,
             procedure: typeof validatedContent === 'string' ? validatedContent : JSON.stringify(validatedContent),
             expectedOutcomes: metadata?.get('expectedOutcomes') || [],
-            applicableContext: metadata?.get('applicableContext') || []
+            applicableContext: metadata?.get('applicableContext') || [],
+            createdAt: now
         };
     }
 
