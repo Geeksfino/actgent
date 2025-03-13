@@ -6,6 +6,8 @@
 import { Tool, ToolInput, ToolOutput, StringOutput } from "../core/Tool";
 import { McpClient } from "../mcp/client";
 import { z } from "zod";
+import { withTags } from "../core/Logger";
+import { toolLoggers } from "./logging";
 
 /**
  * Standard MCP content types that can be returned from tools
@@ -43,6 +45,7 @@ export class McpTool extends Tool<McpToolInput, StringOutput> {
   private toolName: string;
   private inputZodSchema: z.ZodSchema;
   private outputSchema: any;
+  private logger = toolLoggers.mcp;
 
   /**
    * Creates a new MCP Tool instance that represents a single tool on an MCP server
@@ -98,6 +101,9 @@ export class McpTool extends Tool<McpToolInput, StringOutput> {
       };
       
       // Call the tool on the MCP server
+      this.logger.debug(`Calling MCP tool ${this.toolName} with input: ${JSON.stringify(enhancedInput)}`,
+        withTags(["mcp"])
+      );
       const result = await this.mcpClient.callTool(this.toolName, enhancedInput);
       
       // Format the response according to MCP protocol standards
