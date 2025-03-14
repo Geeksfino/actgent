@@ -144,7 +144,9 @@ export class AgentCore {
   }
 
   public getToolForInstruction(instructionName: string): string | undefined {
-    return this.instructionToolMap[instructionName];
+    const toolName = this.instructionToolMap[instructionName];
+    console.log(`⭐ AgentCore.getToolForInstruction: ${instructionName} -> ${toolName || 'undefined'}`);
+    return toolName;
   }
 
   public async receive(message: Message): Promise<void> {
@@ -827,6 +829,10 @@ export class AgentCore {
     this.logger.debug(`Looking for tool: '${name}'`, withTags(['tool_calls']), {
       availableTools: Array.from(this.toolRegistry.keys())
     });
+    
+    console.log(`⭐ AgentCore.getTool: ${name} -> ${this.toolRegistry.has(name) ? 'found' : 'not found'}`);
+    console.log(`⭐ AgentCore.toolRegistry keys:`, Array.from(this.toolRegistry.keys()));
+    
     return this.toolRegistry.get(name);
   }
 
@@ -885,7 +891,10 @@ export class AgentCore {
 
   public hasToolForCurrentInstruction(messageType?: string): boolean {
     if (!messageType) return false;
-    return !!this.instructionToolMap[messageType];
+    const hasTool = !!this.instructionToolMap[messageType];
+    console.log(`⭐ AgentCore.hasToolForCurrentInstruction: ${messageType} -> ${hasTool}`);
+    console.log(`⭐ AgentCore.instructionToolMap:`, this.instructionToolMap);
+    return hasTool;
   }
 
   private static formatHistory(history: any[]): string {
