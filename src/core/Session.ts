@@ -99,20 +99,31 @@ export class Session {
         T extends readonly ClassificationTypeConfig[]
     >(obj: TInput): Promise<void> { 
         logger.debug(`Session: Triggering event handlers for object:`, obj);
+        console.log(`⭐ Session.triggerEventHandlers for messageType: ${obj.messageType}`);
+        
         const instructionName = obj.messageType;
         const toolName = this.core.getToolForInstruction(instructionName);
+        console.log(`⭐ Session: Tool for instruction ${instructionName}: ${toolName || 'none'}`); 
         
         if (toolName) {
+            console.log(`⭐ Session: Looking up tool ${toolName} in registry`);
             const tool = this.core.getTool(toolName) as Tool<TInput, TOutput> | undefined;
             
             if (tool) {
-                const result = await tool.run(obj, {});
-                this.eventHandlers.forEach(handler => {
-                    if (typeof handler === 'function') {  
-                        handler(result, this);
-                    }
-                });
+                console.log(`⭐ Session: Found tool ${toolName}, executing...`);
+                try {
+                    const result = await tool.run(obj, {});
+                    console.log(`⭐ Session: Tool ${toolName} execution successful: `, typeof result);
+                    this.eventHandlers.forEach(handler => {
+                        if (typeof handler === 'function') {  
+                            handler(result, this);
+                        }
+                    });
+                } catch (error) {
+                    console.log(`❌ Session: Error executing tool ${toolName}:`, error);
+                }
             } else {
+                console.log(`❌ Session: Tool ${toolName} not found in registry`);
                 // If no tool found, pass through the original object
                 this.eventHandlers.forEach(handler => {
                     if (typeof handler === 'function') {  
