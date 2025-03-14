@@ -88,9 +88,11 @@ export class McpTool extends Tool<McpToolInput, StringOutput> {
    * @returns Promise that resolves to the tool output
    */
   async execute(input: McpToolInput): Promise<StringOutput> {
+    console.log(`⭐ McpTool.execute called for tool: ${this.toolName}`);
     try {
       // Make sure we have a valid client connection
       if (!this.mcpClient) {
+        console.log(`❌ MCP client is not available for ${this.toolName}`);
         throw new Error("MCP client is not available");
       }
       
@@ -101,6 +103,7 @@ export class McpTool extends Tool<McpToolInput, StringOutput> {
       };
       
       // Call the tool on the MCP server
+      console.log(`⭐ Calling MCP tool ${this.toolName} with input:`, JSON.stringify(enhancedInput, null, 2));
       this.logger.debug(`Calling MCP tool ${this.toolName} with input: ${JSON.stringify(enhancedInput)}`,
         withTags(["mcp"])
       );
@@ -150,6 +153,18 @@ export class McpTool extends Tool<McpToolInput, StringOutput> {
         };
       }
       
+      // Log the formatted result for debugging
+      console.log(`⭐ MCP tool ${this.toolName} execution result:`, JSON.stringify(formattedResult, null, 2));
+      this.logger.debug(`MCP tool ${this.toolName} execution result:`, 
+        withTags(["mcp", "tool-result"]), {
+        result: formattedResult,
+        contentSummary: formattedResult.content.map(c => ({
+          type: c.type,
+          textLength: c.text ? c.text.length : 0,
+          hasData: !!c.data
+        }))
+      });
+      
       // Return the result as a StringOutput
       return new StringOutput(JSON.stringify(formattedResult));
     } catch (error) {
@@ -164,6 +179,14 @@ export class McpTool extends Tool<McpToolInput, StringOutput> {
         ],
         isError: true
       };
+      
+      // Log the error output for debugging
+      console.log(`❌ MCP tool ${this.toolName} execution error:`, errorMessage);
+      this.logger.error(`MCP tool ${this.toolName} execution error:`,
+        withTags(["mcp", "tool-error"]), {
+        error: errorMessage,
+        errorOutput
+      });
       
       return new StringOutput(JSON.stringify(errorOutput));
     }

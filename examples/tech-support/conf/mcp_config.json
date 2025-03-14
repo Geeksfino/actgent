@@ -1,21 +1,5 @@
 {
     "mcpServers": {
-      "filesystem": {
-        "command": "npx",
-        "args": [
-          "-y",
-          "@modelcontextprotocol/server-filesystem",
-          "/Users/cliang/Desktop",
-          "/Users/cliang/Downloads"
-        ]
-      },
-      "echo-server": {
-        "command": "/Users/cliang/repos/mygithub/embedding-mcp-server/.venv/bin/python",
-        "args": [
-          "/Users/cliang/repos/mygithub/embedding-mcp-server/test/echo-mcp/simple_echo.py"
-        ],
-        "cwd": "/Users/cliang/repos/mygithub/embedding-mcp-server"
-      },
       "finclip-rag-server": {
         "command": "/Users/cliang/repos/mygithub/tmp/.venv/bin/kb-mcp-server",
         "args": [

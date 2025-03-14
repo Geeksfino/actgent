@@ -11,6 +11,8 @@ export interface AgentCoreConfig {
   capabilities: string;  // Capabilities the agent has
   instructions?: Instruction[];
   instructionToolMap?: { [key: string]: string };
+  // Tools from MCP servers
+  mcpTools?: any[];     // Array of resolved MCP tools
   // tools?: { [key: string]: Tool };        // Custom tools the agent can use
   //inboxConfig?: InboxConfig;              // Configuration for task inbox settings (priority, queue, etc.)
   // memoryConfig?: MemoryConfig;            // Configuration for memory persistence (in-memory, DB, etc.)
