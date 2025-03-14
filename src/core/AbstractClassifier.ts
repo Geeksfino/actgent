@@ -56,12 +56,20 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
             break;
 
           case ResponseType.EVENT:
-            if (session.core.hasToolForCurrentInstruction(categorizedResponse.structuredData.messageType)) {
+            console.log(`⭐ AbstractClassifier: EVENT response with messageType: ${categorizedResponse.structuredData.messageType}`);
+            const hasTool = session.core.hasToolForCurrentInstruction(categorizedResponse.structuredData.messageType);
+            console.log(`⭐ AbstractClassifier: Has tool for instruction ${categorizedResponse.structuredData.messageType}? ${hasTool}`);
+            
+            if (hasTool) {
+              const toolName = session.core.getToolForInstruction(categorizedResponse.structuredData.messageType);
+              console.log(`⭐ AbstractClassifier: Found mapped tool: ${toolName} for instruction: ${categorizedResponse.structuredData.messageType}`);
               session.triggerEventHandlers(categorizedResponse.structuredData);
               if (categorizedResponse.textData) {
                 session.triggerConversationHandlers(categorizedResponse.textData);
               }
             } else {
+              console.log(`⭐ AbstractClassifier: No tool found for instruction: ${categorizedResponse.structuredData.messageType}`);
+
               // If no tool exists, treat both content and answer as conversation
               session.triggerConversationHandlers(categorizedResponse.structuredData);
               if (categorizedResponse.textData) {
