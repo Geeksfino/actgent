@@ -84,7 +84,7 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
           case ResponseType.EXCEPTION:
             // Exception because of LLM response parse error so obviously
             // the response cannot be structured. Let's treat it as text content
-            session.triggerExceptionHandlers(categorizedResponse.textData);
+            //session.triggerExceptionHandlers(categorizedResponse.textData);
             break;
 
           default:

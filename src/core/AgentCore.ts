@@ -320,7 +320,7 @@ export class AgentCore {
     return this.sessionContextManager[message.sessionId].getSession();
   }
 
-  private async promptLLM(message: Message): Promise<string> {
+  private async promptLLM(message: Message, context?: Record<string, any>): Promise<string> {
     //this.log(`System prompt: ${this.promptManager.getSystemPrompt()}`);
     const sessionContext = this.sessionContextManager[message.sessionId];
 
@@ -402,22 +402,158 @@ export class AgentCore {
           await this.llmClient.chat.completions.create(streamConfig);
 
         let chunks = [];
+        let accumulatedToolCalls: any[] = [];
+        let isCollectingToolCalls = false;
+
         for await (const chunk of stream) {
           chunks.push(chunk);
-          const delta = chunk.choices[0]?.delta?.content || "";
-          responseContent += delta;
-          this.streamBuffer += delta;
-          this.processStreamBuffer();
+          
+          // Check if this chunk contains tool call information
+          const toolCallDelta = chunk.choices[0]?.delta?.tool_calls;
+          
+          if (toolCallDelta) {
+            isCollectingToolCalls = true;
+            // Don't send tool calls to stream, accumulate them instead
+            this.logger.debug('Receiving tool call chunk', withTags(['tool_calls']), {
+              toolCallDelta
+            });
+            
+            // Add to accumulated tool calls
+            accumulatedToolCalls.push(chunk);
+          } else {
+            const delta = chunk.choices[0]?.delta?.content || "";
+            if (!isCollectingToolCalls) {
+              responseContent += delta;
+              this.streamBuffer += delta;
+              this.processStreamBuffer();
+            }
+          }
         }
 
         // Make sure all buffered data is sent before completion signal
-        if (this.streamBuffer) {
+        if (this.streamBuffer && !isCollectingToolCalls) {
           this.processStreamBuffer(true);
         }
 
         const lastChunk = chunks[chunks.length - 1];
         const finishReason = lastChunk.choices[0]?.finish_reason;
         this.logger.debug(`[promptLLM] Stream finished with reason: ${finishReason}`, withTags(["response"]));
+        
+        // If we collected tool calls, execute them and make a follow-up call
+        if (isCollectingToolCalls && finishReason === "tool_calls" && accumulatedToolCalls.length > 0) {
+          // Reconstruct the complete tool calls from chunks
+          const toolCalls = this.reconstructToolCalls(accumulatedToolCalls);
+          
+          if (toolCalls.length > 0) {
+            this.logger.debug('Executing tool calls from stream', withTags(['tool_calls']), {
+              toolCalls: toolCalls.map(tc => ({
+                id: tc.id,
+                name: tc.function.name,
+                arguments: tc.function.arguments
+              }))
+            });
+            
+            // Create updated messages with tool calls and results
+            const updatedMessages = [...messages];
+            
+            // Add assistant message with tool calls
+            updatedMessages.push({
+              role: "assistant",
+              tool_calls: toolCalls
+            });
+            
+            // Execute each tool and add result
+            for (const toolCall of toolCalls) {
+              try {
+                // The OpenAI API response for tool calls can come in different formats
+              // Regular format: { id, type: 'function', function: { name, arguments } }
+              // But sometimes in streaming: { id, type, name, arguments } 
+              
+              // Try both potential locations for the tool name
+              let toolName = toolCall.function?.name;
+              
+              // Handle various malformed cases from the OpenAI API
+              const toolCallAny = toolCall as any;
+              
+              // Case 1: Flattened structure - name at top level
+              if (!toolName && toolCallAny.name) {
+                toolName = toolCallAny.name;
+              }
+              
+              // If we still don't have a name, handle the error
+              if (!toolName) {
+                // Log the exact structure we received for debugging
+                this.logger.warn(`Tool call is missing function name property`, withTags(['tool_calls']), {
+                  toolCallStructure: JSON.stringify(toolCall)
+                });
+                
+                updatedMessages.push({
+                  role: "tool",
+                  tool_call_id: toolCall.id,
+                  content: `Error: Tool call is missing function name property`
+                });
+                continue;
+              }
+              
+              this.logger.debug(`Looking up tool: ${toolName}`, withTags(['tool_calls']));
+              const tool = this.getTool(toolName);
+                
+                if (tool) {
+                  const args = JSON.parse(toolCall.function?.arguments || "{}");
+                  const result = await tool.run(args, {});
+                  
+                  // Add the tool result
+                  updatedMessages.push({
+                    role: "tool",
+                    tool_call_id: toolCall.id,
+                    content: result.getContent()
+                  });
+                } else {
+                  this.logger.warn(`Tool ${toolName} not found`, withTags(['tool_calls']));
+                  // Add error message for missing tool
+                  updatedMessages.push({
+                    role: "tool",
+                    tool_call_id: toolCall.id,
+                    content: `Error: Tool '${toolName}' not found`
+                  });
+                }
+              } catch (error: unknown) {
+                const functionName = toolCall.function?.name || 'unknown';
+                this.logger.error(`Error executing tool ${functionName}:`, error);
+                updatedMessages.push({
+                  role: "tool",
+                  tool_call_id: toolCall.id, 
+                  content: `Error executing tool: ${error instanceof Error ? error.message : String(error)}`
+                });
+              }
+            }
+            
+            // Make a follow-up call with the tool results
+            const followUpConfig: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+              ...baseConfig,
+              messages: updatedMessages,
+              stream: true
+            };
+            
+            this.logger.debug('Making follow-up call with tool results', withTags(['tool_calls']));
+            
+            // Stream the follow-up response
+            const followUpStream = await this.llmClient.chat.completions.create(followUpConfig);
+            
+            responseContent = ""; // Reset response content for the follow-up
+            for await (const chunk of followUpStream) {
+              const delta = chunk.choices[0]?.delta?.content || "";
+              responseContent += delta;
+              this.streamBuffer += delta;
+              this.processStreamBuffer();
+            }
+            
+            // Make sure all buffered data is sent
+            if (this.streamBuffer) {
+              this.processStreamBuffer(true);
+            }
+          }
+        }
         
         // Only send completion signal after all data is processed
         if (this.llmConfig?.streamMode && 
@@ -427,8 +563,8 @@ export class AgentCore {
           for (const callback of this.streamCallbacks) {
             try {
               callback("", { type: 'completion', reason: finishReason });
-            } catch (error) {
-              this.logger.error(`Error in stream callback during completion signal: ${error}`);
+            } catch (error: unknown) {
+              this.logger.error(`Error in stream callback during completion signal: ${error instanceof Error ? error.message : String(error)}`);
             }
           }
         }
@@ -445,54 +581,150 @@ export class AgentCore {
         const message = response.choices[0].message;
         const finishReason = response.choices[0].finish_reason;
         this.logger.debug(`[promptLLM] Non-stream finished with reason: ${finishReason}`, withTags(["response"]));
-        const isToolCalls = finishReason === "tool_calls";
-
-        if (isToolCalls && message.tool_calls) {
-          responseContent = JSON.stringify({
-            tool_calls: message.tool_calls.map((toolCall) => ({
-              name: toolCall.function.name,
-              arguments: toolCall.function.arguments,
-            })),
+        
+        // Check if we need to execute tools
+        if (finishReason === "tool_calls" && message.tool_calls && message.tool_calls.length > 0) {
+          // Inspect the raw structure to diagnose the issue
+          const rawToolCalls = JSON.stringify(message.tool_calls, null, 2);
+          this.logger.debug('Raw tool calls from OpenAI response:', withTags(['tool_calls']), {
+            rawToolCalls
           });
+          
+          // Log the parsed structure
+          this.logger.debug('Executing tool calls from non-stream response', withTags(['tool_calls']), {
+            toolCalls: message.tool_calls.map(tc => ({
+              id: tc.id,
+              type: tc.type,  // This is 'function'
+              name: tc.function?.name, // The actual function name to call
+              arguments: tc.function?.arguments
+            }))
+          });
+          
+          // Create updated messages with tool calls and results
+          const updatedMessages = [...messages];
+          
+          // Add assistant message with tool calls
+          updatedMessages.push({
+            role: "assistant",
+            tool_calls: message.tool_calls
+          });
+          
+          // Execute each tool and add result
+          for (const toolCall of message.tool_calls) {
+            try {
+              // The OpenAI API response for tool calls can come in different formats
+              // Regular format: { id, type: 'function', function: { name, arguments } }
+              // But sometimes in streaming: { id, type, name, arguments } 
+              
+              // Try both potential locations for the tool name
+              let toolName = toolCall.function?.name;
+              
+              // Handle various malformed cases from the OpenAI API
+              const toolCallAny = toolCall as any;
+              
+              // Case 1: Flattened structure - name at top level
+              if (!toolName && toolCallAny.name) {
+                toolName = toolCallAny.name;
+              }
+              
+              // If we still don't have a name, handle the error
+              if (!toolName) {
+                // Log the exact structure we received for debugging
+                this.logger.warn(`Tool call is missing function name property`, withTags(['tool_calls']), {
+                  toolCallStructure: JSON.stringify(toolCall)
+                });
+                
+                updatedMessages.push({
+                  role: "tool",
+                  tool_call_id: toolCall.id,
+                  content: `Error: Tool call is missing function name property`
+                });
+                continue;
+              }
+              
+              this.logger.debug(`Looking up tool: ${toolName}`, withTags(['tool_calls']));
+              const tool = this.getTool(toolName);
+              
+              if (tool) {
+                const args = JSON.parse(toolCall.function?.arguments || "{}");
+                const result = await tool.run(args, {});
+                
+                // Add the tool result
+                updatedMessages.push({
+                  role: "tool",
+                  tool_call_id: toolCall.id,
+                  content: result.getContent()
+                });
+              } else {
+                this.logger.warn(`Tool ${toolName} not found`, withTags(['tool_calls']));
+                // Add error message for missing tool
+                updatedMessages.push({
+                  role: "tool",
+                  tool_call_id: toolCall.id,
+                  content: `Error: Tool '${toolName}' not found`
+                });
+              }
+            } catch (error: unknown) {
+              const functionName = toolCall.function?.name || 'unknown';  
+              this.logger.error(`Error executing tool ${functionName}:`, error);
+              updatedMessages.push({
+                role: "tool",
+                tool_call_id: toolCall.id, 
+                content: `Error executing tool: ${error instanceof Error ? error.message : String(error)}`
+              });
+            }
+          }
+          
+          // Add a max recursion depth parameter to the function to track recursion depth
+          const maxToolRecursionDepth = 3; // Limit recursion to prevent infinite loops
+          const currentRecursionDepth = (baseConfig as any).recursionDepth || 0;
+          
+          this.logger.debug(`Current tool recursion depth: ${currentRecursionDepth}`, withTags(['tool_calls']));
+          
+          if (currentRecursionDepth >= maxToolRecursionDepth) {
+            this.logger.warn(`Maximum tool recursion depth (${maxToolRecursionDepth}) reached, stopping further tool execution`, 
+                             withTags(['tool_calls']));
+            return `I've reached the maximum number of consecutive tool calls (${maxToolRecursionDepth}). To prevent potential infinite loops, I'll stop here. If you need to execute more tools, please make a new request.`;
+          }
+          
+          // Make a follow-up call with the tool results
+          // Create a type-safe config without the custom property
+          const followUpConfig: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
+            ...baseConfig,
+            messages: updatedMessages,
+            stream: false
+          };
+          
+          // Then add our custom tracking property with type assertion
+          (followUpConfig as any).recursionDepth = currentRecursionDepth + 1;
+          
+          this.logger.debug('Making follow-up call with tool results', withTags(['tool_calls']));
+          
+          // Get the follow-up response
+          const followUpResponse = await this.llmClient.chat.completions.create(followUpConfig);
+          const followUpMessage = followUpResponse.choices[0].message;
+          const followUpFinishReason = followUpResponse.choices[0].finish_reason;
+          
+          // Check if the follow-up response is also requesting tool calls
+          if (followUpFinishReason === "tool_calls" && followUpMessage.tool_calls && followUpMessage.tool_calls.length > 0) {
+            this.logger.debug('Follow-up response contains more tool calls, would require additional recursion',
+                             withTags(['tool_calls']), {
+                                toolCount: followUpMessage.tool_calls.length,
+                                recursionDepth: currentRecursionDepth + 1
+                             });
+          }
+          
+          responseContent = followUpMessage.content || "";
         } else {
           responseContent = message.content || "{}";
         }
       }
-      //console.log(`Agent Core Response content: ${responseContent}`);
-
-      // Handle function execution
-      try {
-        this.logger.debug('Raw LLM response:', 
-          withTags(['response']),{
-          responseLength: responseContent.length,
-          firstChars: responseContent.substring(0, 50),
-          lastChars: responseContent.substring(responseContent.length - 50)
-        });
-        
-        const parsed = JSON.parse(responseContent);
-        this.logger.debug('Successfully parsed LLM response as JSON', withTags(['response']));  
-
-        // POTENTIALLY DEAD CODE:
-        // This code path attempts to handle OpenAI's native function calling format (tool_calls),
-        // but likely never executes because:
-        // 1. Our prompt templates format LLM responses in our custom format (primary_action, etc.)
-        // 2. Tool execution is handled by the classifier chain:
-        //    LLM Response -> ReActClassifier.parseLLMResponse -> Session.triggerToolCallsHandlers
-        // 3. The classifier looks for primary_action.response_purpose === 'TOOL_INVOCATION'
-        //    not the OpenAI native tool_calls format
-        // TODO: Verify if this code path is ever taken. If not, consider removing it
-        //       to avoid potential double tool execution.
-        if (parsed.tool_calls) {
-          const tool = this.getTool(parsed.tool_calls[0].name);
-          if (tool) {
-            const args = JSON.parse(parsed.tool_calls[0].arguments);
-            const result = await tool.run(args, {});
-            return result.getContent();
-          }
-        }
-      } catch (e) {
-        // Not a valid function call JSON, return original response
-      }
+      this.logger.debug('Final LLM response:', 
+        withTags(['response']), {
+        responseLength: responseContent.length,
+        firstChars: responseContent.substring(0, 300),
+        lastChars: responseContent.substring(responseContent.length - 50)
+      });
 
       return responseContent;
     } catch (error) {
@@ -530,6 +762,60 @@ export class AgentCore {
     return sessionId; // Return the generated session ID
   }
 
+  /**
+   * Reconstructs complete tool calls from stream chunks.
+   * OpenAI streams tool calls piece by piece, so we need to accumulate and reconstruct them.
+   */
+  private reconstructToolCalls(chunks: any[]): any[] {
+    this.logger.debug('Reconstructing tool calls from chunks', withTags(['tool_calls']), {
+      chunkCount: chunks.length
+    });
+    
+    const toolCallsMap = new Map<string, any>();
+    
+    for (const chunk of chunks) {
+      const toolCallDeltas = chunk.choices[0]?.delta?.tool_calls || [];
+      
+      for (const delta of toolCallDeltas) {
+        const index = delta.index;
+        
+        if (!toolCallsMap.has(String(index))) {
+          toolCallsMap.set(String(index), {
+            id: delta.id || "",
+            function: {
+              name: "",
+              arguments: ""
+            },
+            type: "function"
+          });
+        }
+        
+        const currentTool = toolCallsMap.get(String(index));
+        
+        // Update the id if provided
+        if (delta.id) {
+          currentTool.id = delta.id;
+        }
+        
+        // Update function properties
+        if (delta.function) {
+          if (delta.function.name) {
+            currentTool.function.name = delta.function.name;
+          }
+          
+          if (delta.function.arguments) {
+            currentTool.function.arguments += delta.function.arguments;
+          }
+        }
+        
+        toolCallsMap.set(String(index), currentTool);
+      }
+    }
+    
+    // Convert the map to an array
+    return Array.from(toolCallsMap.values());
+  }
+
   public registerTool<TInput, TOutput extends ToolOutput>(
     tool: Tool<TInput, TOutput, ToolOptions>
   ): void {
@@ -538,6 +824,9 @@ export class AgentCore {
   }
 
   public getTool(name: string): Tool<any, any, any> | undefined {
+    this.logger.debug(`Looking for tool: '${name}'`, withTags(['tool_calls']), {
+      availableTools: Array.from(this.toolRegistry.keys())
+    });
     return this.toolRegistry.get(name);
   }
 
