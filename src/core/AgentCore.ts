@@ -12,6 +12,7 @@ import { SessionContext } from "./SessionContext";
 import { Subject } from "rxjs";
 import { IClassifier } from "./IClassifier";
 import { withTags, Logger } from './Logger';
+import { LLMErrorHandler } from './LLMErrorHandler';
 import { coreLoggers } from './logging';
 import { getEventEmitter } from "./observability/AgentEventEmitter";
 import { ResponseType } from "./ResponseTypes";
@@ -451,8 +452,15 @@ export class AgentCore {
             stream: true,
           };
 
-        const stream =
-          await this.llmClient.chat.completions.create(streamConfig);
+        let stream;
+        try {
+          stream = await this.llmClient.chat.completions.create(streamConfig);
+        } catch (error: any) {
+          this.logger.error(`Error in streaming LLM call: ${error?.message || 'Unknown error'}`, withTags(["error", "llm-api"]));
+          // Handle the error gracefully using our error handler
+          responseContent = await LLMErrorHandler.handleError(error, sessionContext.getSession());
+          return responseContent;
+        }
 
         let chunks = [];
         for await (const chunk of stream) {
@@ -493,8 +501,15 @@ export class AgentCore {
             stream: false,
           };
 
-        const response =
-          await this.llmClient.chat.completions.create(nonStreamConfig);
+        let response;
+        try {
+          response = await this.llmClient.chat.completions.create(nonStreamConfig);
+        } catch (error: any) {
+          this.logger.error(`Error in non-streaming LLM call: ${error?.message || 'Unknown error'}`, withTags(["error", "llm-api"]));
+          // Handle the error gracefully using our error handler
+          responseContent = await LLMErrorHandler.handleError(error, sessionContext.getSession());
+          return responseContent;
+        }
         const message = response.choices[0].message;
         const finishReason = response.choices[0].finish_reason;
         this.logger.debug(`[promptLLM] Non-stream finished: ${JSON.stringify(message, null, 2)}`, withTags(["response"]));
@@ -517,11 +532,36 @@ export class AgentCore {
           lastChars: responseContent.substring(responseContent.length - 50)
         });
         
-        const parsed = JSON.parse(responseContent);
-        this.logger.debug('Successfully parsed LLM response as JSON', withTags(['response']));  
-
+        // Attempt to parse the response as JSON
+        try {
+          const parsed = JSON.parse(responseContent);
+          this.logger.debug('Successfully parsed LLM response as JSON', withTags(['response']));
+        } catch (parseError: any) {
+          // Log the JSON parse error with more details
+          this.logger.error(`Error parsing LLM response as JSON: ${parseError}`, withTags(['error', 'json-parse']), {
+            error: parseError?.message || 'Unknown parse error',
+            responseLength: responseContent.length,
+            responsePreview: responseContent.length > 100 ? 
+              `${responseContent.substring(0, 50)}...${responseContent.substring(responseContent.length - 50)}` : 
+              responseContent
+          });
+          
+          // If we have an unterminated string error, attempt to fix it
+          if (parseError?.message?.includes('Unterminated string')) {
+            this.logger.warn('Attempting to fix unterminated string in JSON response', withTags(['recovery']));
+            // Simple fix: add a closing quote if it seems to be missing
+            const fixedResponse = responseContent.endsWith('"') ? responseContent : responseContent + '"';
+            try {
+              const parsed = JSON.parse(fixedResponse);
+              this.logger.info('Successfully fixed and parsed JSON response', withTags(['recovery']));
+              responseContent = fixedResponse;
+            } catch (fixError) {
+              this.logger.error('Failed to fix unterminated string in JSON response', withTags(['error', 'recovery-failed']));
+            }
+          }
+        }
       } catch (error) {
-        this.logger.error(`Error parsing LLM response as JSON: ${error}`);
+        this.logger.error(`Error in LLM response processing: ${error}`, withTags(['error']));
       }
       return responseContent;
     } catch (error) {

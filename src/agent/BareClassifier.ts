@@ -65,6 +65,20 @@ export class BareClassifier<T extends readonly ClassificationTypeConfig[]> exten
 
       // Tool call handling is done in AbstractClassifier
       
+      // Handle simple string/primitive responses
+      if (typeof parsed === 'string' || typeof parsed === 'number' || typeof parsed === 'boolean') {
+        classifierLogger.debug("Detected simple primitive response, treating as conversation", 
+          withTags(['bare']), { responseType: typeof parsed });
+        return {
+          type: ResponseType.CONVERSATION,
+          structuredData: {
+            messageType: 'CONVERSATION',
+            response: parsed.toString()
+          } as InferClassificationUnion<T>,
+          textData: parsed.toString()
+        };
+      }
+      
       // If we reach here, the response format is unrecognized
       classifierLogger.error("Unrecognized LLM response format: ", response);
       return {

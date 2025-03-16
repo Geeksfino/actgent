@@ -100,9 +100,18 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
         }
       }
       
-      return {
-        originalToolCalls: parsed
-      };
+      // Only return originalToolCalls if it's an array or object that might contain tool call info
+      // For primitive values like strings, numbers, or booleans, return an empty object
+      if (parsed && typeof parsed === 'object') {
+        return {
+          // Store the original parsed object only if it might contain tool call info
+          // This helps debugging but doesn't confuse downstream processing
+          originalToolCalls: Array.isArray(parsed) || Object.keys(parsed).length > 0 ? parsed : undefined
+        };
+      }
+      
+      // For primitive values (string, number, boolean), return empty object
+      return {};
     } catch (error) {
       // Not JSON or doesn't contain tool call info
       return {};
@@ -116,7 +125,18 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
     try {
       // Extract tool call information for any response
       const toolCallInfo = this.extractToolCallInfo(response);
-      logger.info(`Extracted tool call info: ${JSON.stringify(toolCallInfo)}`);
+      
+      // Only log tool call info if there's meaningful content to avoid confusion
+      if (Object.keys(toolCallInfo).length > 0) {
+        logger.info(`Extracted tool call info: ${JSON.stringify(toolCallInfo)}`);
+      } else {
+        logger.debug('No tool call information found in response', {
+          responseLength: response.length,
+          responsePreview: response.length > 100 ? 
+            `${response.substring(0, 50)}...${response.substring(response.length - 50)}` : 
+            response
+        });
+      }
 
       // Check if the response is a tool call
       if (toolCallInfo.id) {
