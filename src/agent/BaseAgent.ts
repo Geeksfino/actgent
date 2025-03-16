@@ -178,26 +178,54 @@ export abstract class BaseAgent<
     
     if (result.status === 'success') {
       let content = '';
+      
+      // Process the tool result data
       if (result.data instanceof JSONOutput) {
-        content = result.data.getContent();
+        // Get the content directly from JSONOutput
+        let rawContent = result.data.getContent();
+        
+        // Check if it's a JSON with a content field structure that would cause nesting
+        try {
+          const parsed = JSON.parse(rawContent);
+          if (parsed && typeof parsed === 'object' && parsed.content) {
+            // If the output already has a content field, use the raw content instead
+            // to avoid nesting issues
+            rawContent = JSON.stringify(parsed.content);
+          }
+        } catch (e) {
+          // If parsing fails, use the original content
+        }
+        
+        content = rawContent;
       } else if (typeof result.data === 'object' && result.data !== null) {
-        content = JSON.stringify(result.data);
+        // For regular objects, check if they have a content field to avoid nesting
+        if (result.data.content) {
+          content = JSON.stringify(result.data.content);
+        } else {
+          content = JSON.stringify(result.data);
+        }
       } else {
         content = String(result.data);
       }
       
-      // Send the result back with tool name and result marker
-      const formattedResponse = `[${result.toolName || 'Tool'} Result]: ${content}`;
-
-      const msg = `[Agent ${this.core.name}] got back ${formattedResponse}. Use this result to infer response to the user.`;
-      session.chat(msg, "agent", { tool_call: true }).catch(error => {
+      // Format tool result according to OpenAI convention
+      // The content should be just the raw tool output without any additional formatting
+      session.chat(content, "tool", { 
+        tool_call_id: result.toolCallId,
+        // Don't add the tool_call flag as it might cause additional processing
+        // that leads to nesting
+      }).catch(error => {
         logger.error("Error sending tool result back to LLM:", error);
       });
     }
     else {
-      const message = `Tool execution failed: ${result.error}. Please determine the next action to take or respond to the user with explanation.`;
-      session.chat(message, "agent", { tool_call: true }).catch(error => {
-        logger.error("Error sending tool result back to LLM:", error);
+      // For failed tool executions, format error message
+      const errorMessage = `Error: ${result.error}`;
+      session.chat(errorMessage, "tool", { 
+        tool_call_id: result.toolCallId
+        // Removed tool_call: true to prevent potential nesting
+      }).catch(error => {
+        logger.error("Error sending tool failure back to LLM:", error);
       });
     }
   }

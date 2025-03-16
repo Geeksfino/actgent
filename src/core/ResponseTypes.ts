@@ -20,6 +20,17 @@ export interface ParsedLLMResponse<T extends readonly ClassificationTypeConfig[]
   // For backward compatibility
   isToolCall?: boolean;
   parsedLLMResponse?: InferClassificationUnion<T>;
+  
+  // Standardized tool call properties
+  toolCallId?: string;  // The ID of the tool call from LLM response
+  originalToolCalls?: Array<{  // Original tool call objects for reference
+    id?: string;
+    function?: {
+      name?: string;
+      arguments?: string;
+    };
+    type?: string;
+  }>;
 }
 
 export interface ResponseHandler<T extends readonly ClassificationTypeConfig[]> {

@@ -37,24 +37,76 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
     return null;
   }
 
+  // Extract tool call information from OpenAI-format responses
+  protected extractToolCallInfo(response: string): { 
+    id?: string; 
+    name?: string;
+    arguments?: any;
+    originalToolCalls?: Array<any>;
+  } {
+    try {
+      const parsed = JSON.parse(response);
+      
+      // Handle array format where tool call is the first element
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const toolCall = parsed[0];
+        // Ensure the tool call has id, type, function.name, and function.arguments
+        if (toolCall.id && toolCall.type === "function" && toolCall.function?.name && toolCall.function?.arguments !== undefined) {
+          return {
+            id: toolCall.id,
+            name: toolCall.function.name,
+            arguments: toolCall.function.arguments,
+            originalToolCalls: parsed
+          };
+        }
+      }
+      
+      return {
+        originalToolCalls: parsed
+      };
+    } catch (error) {
+      // Not JSON or doesn't contain tool call info
+      return {};
+    }
+  }
+
   public handleLLMResponse(
     response: string,
     session: Session
   ): ResponseType {
     try {
+      // Extract tool call information for any response
+      const toolCallInfo = this.extractToolCallInfo(response);
+      logger.info(`Extracted tool call info: ${JSON.stringify(toolCallInfo)}`);
+
+      // Check if the response is a tool call
+      if (toolCallInfo.id) {
+        const categorizedResponse = {
+          type: ResponseType.TOOL_CALL,
+          id: toolCallInfo.id,
+          name: toolCallInfo.name,
+          arguments: toolCallInfo.arguments,
+          originalToolCalls: toolCallInfo.originalToolCalls,
+          structuredData: {
+            id: toolCallInfo.id,
+            name: toolCallInfo.name,
+            arguments: toolCallInfo.arguments,
+            originalToolCalls: toolCallInfo.originalToolCalls
+          },
+          messageType: 'TOOL_INVOCATION'
+        };
+
+        session.triggerToolCallsHandlers(categorizedResponse);
+        return ResponseType.TOOL_CALL;
+      }
+
       // Try the new categorization first
-      const categorizedResponse = this.categorizeLLMResponse(response);
+      let categorizedResponse = this.categorizeLLMResponse(response);
       
       if (categorizedResponse) {
+        
         // Route response based on type
         switch (categorizedResponse.type) {
-          case ResponseType.TOOL_CALL:
-            session.triggerToolCallsHandlers(categorizedResponse.structuredData);
-            if (categorizedResponse.textData) {
-              session.triggerConversationHandlers(categorizedResponse.textData);
-            }
-            break;
-
           case ResponseType.EVENT:
             console.log(`⭐ AbstractClassifier: EVENT response with messageType: ${categorizedResponse.structuredData.messageType}`);
             const hasTool = session.core.hasToolForCurrentInstruction(categorizedResponse.structuredData.messageType);
@@ -106,6 +158,11 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
       // Fall back to legacy parsing if categorization returns null
       const { isToolCall, instruction, parsedLLMResponse, answer } = 
         this.parseLLMResponse(response);
+      
+      // For legacy parsing, add the tool call ID to the parsed response if it's a tool call
+      if (isToolCall && toolCallInfo.id) {
+        (parsedLLMResponse as any).id = toolCallInfo.id;
+      }
             
       if (isToolCall) {
         session.triggerToolCallsHandlers(parsedLLMResponse);

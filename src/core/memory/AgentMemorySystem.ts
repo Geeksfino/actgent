@@ -84,7 +84,7 @@ export class AgentMemorySystem {
      * based on events from MemoryTransitionManager.
      */
     public async remember<C>(content: C | string, schema?: z.ZodSchema<C>, metadata?: Map<string, any>): Promise<void> {
-        if (metadata?.get('role') === 'user' || metadata?.get('role') === 'assistant') {
+        if (metadata?.get('role') === 'user' || metadata?.get('role') === 'assistant' || metadata?.get('role') === 'tool') {
             const memoryUnit = this.ephemeralMemory.createMemoryUnit(content, schema, metadata);
             await this.ephemeralMemory.store(memoryUnit);
         }
@@ -249,15 +249,43 @@ export class AgentMemorySystem {
      * @param limit Optional number of messages to return
      * @returns Array of messages in OpenAI format {role, content}
      */
-    public async recallRecentMessages(limit?: number): Promise<Array<{ role: 'system' | 'user' | 'assistant', content: string }>> {
+    public async recallRecentMessages(limit?: number): Promise<Array<any>> {
         // Get messages in FIFO order
         const memories = await this.ephemeralMemory.query({ limit });
         
         // Convert to OpenAI format
-        return memories.map(memory => ({
-            role: memory.metadata.get('role') as 'system' | 'user' | 'assistant' || 'assistant',
-            content: String(memory.content)
-        }));
+        return memories.map(memory => {
+            const role = memory.metadata.get('role') as 'system' | 'user' | 'assistant' | 'tool' || 'assistant';
+            
+            // Basic message format
+            const message: any = {
+                role,
+                content: String(memory.content)
+            };
+            
+            // Handle tool calls for assistant messages
+            const toolCalls = memory.metadata.get('tool_calls');
+            if (role === 'assistant' && toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0) {
+                message.tool_calls = toolCalls;
+                // Remove content field completely when tool_calls is present
+                delete message.content;
+            } else {
+                message.content = String(memory.content);
+            }
+            
+            // Handle tool responses
+            if (role === 'tool') {
+                const toolCallId = memory.metadata.get('tool_call_id');
+                if (toolCallId) {
+                    message.tool_call_id = toolCallId;
+                    
+                    // No need for complex content handling anymore since we fixed the root cause
+                    // The content should already be properly formatted
+                }
+            }
+            
+            return message;
+        });
     }
 
     /**

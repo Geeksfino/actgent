@@ -287,7 +287,9 @@ export class AgentCore {
 
       await this.remember(conversationMessage);
     } else if (responseType === ResponseType.TOOL_CALL) {
-      // not sure what to do here yet
+      // Create a new message with the tool_calls and remember it
+      const toolCallMessage = session.createMessage("", "assistant", { tool_calls: JSON.parse(cleanedResponse) });
+      await this.remember(toolCallMessage);
     }
   }
 
@@ -298,7 +300,10 @@ export class AgentCore {
       sender = 'user';
     } else if (message.metadata?.sender === 'assistant') {
       sender = 'assistant';
+    } else if (message.metadata?.sender === 'tool') {
+      sender = 'tool';
     }
+    
     const metadataMap = new Map(
       message.metadata ? 
         Object.entries({
@@ -308,7 +313,30 @@ export class AgentCore {
           ...message.metadata.context
         }) : []
     );
-    await this.memories.remember(message.payload.input, undefined, metadataMap);
+    
+    // Store content directly for most messages
+    let content = message.payload.input;
+    
+    // Handle tool calls in assistant messages
+    if (sender === 'assistant' && message.metadata?.context?.tool_calls) {
+      // Store tool_calls array for OpenAI format compatibility
+      metadataMap.set('tool_calls', message.metadata.context.tool_calls);
+      
+      // For messages with tool calls, content can be empty string per OpenAI convention
+      if (message.metadata.context.tool_calls.length > 0) {
+        metadataMap.set('content', content);
+        // Don't set content to empty string here as we still want to store the original content
+      }
+    }
+    
+    // Handle tool responses
+    if (sender === 'tool' && message.metadata?.context?.tool_call_id) {
+      metadataMap.set('tool_call_id', message.metadata.context.tool_call_id);
+      // Don't store content again in metadata - it's already in the main content field
+      // metadataMap.set('content', content); - This was causing nested content fields
+    }
+    
+    await this.memories.remember(content, undefined, metadataMap);
   }
 
   public async getOrCreateSessionContext(message: Message): Promise<Session> {
@@ -322,7 +350,7 @@ export class AgentCore {
     return this.sessionContextManager[message.sessionId].getSession();
   }
 
-  private async promptLLM(message: Message, context?: Record<string, any>): Promise<string> {
+  private async promptLLM(message: Message): Promise<string> {
     //this.log(`System prompt: ${this.promptManager.getSystemPrompt()}`);
     const sessionContext = this.sessionContextManager[message.sessionId];
 
@@ -361,9 +389,32 @@ export class AgentCore {
 
       const messageRecords = await this.memories.recallRecentMessages();
       const history: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-        ...messageRecords.map(({ role, content }) => ({ role, content })),
+        ...messageRecords.map((message) => {
+          // Create a basic message structure
+          const mapped: any = {
+            role: message.role,
+            content: message.content
+          };
+          
+          // For assistant messages with tool_calls
+          if (message.role === 'assistant' && message.tool_calls) {
+            mapped.tool_calls = message.tool_calls;
+            // When tool_calls is present, content should be omitted per OpenAI convention
+            delete mapped.content;
+          }
+          
+          // For tool messages
+          if (message.role === 'tool' && message.tool_call_id) {
+            mapped.tool_call_id = message.tool_call_id;
+            
+            // No need for complex content handling anymore since we fixed the root cause
+            // The content should already be properly formatted
+          }
+          
+          return mapped as OpenAI.Chat.Completions.ChatCompletionMessageParam;
+        }),
       ];
-  
+
       // Pretty print the history
       const formattedHistory = AgentCore.formatHistory(history);
       this.promptLogger.debug(`History:\n${formattedHistory}`);
@@ -404,158 +455,22 @@ export class AgentCore {
           await this.llmClient.chat.completions.create(streamConfig);
 
         let chunks = [];
-        let accumulatedToolCalls: any[] = [];
-        let isCollectingToolCalls = false;
-
         for await (const chunk of stream) {
           chunks.push(chunk);
-          
-          // Check if this chunk contains tool call information
-          const toolCallDelta = chunk.choices[0]?.delta?.tool_calls;
-          
-          if (toolCallDelta) {
-            isCollectingToolCalls = true;
-            // Don't send tool calls to stream, accumulate them instead
-            this.logger.debug('Receiving tool call chunk', withTags(['tool_calls']), {
-              toolCallDelta
-            });
-            
-            // Add to accumulated tool calls
-            accumulatedToolCalls.push(chunk);
-          } else {
-            const delta = chunk.choices[0]?.delta?.content || "";
-            if (!isCollectingToolCalls) {
-              responseContent += delta;
-              this.streamBuffer += delta;
-              this.processStreamBuffer();
-            }
-          }
+          const delta = chunk.choices[0]?.delta?.content || "";
+          responseContent += delta;
+          this.streamBuffer += delta;
+          this.processStreamBuffer();
         }
 
         // Make sure all buffered data is sent before completion signal
-        if (this.streamBuffer && !isCollectingToolCalls) {
+        if (this.streamBuffer) {
           this.processStreamBuffer(true);
         }
 
         const lastChunk = chunks[chunks.length - 1];
         const finishReason = lastChunk.choices[0]?.finish_reason;
         this.logger.debug(`[promptLLM] Stream finished with reason: ${finishReason}`, withTags(["response"]));
-        
-        // If we collected tool calls, execute them and make a follow-up call
-        if (isCollectingToolCalls && finishReason === "tool_calls" && accumulatedToolCalls.length > 0) {
-          // Reconstruct the complete tool calls from chunks
-          const toolCalls = this.reconstructToolCalls(accumulatedToolCalls);
-          
-          if (toolCalls.length > 0) {
-            this.logger.debug('Executing tool calls from stream', withTags(['tool_calls']), {
-              toolCalls: toolCalls.map(tc => ({
-                id: tc.id,
-                name: tc.function.name,
-                arguments: tc.function.arguments
-              }))
-            });
-            
-            // Create updated messages with tool calls and results
-            const updatedMessages = [...messages];
-            
-            // Add assistant message with tool calls
-            updatedMessages.push({
-              role: "assistant",
-              tool_calls: toolCalls
-            });
-            
-            // Execute each tool and add result
-            for (const toolCall of toolCalls) {
-              try {
-                // The OpenAI API response for tool calls can come in different formats
-              // Regular format: { id, type: 'function', function: { name, arguments } }
-              // But sometimes in streaming: { id, type, name, arguments } 
-              
-              // Try both potential locations for the tool name
-              let toolName = toolCall.function?.name;
-              
-              // Handle various malformed cases from the OpenAI API
-              const toolCallAny = toolCall as any;
-              
-              // Case 1: Flattened structure - name at top level
-              if (!toolName && toolCallAny.name) {
-                toolName = toolCallAny.name;
-              }
-              
-              // If we still don't have a name, handle the error
-              if (!toolName) {
-                // Log the exact structure we received for debugging
-                this.logger.warn(`Tool call is missing function name property`, withTags(['tool_calls']), {
-                  toolCallStructure: JSON.stringify(toolCall)
-                });
-                
-                updatedMessages.push({
-                  role: "tool",
-                  tool_call_id: toolCall.id,
-                  content: `Error: Tool call is missing function name property`
-                });
-                continue;
-              }
-              
-              this.logger.debug(`Looking up tool: ${toolName}`, withTags(['tool_calls']));
-              const tool = this.getTool(toolName);
-                
-                if (tool) {
-                  const args = JSON.parse(toolCall.function?.arguments || "{}");
-                  const result = await tool.run(args, {});
-                  
-                  // Add the tool result
-                  updatedMessages.push({
-                    role: "tool",
-                    tool_call_id: toolCall.id,
-                    content: result.getContent()
-                  });
-                } else {
-                  this.logger.warn(`Tool ${toolName} not found`, withTags(['tool_calls']));
-                  // Add error message for missing tool
-                  updatedMessages.push({
-                    role: "tool",
-                    tool_call_id: toolCall.id,
-                    content: `Error: Tool '${toolName}' not found`
-                  });
-                }
-              } catch (error: unknown) {
-                const functionName = toolCall.function?.name || 'unknown';
-                this.logger.error(`Error executing tool ${functionName}:`, error);
-                updatedMessages.push({
-                  role: "tool",
-                  tool_call_id: toolCall.id, 
-                  content: `Error executing tool: ${error instanceof Error ? error.message : String(error)}`
-                });
-              }
-            }
-            
-            // Make a follow-up call with the tool results
-            const followUpConfig: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
-              ...baseConfig,
-              messages: updatedMessages,
-              stream: true
-            };
-            
-            this.logger.debug('Making follow-up call with tool results', withTags(['tool_calls']));
-            
-            // Stream the follow-up response
-            const followUpStream = await this.llmClient.chat.completions.create(followUpConfig);
-            
-            responseContent = ""; // Reset response content for the follow-up
-            for await (const chunk of followUpStream) {
-              const delta = chunk.choices[0]?.delta?.content || "";
-              responseContent += delta;
-              this.streamBuffer += delta;
-              this.processStreamBuffer();
-            }
-            
-            // Make sure all buffered data is sent
-            if (this.streamBuffer) {
-              this.processStreamBuffer(true);
-            }
-          }
-        }
         
         // Only send completion signal after all data is processed
         if (this.llmConfig?.streamMode && 
@@ -565,8 +480,8 @@ export class AgentCore {
           for (const callback of this.streamCallbacks) {
             try {
               callback("", { type: 'completion', reason: finishReason });
-            } catch (error: unknown) {
-              this.logger.error(`Error in stream callback during completion signal: ${error instanceof Error ? error.message : String(error)}`);
+            } catch (error) {
+              this.logger.error(`Error in stream callback during completion signal: ${error}`);
             }
           }
         }
@@ -582,152 +497,32 @@ export class AgentCore {
           await this.llmClient.chat.completions.create(nonStreamConfig);
         const message = response.choices[0].message;
         const finishReason = response.choices[0].finish_reason;
-        this.logger.debug(`[promptLLM] Non-stream finished with reason: ${finishReason}`, withTags(["response"]));
-        
-        // Check if we need to execute tools
-        if (finishReason === "tool_calls" && message.tool_calls && message.tool_calls.length > 0) {
-          // Inspect the raw structure to diagnose the issue
-          const rawToolCalls = JSON.stringify(message.tool_calls, null, 2);
-          this.logger.debug('Raw tool calls from OpenAI response:', withTags(['tool_calls']), {
-            rawToolCalls
-          });
-          
-          // Log the parsed structure
-          this.logger.debug('Executing tool calls from non-stream response', withTags(['tool_calls']), {
-            toolCalls: message.tool_calls.map(tc => ({
-              id: tc.id,
-              type: tc.type,  // This is 'function'
-              name: tc.function?.name, // The actual function name to call
-              arguments: tc.function?.arguments
-            }))
-          });
-          
-          // Create updated messages with tool calls and results
-          const updatedMessages = [...messages];
-          
-          // Add assistant message with tool calls
-          updatedMessages.push({
-            role: "assistant",
-            tool_calls: message.tool_calls
-          });
-          
-          // Execute each tool and add result
-          for (const toolCall of message.tool_calls) {
-            try {
-              // The OpenAI API response for tool calls can come in different formats
-              // Regular format: { id, type: 'function', function: { name, arguments } }
-              // But sometimes in streaming: { id, type, name, arguments } 
-              
-              // Try both potential locations for the tool name
-              let toolName = toolCall.function?.name;
-              
-              // Handle various malformed cases from the OpenAI API
-              const toolCallAny = toolCall as any;
-              
-              // Case 1: Flattened structure - name at top level
-              if (!toolName && toolCallAny.name) {
-                toolName = toolCallAny.name;
-              }
-              
-              // If we still don't have a name, handle the error
-              if (!toolName) {
-                // Log the exact structure we received for debugging
-                this.logger.warn(`Tool call is missing function name property`, withTags(['tool_calls']), {
-                  toolCallStructure: JSON.stringify(toolCall)
-                });
-                
-                updatedMessages.push({
-                  role: "tool",
-                  tool_call_id: toolCall.id,
-                  content: `Error: Tool call is missing function name property`
-                });
-                continue;
-              }
-              
-              this.logger.debug(`Looking up tool: ${toolName}`, withTags(['tool_calls']));
-              const tool = this.getTool(toolName);
-              
-              if (tool) {
-                const args = JSON.parse(toolCall.function?.arguments || "{}");
-                const result = await tool.run(args, {});
-                
-                // Add the tool result
-                updatedMessages.push({
-                  role: "tool",
-                  tool_call_id: toolCall.id,
-                  content: result.getContent()
-                });
-              } else {
-                this.logger.warn(`Tool ${toolName} not found`, withTags(['tool_calls']));
-                // Add error message for missing tool
-                updatedMessages.push({
-                  role: "tool",
-                  tool_call_id: toolCall.id,
-                  content: `Error: Tool '${toolName}' not found`
-                });
-              }
-            } catch (error: unknown) {
-              const functionName = toolCall.function?.name || 'unknown';  
-              this.logger.error(`Error executing tool ${functionName}:`, error);
-              updatedMessages.push({
-                role: "tool",
-                tool_call_id: toolCall.id, 
-                content: `Error executing tool: ${error instanceof Error ? error.message : String(error)}`
-              });
-            }
-          }
-          
-          // Add a max recursion depth parameter to the function to track recursion depth
-          const maxToolRecursionDepth = 3; // Limit recursion to prevent infinite loops
-          const currentRecursionDepth = (baseConfig as any).recursionDepth || 0;
-          
-          this.logger.debug(`Current tool recursion depth: ${currentRecursionDepth}`, withTags(['tool_calls']));
-          
-          if (currentRecursionDepth >= maxToolRecursionDepth) {
-            this.logger.warn(`Maximum tool recursion depth (${maxToolRecursionDepth}) reached, stopping further tool execution`, 
-                             withTags(['tool_calls']));
-            return `I've reached the maximum number of consecutive tool calls (${maxToolRecursionDepth}). To prevent potential infinite loops, I'll stop here. If you need to execute more tools, please make a new request.`;
-          }
-          
-          // Make a follow-up call with the tool results
-          // Create a type-safe config without the custom property
-          const followUpConfig: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
-            ...baseConfig,
-            messages: updatedMessages,
-            stream: false
-          };
-          
-          // Then add our custom tracking property with type assertion
-          (followUpConfig as any).recursionDepth = currentRecursionDepth + 1;
-          
-          this.logger.debug('Making follow-up call with tool results', withTags(['tool_calls']));
-          
-          // Get the follow-up response
-          const followUpResponse = await this.llmClient.chat.completions.create(followUpConfig);
-          const followUpMessage = followUpResponse.choices[0].message;
-          const followUpFinishReason = followUpResponse.choices[0].finish_reason;
-          
-          // Check if the follow-up response is also requesting tool calls
-          if (followUpFinishReason === "tool_calls" && followUpMessage.tool_calls && followUpMessage.tool_calls.length > 0) {
-            this.logger.debug('Follow-up response contains more tool calls, would require additional recursion',
-                             withTags(['tool_calls']), {
-                                toolCount: followUpMessage.tool_calls.length,
-                                recursionDepth: currentRecursionDepth + 1
-                             });
-          }
-          
-          responseContent = followUpMessage.content || "";
+        this.logger.debug(`[promptLLM] Non-stream finished: ${JSON.stringify(message, null, 2)}`, withTags(["response"]));
+        const isToolCalls = finishReason === "tool_calls";
+
+        if (isToolCalls && message.tool_calls) {
+          responseContent = JSON.stringify(message.tool_calls);
         } else {
           responseContent = message.content || "{}";
         }
       }
-      this.logger.debug('Final LLM response:', 
-        withTags(['response']), {
-        responseLength: responseContent.length,
-        firstChars: responseContent.substring(0, 300),
-        lastChars: responseContent.substring(responseContent.length - 50)
-      });
+      //console.log(`Agent Core Response content: ${responseContent}`);
 
+      // Handle function execution
+      try {
+        this.logger.debug('Raw LLM response:', 
+          withTags(['response']),{
+          responseLength: responseContent.length,
+          firstChars: responseContent.substring(0, 50),
+          lastChars: responseContent.substring(responseContent.length - 50)
+        });
+        
+        const parsed = JSON.parse(responseContent);
+        this.logger.debug('Successfully parsed LLM response as JSON', withTags(['response']));  
+
+      } catch (error) {
+        this.logger.error(`Error parsing LLM response as JSON: ${error}`);
+      }
       return responseContent;
     } catch (error) {
       this.logger.error(`Error interacting with LLM: ${error}`);
@@ -899,7 +694,7 @@ export class AgentCore {
 
   private static formatHistory(history: any[]): string {
     return 'History:\n' + history.map(entry => {
-      const parsedEntry = this.parseNestedJson(entry);
+      const parsedEntry = AgentCore.parseNestedJson(entry);
       return JSON.stringify(parsedEntry, null, 4);
     })
     .join('\n')
@@ -917,10 +712,11 @@ export class AgentCore {
         return data as T;
       }
     } else if (Array.isArray(data)) {
-      return data.map(this.parseNestedJson) as T;
+      // Use arrow function to maintain the class context
+      return data.map(item => AgentCore.parseNestedJson(item)) as T;
     } else if (typeof data === 'object' && data !== null) {
       return Object.fromEntries(
-        Object.entries(data).map(([key, value]) => [key, this.parseNestedJson(value)])
+        Object.entries(data).map(([key, value]) => [key, AgentCore.parseNestedJson(value)])
       ) as T;
     } else {
       return data;

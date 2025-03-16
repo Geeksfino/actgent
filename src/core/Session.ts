@@ -141,44 +141,105 @@ export class Session {
         }
     }
 
-    // Similarly, update triggerToolCallsHandlers with proper typing
+    // Handle tool calls from LLM and route the results properly
     public async triggerToolCallsHandlers<
         TInput extends InferClassificationUnion<T>,
         TOutput extends ToolOutput,
         T extends readonly ClassificationTypeConfig[]
     >(obj: TInput): Promise<void> { 
         logger.debug(`Session: Triggering tool call handlers for object:`, obj);
-        const toolName = obj.toolName;
+        const toolName = obj.name;
+        logger.error(`Tool name: ${toolName}`);
+        
+        // Ensure we extract toolCallId consistently from multiple potential sources
+        // This is important for proper OpenAI tool call response formatting
+        const toolCallId = (obj as any).id || 
+                          (obj as any).toolCallId || 
+                          ((obj as any).originalToolCalls?.[0]?.id) || 
+                          undefined;
+        
+        if (!toolName) {
+            // Handle missing tool name
+            const availableTools = Array.from(this.core['toolRegistry'].keys());
+            logger.warning(`Tool call received without a valid tool name. Available tools: ${availableTools.join(', ')}`);
+            
+            const errorResult = {
+                status: 'failure',
+                error: `Tool call missing a valid tool name. Available tools: ${availableTools.join(', ')}`,
+                toolCallId
+            };
+            
+            this.toolResultHandlers.forEach(handler => {
+                if (typeof handler === 'function') {
+                    handler(errorResult, this);
+                }
+            });
+            return;
+        }
+        
         const tool = this.core.getTool(toolName) as Tool<TInput, TOutput> | undefined;
         
-        if (tool) {
-            try {
-                const toolInput = (obj as any).arguments;
-                const result = await tool.run(toolInput, {});
-                const successResult = { status: 'success', data: result };
-                this.toolResultHandlers.forEach(handler => {
-                    if (typeof handler === 'function') { 
-                        handler(successResult, this);
-                    }
-                });
-            } catch (error) {
-                const failureResult = {
-                    status: 'failure',
-                    data: null,
-                    error: error instanceof Error ? error.message : String(error)
-                };
-                if (error instanceof ValidationError) {
-                    logger.warning(`Validation error in tool ${toolName}:`, error.message, error.errors);
-                    failureResult.error = `Validation error: ${error.message}`;
-                } else {
-                    logger.error(`Error executing tool ${toolName}:`, error);
+        if (!tool) {
+            // Handle tool not found
+            const availableTools = Array.from(this.core['toolRegistry'].keys());
+            logger.warning(`Tool "${toolName}" not found. Available tools: ${availableTools.join(', ')}`);
+            
+            const errorResult = {
+                status: 'failure',
+                error: `Tool "${toolName}" not found. Available tools: ${availableTools.join(', ')}`,
+                toolCallId
+            };
+            
+            this.toolResultHandlers.forEach(handler => {
+                if (typeof handler === 'function') {
+                    handler(errorResult, this);
                 }
-                this.toolResultHandlers.forEach(handler => {
-                    if (typeof handler === 'function') {
-                        handler(failureResult, this);
-                    }
-                });
+            });
+            return;
+        }
+        
+        // Tool exists, try to execute it
+        try {
+            const toolInput = (obj as any).arguments;
+            const result = await tool.run(toolInput, {});
+            
+            // Success case
+            const successResult = {
+                status: 'success',
+                data: result,
+                toolName,
+                toolCallId
+            };
+            
+            this.toolResultHandlers.forEach(handler => {
+                if (typeof handler === 'function') { 
+                    handler(successResult, this);
+                }
+            });
+        } catch (error) {
+            // Handle execution error
+            let errorMessage = error instanceof Error ? error.message : String(error);
+            
+            if (error instanceof ValidationError) {
+                logger.warning(`Validation error in tool ${toolName}:`, errorMessage, (error as ValidationError).errors);
+                errorMessage = `Validation error in tool "${toolName}": ${errorMessage}`;
+            } else {
+                logger.error(`Error executing tool ${toolName}:`, error);
+                errorMessage = `Error executing tool "${toolName}": ${errorMessage}`;
             }
+            
+            const failureResult = {
+                status: 'failure',
+                error: errorMessage,
+                toolName,
+                toolCallId
+            };
+            
+            this.toolResultHandlers.forEach(handler => {
+                if (typeof handler === 'function') {
+                    handler(failureResult, this);
+                }
+            });
         }
     }
 
