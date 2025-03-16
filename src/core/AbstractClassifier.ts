@@ -52,11 +52,50 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
         const toolCall = parsed[0];
         // Ensure the tool call has id, type, function.name, and function.arguments
         if (toolCall.id && toolCall.type === "function" && toolCall.function?.name && toolCall.function?.arguments !== undefined) {
+          // Parse arguments if they're a string
+          let toolArguments = toolCall.function.arguments;
+          
+          if (typeof toolArguments === 'string') {
+            try {
+              // Try to parse the arguments if they're a JSON string
+              toolArguments = JSON.parse(toolArguments);
+            } catch {
+              // If parsing fails, keep the original string
+              logger.debug('Failed to parse tool arguments as JSON, using as-is');
+            }
+          }
+          
           return {
             id: toolCall.id,
             name: toolCall.function.name,
-            arguments: toolCall.function.arguments,
+            arguments: toolArguments,
             originalToolCalls: parsed
+          };
+        }
+      }
+      
+      // Also try to extract tool calls from the 'tool_calls' property (OpenAI format)
+      if (parsed.tool_calls && parsed.tool_calls.length > 0) {
+        const toolCall = parsed.tool_calls[0];
+        if (toolCall && toolCall.function && toolCall.function.name) {
+          // Parse arguments if they're a string
+          let toolArguments = toolCall.function.arguments;
+          
+          if (typeof toolArguments === 'string') {
+            try {
+              // Try to parse the arguments if they're a JSON string
+              toolArguments = JSON.parse(toolArguments);
+            } catch {
+              // If parsing fails, keep the original string
+              logger.debug('Failed to parse tool arguments as JSON, using as-is');
+            }
+          }
+          
+          return {
+            id: toolCall.id,
+            name: toolCall.function.name,
+            arguments: toolArguments,
+            originalToolCalls: parsed.tool_calls
           };
         }
       }

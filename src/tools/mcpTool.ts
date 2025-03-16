@@ -69,10 +69,10 @@ export class McpTool extends Tool<McpToolInput, StringOutput> {
     this.toolName = toolName;
     this.outputSchema = outputSchema;
     
-    // Convert input schema to Zod schema if needed
+    // Convert input schema to Zod schema properly
     this.inputZodSchema = inputSchema instanceof z.ZodSchema 
       ? inputSchema 
-      : z.record(z.any());
+      : this.convertJsonSchemaToZod(inputSchema);
   }
   
   /**
@@ -80,6 +80,101 @@ export class McpTool extends Tool<McpToolInput, StringOutput> {
    */
   schema(): z.ZodSchema<McpToolInput> {
     return this.inputZodSchema as z.ZodSchema<McpToolInput>;
+  }
+
+  /**
+   * Converts a JSON schema to a Zod schema, preserving properties and required fields
+   * @param jsonSchema The JSON schema to convert
+   * @returns A Zod schema equivalent to the JSON schema
+   */
+  private convertJsonSchemaToZod(jsonSchema: any): z.ZodSchema {
+    if (!jsonSchema || typeof jsonSchema !== 'object') {
+      // Default to a record schema if no schema is provided
+      return z.record(z.any());
+    }
+
+    // Handle schema with properties object
+    if (jsonSchema.type === 'object' && jsonSchema.properties) {
+      const shape: Record<string, z.ZodTypeAny> = {};
+      const required = Array.isArray(jsonSchema.required) ? jsonSchema.required : [];
+
+      // Convert each property to its corresponding Zod type
+      Object.entries(jsonSchema.properties).forEach(([key, propSchema]: [string, any]) => {
+        let zodType: z.ZodTypeAny;
+
+        switch (propSchema.type) {
+          case 'string':
+            zodType = z.string();
+            if (propSchema.description) {
+              zodType = zodType.describe(propSchema.description);
+            }
+            break;
+          case 'number':
+          case 'integer':
+            zodType = z.number();
+            if (propSchema.description) {
+              zodType = zodType.describe(propSchema.description);
+            }
+            break;
+          case 'boolean':
+            zodType = z.boolean();
+            if (propSchema.description) {
+              zodType = zodType.describe(propSchema.description);
+            }
+            break;
+          case 'array':
+            // For arrays, use z.array with any if items not defined
+            if (propSchema.items) {
+              const itemSchema = this.convertJsonSchemaToZod(propSchema.items);
+              zodType = z.array(itemSchema);
+            } else {
+              zodType = z.array(z.any());
+            }
+            if (propSchema.description) {
+              zodType = zodType.describe(propSchema.description);
+            }
+            break;
+          case 'object':
+            // Recursively convert nested object schemas
+            zodType = this.convertJsonSchemaToZod(propSchema);
+            break;
+          default:
+            zodType = z.any();
+            if (propSchema.description) {
+              zodType = zodType.describe(propSchema.description);
+            }
+            break;
+        }
+
+        // Make optional if not in required array
+        shape[key] = required.includes(key) ? zodType : zodType.optional();
+      });
+
+      return z.object(shape);
+    }
+
+    // If the schema doesn't have properties but has a type
+    if (jsonSchema.type) {
+      switch (jsonSchema.type) {
+        case 'string':
+          return z.string().describe(jsonSchema.description || '');
+        case 'number':
+        case 'integer':
+          return z.number().describe(jsonSchema.description || '');
+        case 'boolean':
+          return z.boolean().describe(jsonSchema.description || '');
+        case 'array':
+          if (jsonSchema.items) {
+            return z.array(this.convertJsonSchemaToZod(jsonSchema.items));
+          }
+          return z.array(z.any());
+        default:
+          return z.any();
+      }
+    }
+
+    // Fallback to record for other cases
+    return z.record(z.any());
   }
 
   /**
@@ -96,9 +191,38 @@ export class McpTool extends Tool<McpToolInput, StringOutput> {
         throw new Error("MCP client is not available");
       }
       
+      // Check if the input appears to be a serialized JSON string passed character by character
+      // This handles a bug where the LLM function arguments come in as an object with numeric keys
+      let processedInput = input;
+      
+      if (input && typeof input === 'object') {
+        // Check for numeric keys which indicate a character-by-character serialized string
+        const keys = Object.keys(input);
+        const hasNumericKeys = keys.length > 0 && keys.every(k => !isNaN(parseInt(k, 10)));
+        
+        if (hasNumericKeys) {
+          console.log(`⚠️ Detected serialized string passed character by character for ${this.toolName}`); 
+          // Reconstruct the string from character-by-character object
+          const serializedString = keys
+            .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
+            .map(k => (input as any)[k])
+            .join('');
+            
+          try {
+            // Parse the reconstructed JSON string
+            const parsed = JSON.parse(serializedString);
+            processedInput = parsed;
+            console.log(`✅ Successfully reconstructed input from serialized string for ${this.toolName}`); 
+          } catch (e) {
+            console.error(`❌ Error parsing reconstructed input string for ${this.toolName}:`, e);
+            // Keep original input if parsing fails
+          }
+        }
+      }
+      
       // Ensure input has messageType as required by the protocol
       const enhancedInput = { 
-        ...input,
+        ...processedInput,
         messageType: 'toolCall'
       };
       
