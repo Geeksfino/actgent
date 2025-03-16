@@ -444,6 +444,9 @@ export class AgentCore {
         tools: unmappedTools.length > 0 ? unmappedTools : undefined,
       };
 
+      // Variable to track if we detected tool calls during streaming
+      let toolCallsInProgress = false;
+      
       // Stream mode
       if (this.llmConfig?.streamMode && this.streamCallbacks.size > 0) {
         const streamConfig: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming =
@@ -463,11 +466,59 @@ export class AgentCore {
         }
 
         let chunks = [];
+        let toolCallsInProgress = false;
+        let currentToolCalls = [];
+        
         for await (const chunk of stream) {
           chunks.push(chunk);
-          const delta = chunk.choices[0]?.delta?.content || "";
-          responseContent += delta;
-          this.streamBuffer += delta;
+          const delta = chunk.choices[0]?.delta;
+          
+          // Process tool calls directly from the delta (similar to OpenAI sample)
+          if (delta.tool_calls) {
+            toolCallsInProgress = true;
+            
+            // Log tool call detection
+            this.logger.debug('Tool call detected in stream chunk', withTags(['response', 'tool_calls']), {
+              toolCallDelta: delta.tool_calls
+            });
+            
+            // We'll collect tool calls and process them after the stream
+            for (const toolCallDelta of delta.tool_calls) {
+              // Initialize the tool call if it's new
+              if (!currentToolCalls[toolCallDelta.index]) {
+                currentToolCalls[toolCallDelta.index] = {
+                  id: toolCallDelta.id || '',
+                  type: 'function',
+                  function: {
+                    name: '',
+                    arguments: ''
+                  }
+                };
+              }
+              
+              // Update the tool call with the delta information
+              const currentTool = currentToolCalls[toolCallDelta.index];
+              
+              if (toolCallDelta.id) {
+                currentTool.id = toolCallDelta.id;
+              }
+              
+              if (toolCallDelta.function) {
+                if (toolCallDelta.function.name) {
+                  currentTool.function.name = toolCallDelta.function.name;
+                }
+                
+                if (toolCallDelta.function.arguments) {
+                  currentTool.function.arguments += toolCallDelta.function.arguments;
+                }
+              }
+            }
+          }
+          
+          // Process content delta (if any)
+          const contentDelta = delta.content || "";
+          responseContent += contentDelta;
+          this.streamBuffer += contentDelta;
           this.processStreamBuffer();
         }
 
@@ -478,6 +529,35 @@ export class AgentCore {
 
         const lastChunk = chunks[chunks.length - 1];
         const finishReason = lastChunk.choices[0]?.finish_reason;
+        
+        // If we collected tool calls during streaming, use those
+        if (toolCallsInProgress && currentToolCalls.length > 0) {
+          // Filter out any undefined entries (can happen with sparse arrays)
+          const validToolCalls = currentToolCalls.filter(call => call !== undefined);
+          
+          if (validToolCalls.length > 0) {
+            this.logger.debug('Using tool calls collected during streaming', withTags(['response', 'tool_calls']), {
+              toolCallCount: validToolCalls.length,
+              toolCalls: validToolCalls
+            });
+            responseContent = JSON.stringify(validToolCalls);
+            return responseContent;
+          }
+        }
+        
+        // Fallback: Check if this is a tool call response by examining the finish reason
+        if (finishReason === 'tool_calls') {
+          // Use the existing reconstructToolCalls method to handle tool calls in stream mode
+          const toolCalls = this.reconstructToolCalls(chunks);
+          if (toolCalls && toolCalls.length > 0) {
+            this.logger.debug('Reconstructed tool calls from stream chunks', withTags(['response', 'tool_calls']), {
+              toolCallCount: toolCalls.length,
+              toolCalls: toolCalls
+            });
+            responseContent = JSON.stringify(toolCalls);
+            return responseContent;
+          }
+        }
         this.logger.debug(`[promptLLM] Stream finished with reason: ${finishReason}`, withTags(["response"]));
         
         // Only send completion signal after all data is processed
@@ -531,6 +611,110 @@ export class AgentCore {
           firstChars: responseContent.substring(0, 50),
           lastChars: responseContent.substring(responseContent.length - 50)
         });
+        
+        // Final fallback: Check for special token formats (common in streaming mode with some models)
+        // Only apply this if we're in stream mode and haven't already handled tool calls via other methods
+        const isStreamMode = this.llmConfig?.streamMode && this.streamCallbacks.size > 0;
+        const hasSpecialTokenFormat = responseContent.includes('<｜tool▁calls▁begin｜>') || 
+                                    responseContent.includes('<|tool_calls_begin|>');
+                                    
+        if (isStreamMode && hasSpecialTokenFormat && !toolCallsInProgress) {
+          this.logger.debug('Detected special token format in stream response', withTags(['response', 'stream']));
+          
+          // First, try to extract the function name from the special token format
+          let toolName = null;
+          let toolArgs = {};
+          
+          // Log the full response for debugging
+          this.logger.debug('Full special token response for debugging:', withTags(['response', 'debug']), {
+            fullResponse: responseContent
+          });
+          
+          // Pattern to extract function name from various formats
+          const functionNameMatch = responseContent.match(/function<｜tool_name｜>([\w_]+)/) || 
+                                   responseContent.match(/function<\|tool_name\|>([\w_]+)/) ||
+                                   responseContent.match(/<｜tool▁call▁begin｜>function<｜t[^>]*>([\w_]+)/) ||
+                                   responseContent.match(/<\|tool_call_begin\|>function<\|t[^>]*>([\w_]+)/) ||
+                                   responseContent.match(/list_allowed_directories/);
+          
+          if (functionNameMatch) {
+            // If we matched the pattern but don't have a capture group (like with the list_allowed_directories match)
+            if (functionNameMatch[1]) {
+              toolName = functionNameMatch[1];
+            } else if (responseContent.includes('list_allowed_directories')) {
+              toolName = 'list_allowed_directories';
+            }
+            
+            this.logger.debug(`Extracted tool name from special token format: ${toolName}`, 
+              withTags(['response', 'recovery']));
+          }
+          
+          // Extract JSON content from between tokens or code blocks
+          try {
+            // Look for JSON content between markers or in code blocks
+            const jsonMatch = responseContent.match(/```json\s*([\s\S]*?)\s*```/) || 
+                             responseContent.match(/\{[\s\S]*\}/g);
+            
+            if (jsonMatch && jsonMatch[0]) {
+              const jsonContent = jsonMatch[0].startsWith('```') ? jsonMatch[1] : jsonMatch[0];
+              this.logger.debug('Extracted potential JSON from special token format', withTags(['response', 'recovery']));
+              
+              try {
+                // Try to parse the JSON content
+                toolArgs = JSON.parse(jsonContent.trim() || '{}');
+              } catch (parseError) {
+                this.logger.warn(`Failed to parse extracted JSON: ${parseError}`, withTags(['response', 'recovery']));
+                toolArgs = {};
+              }
+              
+              // If we have a tool name, construct a proper tool call
+              if (toolName) {
+                const toolCall = {
+                  id: `call_${Date.now().toString(36)}${Math.random().toString(36).substring(2, 7)}`,
+                  type: 'function',
+                  function: {
+                    name: toolName,
+                    arguments: JSON.stringify(toolArgs)
+                  }
+                };
+                
+                this.logger.debug(`Constructed tool call from special token format: ${JSON.stringify(toolCall)}`, 
+                  withTags(['response', 'recovery']));
+                  
+                // Set responseContent to the tool call array
+                responseContent = JSON.stringify([toolCall]);
+              } else {
+                // No tool name found, just use the extracted JSON
+                responseContent = jsonContent.trim() || '{}';
+              }
+            } else if (toolName) {
+              // We have a tool name but no JSON arguments, create a tool call with empty args
+              const toolCall = {
+                id: `call_${Date.now().toString(36)}${Math.random().toString(36).substring(2, 7)}`,
+                type: 'function',
+                function: {
+                  name: toolName,
+                  arguments: '{}'
+                }
+              };
+              
+              this.logger.debug(`Constructed tool call with empty args: ${JSON.stringify(toolCall)}`, 
+                withTags(['response', 'recovery']));
+                
+              // Set responseContent to the tool call array
+              responseContent = JSON.stringify([toolCall]);
+            } else {
+              // Fallback to empty object if no JSON found and no tool name
+              this.logger.warn('Could not extract JSON or tool name from special token format', 
+                withTags(['response', 'recovery']));
+              responseContent = '{}';
+            }
+          } catch (extractError) {
+            this.logger.error(`Error extracting content from special token format: ${extractError}`, 
+              withTags(['error', 'recovery-failed']));
+            responseContent = '{}';
+          }
+        }
         
         // Attempt to parse the response as JSON
         try {

@@ -79,6 +79,39 @@ export class BareClassifier<T extends readonly ClassificationTypeConfig[]> exten
         };
       }
       
+      // Handle simple object with text/content property (common in streaming responses)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        // Check for common response patterns
+        if (parsed.text !== undefined || parsed.content !== undefined) {
+          const content = parsed.text !== undefined ? parsed.text : parsed.content;
+          classifierLogger.debug("Detected object with text/content property, treating as conversation", 
+            withTags(['bare']), { responseType: 'object-with-text' });
+          return {
+            type: ResponseType.CONVERSATION,
+            structuredData: {
+              messageType: 'CONVERSATION',
+              response: content.toString()
+            } as InferClassificationUnion<T>,
+            textData: content.toString()
+          };
+        }
+        
+        // Handle empty objects or objects with no recognized properties
+        // This often happens in stream mode with special token formats
+        if (Object.keys(parsed).length === 0) {
+          classifierLogger.debug("Detected empty object response, treating as empty conversation", 
+            withTags(['bare']), { responseType: 'empty-object' });
+          return {
+            type: ResponseType.CONVERSATION,
+            structuredData: {
+              messageType: 'CONVERSATION',
+              response: ''
+            } as InferClassificationUnion<T>,
+            textData: ''
+          };
+        }
+      }
+      
       // If we reach here, the response format is unrecognized
       classifierLogger.error("Unrecognized LLM response format: ", response);
       return {
