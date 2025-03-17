@@ -258,7 +258,7 @@ export class AgentCore {
 
     let processedInput = message;
     if (this.queryPreProcessor && message.metadata?.sender === "user") {
-      const processed = await this.queryPreProcessor(processedInput.payload.input, message.sessionId);
+      const processed = await this.queryPreProcessor.process(processedInput.payload.input, message.sessionId);
       processedInput.payload.input = processed;
     }
     const response = await this.promptLLM(processedInput);
@@ -343,8 +343,9 @@ export class AgentCore {
     // Handle tool responses
     if (sender === 'tool' && message.metadata?.context?.tool_call_id) {
       metadataMap.set('tool_call_id', message.metadata.context.tool_call_id);
-      // Don't store content again in metadata - it's already in the main content field
-      // metadataMap.set('content', content); - This was causing nested content fields
+      
+      // No need for complex content handling anymore since we fixed the root cause
+      // The content should already be properly formatted
     }
     
     await this.memories.remember(content, undefined, metadataMap);
