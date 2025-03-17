@@ -34,6 +34,16 @@ export interface LLMConfig {
   streamMode?: boolean;
 }
 
+/**
+ * Function type for query pre-processing
+ * Takes the original query and session ID, returns the processed query
+ * The original query is still stored in memory
+ */
+export type QueryPreProcessor = (
+  query: string, 
+  sessionId: string
+) => Promise<string>;
+
 export interface MemoryConfig {
   type: string;
   dbFilePath: string;

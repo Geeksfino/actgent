@@ -1,4 +1,4 @@
-import { AgentCoreConfig, LLMConfig, Instruction, LoggingConfig } from "./configs";
+import { AgentCoreConfig, LLMConfig, Instruction, LoggingConfig, QueryPreProcessor } from "./configs";
 import { PromptManager } from "./PromptManager";
 import { PriorityInbox } from "./PriorityInbox";
 import { Message } from "./Message";
@@ -41,6 +41,7 @@ export class AgentCore {
   llmClient: OpenAI;
   toolRegistry: Map<string, Tool<any, any, any>> = new Map();
   instructionToolMap: { [key: string]: string } = {};
+  queryPreProcessor: QueryPreProcessor | null = null;
 
   private memories: AgentMemorySystem;
   private inbox: PriorityInbox;
@@ -110,6 +111,10 @@ export class AgentCore {
 
   public getCapabilities(): string {
     return this.capabilities;
+  }
+
+  public setQueryPreProcessor(processor: QueryPreProcessor | null): void {
+    this.queryPreProcessor = processor;
   }
 
   public addInstruction(
@@ -251,7 +256,12 @@ export class AgentCore {
 
     await this.remember(message);
 
-    const response = await this.promptLLM(message);
+    let processedInput = message;
+    if (this.queryPreProcessor && message.metadata?.sender === "user") {
+      const processed = await this.queryPreProcessor(processedInput.payload.input, message.sessionId);
+      processedInput.payload.input = processed;
+    }
+    const response = await this.promptLLM(processedInput);
 
     // Handle the response based on message type
     const cleanedResponse = this.cleanLLMResponse(response);

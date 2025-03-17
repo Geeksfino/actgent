@@ -1,4 +1,4 @@
-import { AgentCoreConfig, LLMConfig, CommunicationConfig, AgentServiceConfig, Instruction  } from '../core/configs';
+import { AgentCoreConfig, QueryPreProcessor, AgentServiceConfig, Instruction  } from '../core/configs';
 import { Communication } from './Communication';
 import { AgentRegistry } from './AgentRegistry';
 import { AgentCore } from '../core/AgentCore';
@@ -72,6 +72,9 @@ export abstract class BaseAgent<
     );
   }
 
+  public setQueryPreProcessor(queryPreProcessor: QueryPreProcessor | null): void {
+    this.core.setQueryPreProcessor(queryPreProcessor);
+  }
   public getExecutionContext(): ExecutionContext {
     return this.core.executionContext;
   }
