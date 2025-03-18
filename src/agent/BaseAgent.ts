@@ -272,13 +272,22 @@ export abstract class BaseAgent<
   }
 
   protected handleLLMResponse(response: string | InferClassificationUnion<T>, session: Session) {
-    let parsedResponse: InferClassificationUnion<T>;
+    let parsedResponse: InferClassificationUnion<T> | string;
     if (typeof response === 'string') {
       try {
-        parsedResponse = JSON.parse(response);
+        // Only try to parse as JSON if it looks like JSON
+        if (response.trim().startsWith('{') || response.trim().startsWith('[')) {
+          parsedResponse = JSON.parse(response);
+        } else {
+          // Plain text - pass directly to classifier
+          this.core.log(session.sessionId, 'Response appears to be plain text, passing directly to classifier');
+          parsedResponse = response;
+        }
       } catch (error) {
-        this.core.log(session.sessionId, `Failed to parse response string: ${error}`);
-        return;
+        // Even on parse error, pass the response to the classifier
+        // Don't block text responses just because they're not valid JSON
+        this.core.log(session.sessionId, `Not valid JSON, passing as plain text: ${error}`);
+        parsedResponse = response;
       }
     } else {
       parsedResponse = response;
