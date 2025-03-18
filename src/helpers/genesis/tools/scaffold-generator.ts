@@ -88,7 +88,7 @@ async function generateAgentScaffold({ agent_name, role, goal, capabilities, ins
 
     // Generate tool imports and registrations
     const toolImports = tools.map(toolName => 
-        `import { ${toolName} } from "@finogeeks/actgent/tools";`
+        `import { ${toolName} } from "@finogeek/actgent/tools";`
     ).join('\n');
 
     const toolRegistrations = tools.map(toolName =>

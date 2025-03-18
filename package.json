@@ -1,5 +1,5 @@
 {
-  "name": "@finogeeks/actgent",
+  "name": "@finogeek/actgent",
   "version": "1.0.0",
   "type": "module",
   "main": "dist/index.js",
@@ -54,7 +54,7 @@
     "watch:dev": "bun concurrently \"bun run watch:ts\" \"bun run watch:test\" \"bun run watch:resources\"",
     "watch": "bun concurrently \"bun run watch:ts\" \"bun run watch:resources\"",
     "clean": "rm -rf dist dist-test",
-    "rebuild": "bun run clean && bun run build && bun link @finogeeks/actgent"
+    "rebuild": "bun run clean && bun run build && bun link @finogeek/actgent"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.12.4",

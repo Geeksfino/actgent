@@ -22,7 +22,7 @@ async function extractTools(indexPath: string): Promise<string[]> {
     const tools: string[] = [];
     
     // Extract tool imports
-    const importLines = content.match(/import\s*{\s*([^}]+)}\s*from\s*["']@finogeeks\/actgent\/tools["']/);
+    const importLines = content.match(/import\s*{\s*([^}]+)}\s*from\s*["']@finogeek\/actgent\/tools["']/);
     if (importLines && importLines[1]) {
         tools.push(...importLines[1].split(',').map(t => t.trim()));
     }

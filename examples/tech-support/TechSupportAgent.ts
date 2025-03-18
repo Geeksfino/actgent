@@ -1,8 +1,8 @@
-import { AgentBuilder } from "@finogeeks/actgent/agent";
-import { AgentServiceConfigurator, AgentCoreConfigurator } from "@finogeeks/actgent/helpers";
-import { MultiLevelClassifier, MultiLevelPromptTemplate } from "@finogeeks/actgent/agent";
-import { BarePromptTemplate, BareClassifier } from "@finogeeks/actgent/agent";
-import { createRuntime } from "@finogeeks/actgent/runtime";
+import { AgentBuilder } from "@finogeek/actgent/agent";
+import { AgentServiceConfigurator, AgentCoreConfigurator } from "@finogeek/actgent/helpers";
+import { MultiLevelClassifier, MultiLevelPromptTemplate } from "@finogeek/actgent/agent";
+import { BarePromptTemplate, BareClassifier } from "@finogeek/actgent/agent";
+import { createRuntime } from "@finogeek/actgent/runtime";
 import { McpKnowledgePreProcessor } from "./McpKnowledgePreProcessor";
 
 const runtime = createRuntime();

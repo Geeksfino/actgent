@@ -1,5 +1,5 @@
-import { AgentBuilder } from "@finogeeks/actgent/agent";
-import { AgentServiceConfigurator, AgentCoreConfigurator, KeywordBasedStrategyBuilder } from "@finogeeks/actgent/helpers";
+import { AgentBuilder } from "@finogeek/actgent/agent";
+import { AgentServiceConfigurator, AgentCoreConfigurator, KeywordBasedStrategyBuilder } from "@finogeek/actgent/helpers";
 import { AutoSwitchingStrategy, KeywordBasedStrategy, UserPreferenceStrategy } from "../../dist/agent/ReActModeStrategy";
 import path from 'path';
 

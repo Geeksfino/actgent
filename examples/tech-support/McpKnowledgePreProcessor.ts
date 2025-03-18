@@ -1,7 +1,7 @@
-import { QueryPreProcessor } from "@finogeeks/actgent/core";
-import { McpTool } from "@finogeeks/actgent/tools";
-import { McpConfigurator } from "@finogeeks/actgent/helpers";
-import { createRuntime } from "@finogeeks/actgent/runtime";
+import { QueryPreProcessor } from "@finogeek/actgent/core";
+import { McpTool } from "@finogeek/actgent/tools";
+import { McpConfigurator } from "@finogeek/actgent/helpers";
+import { createRuntime } from "@finogeek/actgent/runtime";
 
 const runtime = createRuntime();
 

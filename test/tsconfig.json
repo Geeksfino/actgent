@@ -8,8 +8,8 @@
     "types": ["bun-types"],
     "tsBuildInfoFile": "../dist-test/.tsbuildinfo",
     "paths": {
-      "@finogeeks/actgent": ["../src/index"],
-      "@finogeeks/actgent/*": ["../src/*"]
+      "@finogeek/actgent": ["../src/index"],
+      "@finogeek/actgent/*": ["../src/*"]
     }
   },
   "include": [

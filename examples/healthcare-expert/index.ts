@@ -1,7 +1,7 @@
 import { HealthcareExpert } from './HealthcareExpert';
 import readline from 'readline';
-import { LoggingConfig } from "@finogeeks/actgent/core";
-import { Logger, logger, LogLevel} from '@finogeeks/actgent/core'
+import { LoggingConfig } from "@finogeek/actgent/core";
+import { Logger, logger, LogLevel} from '@finogeek/actgent/core'
 import path from "path";
 import os from "os";
 import { program } from 'commander';
