@@ -1,5 +1,7 @@
 // Core components
 export * from './configs';
+// Explicitly export the LoggingConfig type for better module compatibility
+export type { LoggingConfig } from './configs';
 export { AgentCore } from './AgentCore';
 export { AbstractClassifier } from './AbstractClassifier';
 export { IClassifier, ClassificationTypeConfig, ClassifiedTypeHandlers } from './IClassifier';

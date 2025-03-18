@@ -733,7 +733,7 @@ export class AgentCore {
           this.logger.debug('Successfully parsed LLM response as JSON', withTags(['response']));
         } catch (parseError: any) {
           // Log the JSON parse error with more details
-          this.logger.error(`Error parsing LLM response as JSON: ${parseError}`, withTags(['error', 'json-parse']), {
+          this.logger.debug(`LLM response is not JSON: ${parseError}`, withTags(['error', 'json-parse']), {
             error: parseError?.message || 'Unknown parse error',
             responseLength: responseContent.length,
             responsePreview: responseContent.length > 100 ? 

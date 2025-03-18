@@ -133,9 +133,6 @@ export class BareClassifier<T extends readonly ClassificationTypeConfig[]> exten
         } as InferClassificationUnion<T>,
         textData: response,
       };
-    }   // not used
-    return null;
+    }
   }
-
-
 }
