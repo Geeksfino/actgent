@@ -211,14 +211,14 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
           // Subscribe to session events
           session.onConversation((event) => {
             if (!isAlive) return;
-            // Wrap the string in the expected structure
-            const wrappedEvent = {
-              type: "event",
-              data: {
-                content: event  
-              }
-            };
-            streamController.enqueue(JSON.stringify(wrappedEvent));
+            
+            // Send event directly without wrapping - consistent with raw stream
+            // If it's already a string, use it directly, otherwise stringify it
+            const eventData = typeof event === 'string' 
+              ? event 
+              : JSON.stringify(event);
+              
+            streamController.enqueue(eventData);
           });
 
           // Cleanup when the client disconnects
