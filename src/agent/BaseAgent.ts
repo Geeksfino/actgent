@@ -21,7 +21,7 @@ export abstract class BaseAgent<
   private promptTemplate!: P;
   private svcConfig: AgentServiceConfig;
   private communication?: Communication;
-  private httpStreamCallback?: (delta: string, control?: { type: 'completion', reason: string }) => void;
+  private httpStreamCallback?: (delta: string, control?: { type: 'completion', reason: string }, sessionId?: string) => void;
 
   protected abstract useClassifierClass(schemaTypes: T): new () => K;
   protected abstract usePromptTemplateClass(): new (classificationTypes: T) => P;
@@ -131,18 +131,35 @@ export abstract class BaseAgent<
       // Set up streaming if enabled and core streaming is enabled
       if (this.svcConfig.communicationConfig.enableStreaming && this.core.llmConfig?.streamMode) {
         logger.debug('Setting up streaming callback');
-        this.httpStreamCallback = (delta: string, control?: { type: 'completion', reason: string }) => {
+        this.httpStreamCallback = (delta: string, control?: { type: 'completion', reason: string }, sessionId?: string) => {
           if (control?.type === 'completion') {
-            // Send completion signal as a special message
+            // Send completion signal as a special message with session ID
             const completionMessage = JSON.stringify({
               type: 'completion',
-              reason: control.reason
+              reason: control.reason,
+              sessionId: sessionId || '' // Include session ID in completion message
             });
-            this.communication?.broadcastStreamData('', completionMessage);
-            logger.debug(`Stream completed with reason: ${control.reason}`);
+            this.communication?.broadcastStreamData(sessionId || '', completionMessage);
+            logger.debug(`Stream completed with reason: ${control.reason} for session: ${sessionId || 'unknown'}`);
           } else {
-            // Normal stream data
-            this.communication?.broadcastStreamData('', delta);
+            // Normal stream data with session ID
+            // If the delta is already a JSON string, try to parse and add sessionId if missing
+            try {
+              // Check if delta is a JSON string
+              const parsedDelta = JSON.parse(delta);
+              // Add sessionId if not already present
+              if (!parsedDelta.sessionId && sessionId) {
+                parsedDelta.sessionId = sessionId;
+                // Broadcast the modified JSON
+                this.communication?.broadcastStreamData(sessionId, JSON.stringify(parsedDelta));
+              } else {
+                // Already has sessionId or we don't have one to add
+                this.communication?.broadcastStreamData(sessionId || '', delta);
+              }
+            } catch (e) {
+              // Not a JSON string, just broadcast as is
+              this.communication?.broadcastStreamData(sessionId || '', delta);
+            }
           }
         };
         this.core.registerStreamCallback(this.httpStreamCallback);

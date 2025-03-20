@@ -87,7 +87,7 @@ export class Communication {
     //logger.trace('[Communication] Broadcasting stream data');
     try {
       if (this._streamingProtocol && this.config.enableStreaming) {
-        this._streamingProtocol.broadcast(data);
+        this._streamingProtocol.broadcast(data, sessionId);
         //logger.trace('[Communication] Stream data broadcast successful');
       } else {
         //logger.trace('[Communication] No streaming protocol available for broadcast');

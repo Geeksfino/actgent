@@ -24,7 +24,12 @@ const STREAM_CONTROL = {
   COMPLETE: "\0COMPLETE:",  // Null byte followed by completion reason
 };
 
-export type StreamCallback = (delta: string, control?: { type: 'completion', reason: string }) => void;
+// Update the StreamCallback type to include sessionId parameter
+export type StreamCallback = (
+  delta: string, 
+  control?: { type: 'completion', reason: string },
+  sessionId?: string
+) => void;
 
 export class AgentCore {
   public id: string;
@@ -207,7 +212,7 @@ export class AgentCore {
     this.streamCallbacks.delete(callback);
   }
 
-  processStreamBuffer(force: boolean = false) {
+  processStreamBuffer(force: boolean = false, sessionId?: string) {
     // Split the buffer on newline characters
     const lines = this.streamBuffer.split("\n");
     const completeLines = lines.slice(0, -1);
@@ -217,7 +222,7 @@ export class AgentCore {
     for (const line of completeLines) {
       for (const callback of this.streamCallbacks) {
         try {
-          callback(line + "\n"); // Call the callback with each complete line
+          callback(line + "\n", undefined, sessionId); // Call the callback with each complete line and session ID
         } catch (error) {
           this.logger.error(`Error in stream callback: ${error}`);
         }
@@ -230,7 +235,7 @@ export class AgentCore {
       for (const callback of this.streamCallbacks) {
         if (callback && this.streamBuffer) {
           try {
-            callback(this.streamBuffer); // Flush the remaining content in the buffer
+            callback(this.streamBuffer, undefined, sessionId); // Flush with session ID
           } catch (error) {
             this.logger.error(`Error in stream callback during force flush: ${error}`);
           }
@@ -530,12 +535,12 @@ export class AgentCore {
           const contentDelta = delta.content || "";
           responseContent += contentDelta;
           this.streamBuffer += contentDelta;
-          this.processStreamBuffer();
+          this.processStreamBuffer(undefined, message.sessionId);
         }
 
         // Make sure all buffered data is sent before completion signal
         if (this.streamBuffer) {
-          this.processStreamBuffer(true);
+          this.processStreamBuffer(true, message.sessionId);
         }
 
         const lastChunk = chunks[chunks.length - 1];
@@ -578,7 +583,7 @@ export class AgentCore {
             !this.streamBuffer) {  // Ensure buffer is empty
           for (const callback of this.streamCallbacks) {
             try {
-              callback("", { type: 'completion', reason: finishReason });
+              callback("", { type: 'completion', reason: finishReason }, message.sessionId);
             } catch (error) {
               this.logger.error(`Error in stream callback during completion signal: ${error}`);
             }

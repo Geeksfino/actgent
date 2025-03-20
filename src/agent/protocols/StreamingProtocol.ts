@@ -182,7 +182,7 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
     try {
       const stream = new ReadableStream({
         start: (controller) => {
-          const streamController = new StreamController(controller, this, StreamType.SESSION);
+          const streamController = new StreamController(controller, this, StreamType.SESSION, sessionId);
           this.streams.add(streamController);
           
           // Keep the stream alive
@@ -208,17 +208,44 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
             return;
           }
 
-          // Subscribe to session events
+          // Subscribe to session events - this is now primarily for backward compatibility
+          // as most real-time streaming will come through the broadcast method
           session.onConversation((event) => {
             if (!isAlive) return;
             
-            // Send event directly without wrapping - consistent with raw stream
-            // If it's already a string, use it directly, otherwise stringify it
-            const eventData = typeof event === 'string' 
-              ? event 
-              : JSON.stringify(event);
+            // Safe handling of events to prevent undefined errors
+            try {
+              // If it's already a string, use it directly
+              if (typeof event === 'string') {
+                streamController.enqueue(event);
+                return;
+              }
               
-            streamController.enqueue(eventData);
+              // For objects, ensure they have the expected structure
+              // or wrap them in a format that won't cause errors downstream
+              const safeEvent = event || {};
+              
+              // If the event has choices with delta, ensure delta is an object
+              if (safeEvent.choices && safeEvent.choices[0] && safeEvent.choices[0].delta === undefined) {
+                // Fix the structure to prevent delta.tool_calls errors
+                safeEvent.choices[0].delta = safeEvent.choices[0].delta || {};
+              }
+              
+              // Ensure sessionId is included
+              if (!safeEvent.sessionId) {
+                safeEvent.sessionId = sessionId;
+              }
+              
+              // Convert to string and send
+              streamController.enqueue(JSON.stringify(safeEvent));
+            } catch (error) {
+              logger.error(`[StreamingProtocol] Error processing session event:`, error);
+              // Send a safe version of the event that won't cause errors
+              const safeEventStr = typeof event === 'string' 
+                ? event 
+                : JSON.stringify({ content: JSON.stringify(event), sessionId });
+              streamController.enqueue(safeEventStr);
+            }
           });
 
           // Cleanup when the client disconnects
@@ -255,22 +282,86 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
     controller.close();
   }
 
-  public broadcast(data: string): void {
-    //logger.trace(`[StreamingProtocol] Broadcasting to raw streams`);
-    for (const stream of this.streams) {
-      if (stream.type === StreamType.RAW) {
-        stream.enqueue(data);
+  public broadcast(data: string, sessionId?: string): void {
+    const timestamp = new Date().toISOString();
+    logger.debug(`[StreamingProtocol] Broadcast called at ${timestamp} with${sessionId ? ' sessionId: ' + sessionId : ' no sessionId'}`);
+    
+    // If sessionId is provided, also send to session-specific streams
+    if (sessionId) {
+      logger.debug(`[StreamingProtocol] Broadcasting to session ${sessionId}`);
+      
+      // First try to parse the data to see if it's JSON
+      let jsonData: any = null;
+      try {
+        jsonData = JSON.parse(data);
+        // Ensure sessionId is included in the data
+        if (!jsonData.sessionId) {
+          jsonData.sessionId = sessionId;
+          // Use the modified JSON with sessionId
+          data = JSON.stringify(jsonData);
+        }
+        logger.debug(`[StreamingProtocol] Parsed JSON data: ${JSON.stringify(jsonData).substring(0, 100)}...`);
+      } catch (e) {
+        // Not JSON, continue with original data
+        logger.debug(`[StreamingProtocol] Data is not JSON: ${data.substring(0, 50)}...`);
+      }
+
+      // Count session streams for this session
+      let sessionStreamCount = 0;
+      for (const stream of this.streams) {
+        if (stream.type === StreamType.SESSION && stream.sessionId === sessionId) {
+          sessionStreamCount++;
+        }
+      }
+      logger.debug(`[StreamingProtocol] Found ${sessionStreamCount} streams for session ${sessionId}`);
+
+      // Send to session-specific streams
+      for (const stream of this.streams) {
+        if (stream.type === StreamType.SESSION && stream.sessionId === sessionId) {
+          logger.debug(`[StreamingProtocol] Sending data to session stream ${stream.id}`);
+          stream.enqueue(data);
+        }
       }
     }
+
+    // Always send to raw streams, but filter by sessionId if specified
+    let rawStreamCount = 0;
+    let filteredRawStreamCount = 0;
+    
+    for (const stream of this.streams) {
+      if (stream.type === StreamType.RAW) {
+        rawStreamCount++;
+        
+        // If this raw stream has a sessionId filter
+        if (stream.sessionId) {
+          // Only send if the broadcast sessionId matches the stream's filter
+          if (sessionId === stream.sessionId) {
+            filteredRawStreamCount++;
+            stream.enqueue(data);
+          }
+        } else {
+          // No filter, send to all unfiltered raw streams
+          stream.enqueue(data);
+        }
+      }
+    }
+    
+    logger.debug(`[StreamingProtocol] Broadcasting to ${rawStreamCount} raw streams (${filteredRawStreamCount} filtered)`);
   }
 
   public sendResponseComplete(sessionId: string): void {
-    logger.warning(`[StreamingProtocol] Sending response complete for session ${sessionId}`);
+    logger.debug(`[StreamingProtocol] Sending response complete for session ${sessionId}`);
     try {
-      this.broadcast('[DONE]');
-      logger.warning('[StreamingProtocol] Response complete sent');
+      // Send completion message with session ID
+      const completionMessage = JSON.stringify({
+        type: "completion",
+        reason: "stop",
+        sessionId
+      });
+      this.broadcast(completionMessage, sessionId);
+      logger.debug('[StreamingProtocol] Response complete sent');
     } catch (error) {
-      logger.warning('[StreamingProtocol] Error sending response complete:', error);
+      logger.error('[StreamingProtocol] Error sending response complete:', error);
     }
   }
 
@@ -324,14 +415,18 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
 
 class StreamController {
   public readonly id: string = Math.random().toString(36).substring(7);
+  public readonly sessionId?: string;
   private isActive: boolean = true;
   private encoder = new TextEncoder();
 
   constructor(
     private controller: ReadableStreamDefaultController,
     private protocol: StreamingProtocol,
-    public readonly type: StreamType
-  ) {}
+    public readonly type: StreamType,
+    sessionId?: string
+  ) {
+    this.sessionId = sessionId;
+  }
 
   public enqueue(data: string) {
     if (!this.isActive) return;
