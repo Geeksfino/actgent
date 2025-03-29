@@ -213,6 +213,16 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
           session.onConversation((event) => {
             if (!isAlive) return;
             
+            // Check if LLM streaming is enabled via the agent's core configuration
+            const isLlmStreamingEnabled = this.handler.getAgent().isStreamingEnabled();
+            
+            // When streaming is enabled, we only want to process special event types
+            // Regular content messages are already sent via streaming chunks
+            if (isLlmStreamingEnabled) {
+              logger.debug(`[StreamingProtocol] Skipping complete message for streaming session ${sessionId} to prevent duplication`);
+              return;
+            }
+            
             // Safe handling of events to prevent undefined errors
             try {
               // If it's already a string, use it directly

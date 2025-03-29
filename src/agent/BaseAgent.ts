@@ -312,6 +312,10 @@ export abstract class BaseAgent<
     this.classifier.handleLLMResponse(parsedResponse, session);
   }
 
+  public isStreamingEnabled(): boolean {
+    return this.core.llmConfig?.streamMode === true;
+  }
+
   public async shutdown(): Promise<void> {
     // Clean up HTTP streaming callback
     if (this.httpStreamCallback) {
