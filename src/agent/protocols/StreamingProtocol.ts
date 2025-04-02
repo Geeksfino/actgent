@@ -14,6 +14,12 @@ export enum StreamType {
   SESSION = 'session'
 }
 
+// Client format types for response formatting
+export enum ClientFormat {
+  SSE = 'sse',      // Server-Sent Events (default for web)
+  RAW_JSON = 'raw'  // Raw JSON (for mini-programs)
+}
+
 export class StreamingProtocol extends BaseCommunicationProtocol {
   private server?: Server;
   private port: number;
@@ -54,15 +60,29 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
     logger.trace(`[StreamingProtocol] New stream connection request`);
     const url = new URL(req.url);
     
-    const headers = {
+    // Check for mini-program client via header
+    const clientType = req.headers.get("X-Client-Type") || "";
+    const isMiniProgram = clientType.toLowerCase() === "miniprogram";
+    const responseFormat = isMiniProgram ? ClientFormat.RAW_JSON : ClientFormat.SSE;
+
+    // Set appropriate Content-Type based on client type
+    const contentType = isMiniProgram ? "application/json" : "text/event-stream";
+
+    // Define headers with index signature to allow dynamic properties
+    const headers: Record<string, string> = {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
-      "Content-Type": "text/event-stream",
+      "Access-Control-Allow-Headers": "Content-Type, X-Client-Type",
+      "Content-Type": contentType,
       "Cache-Control": "no-cache, no-transform",
       "Connection": "keep-alive",
-      "X-Accel-Buffering": "no",
+      "X-Accel-Buffering": "no"
     };
+    
+    // Add chunked transfer encoding for mini-programs
+    if (isMiniProgram) {
+      headers["Transfer-Encoding"] = "chunked";
+    }
 
     if (req.method === "OPTIONS") {
       return new Response(null, { status: 204, headers });
@@ -75,25 +95,26 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
     // Handle different endpoints
     switch (url.pathname) {
       case '/raw':
-        return this.handleRawStream(req, headers);
+        return this.handleRawStream(req, headers, isMiniProgram ? ClientFormat.RAW_JSON : ClientFormat.SSE);
       case '/observe':
-        return this.handleObservabilityStream(req, headers);
+        return this.handleObservabilityStream(req, headers, isMiniProgram ? ClientFormat.RAW_JSON : ClientFormat.SSE);
       default:
+        // Check for session endpoint pattern
         // Check for session endpoint pattern
         const sessionMatch = url.pathname.match(/^\/session\/([^\/]+)$/);
         if (sessionMatch) {
           const sessionId = sessionMatch[1];
-          return this.handleSessionStream(sessionId, req, headers);
+          return this.handleSessionStream(sessionId, req, headers, isMiniProgram ? ClientFormat.RAW_JSON : ClientFormat.SSE);
         }
         return new Response('Not Found', { status: 404 });
     }
   }
 
-  private handleRawStream(req: Request, headers: Record<string, string>): Response {
+  private handleRawStream(req: Request, headers: Record<string, string>, format: ClientFormat = ClientFormat.SSE): Response {
     try {
       const stream = new ReadableStream({
         start: (controller) => {
-          const streamController = new StreamController(controller, this, StreamType.RAW);
+          const streamController = new StreamController(controller, this, StreamType.RAW, undefined, format);
           this.streams.add(streamController);
           
           // Keep the stream alive
@@ -126,11 +147,11 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
     }
   }
 
-  private handleObservabilityStream(req: Request, headers: Record<string, string>): Response {
+  private handleObservabilityStream(req: Request, headers: Record<string, string>, format: ClientFormat = ClientFormat.SSE): Response {
     try {
       const stream = new ReadableStream({
         start: (controller) => {
-          const streamController = new StreamController(controller, this, StreamType.OBSERVE);
+          const streamController = new StreamController(controller, this, StreamType.OBSERVE, undefined, format);
           this.streams.add(streamController);
           
           // Send initial connected message
@@ -178,11 +199,11 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
     }
   }
 
-  private handleSessionStream(sessionId: string, req: Request, headers: Record<string, string>): Response {
+  private handleSessionStream(sessionId: string, req: Request, headers: Record<string, string>, format: ClientFormat = ClientFormat.SSE): Response {
     try {
       const stream = new ReadableStream({
         start: (controller) => {
-          const streamController = new StreamController(controller, this, StreamType.SESSION, sessionId);
+          const streamController = new StreamController(controller, this, StreamType.SESSION, sessionId, format);
           this.streams.add(streamController);
           
           // Keep the stream alive
@@ -433,26 +454,39 @@ class StreamController {
     private controller: ReadableStreamDefaultController,
     private protocol: StreamingProtocol,
     public readonly type: StreamType,
-    sessionId?: string
+    sessionId?: string,
+    private responseFormat: ClientFormat = ClientFormat.SSE  // Default to SSE for web clients
   ) {
     this.sessionId = sessionId;
+    logger.debug(`[StreamingProtocol] Created ${type} stream with format ${responseFormat}${sessionId ? ' for session ' + sessionId : ''}`); 
   }
 
   public enqueue(data: string) {
     if (!this.isActive) return;
     
-    // Format as SSE data
-    const message = data.split('\n')
-      .map(line => `data: ${line}`)
-      .join('\n') + '\n\n';
+    if (this.responseFormat === ClientFormat.SSE) {
+      // Format as SSE data for web clients (existing behavior)
+      const message = data.split('\n')
+        .map(line => `data: ${line}`)
+        .join('\n') + '\n\n';
       
-    this.controller.enqueue(this.encoder.encode(message));
+      this.controller.enqueue(this.encoder.encode(message));
+    } else {
+      // Raw JSON format for mini-programs - no SSE formatting
+      this.controller.enqueue(this.encoder.encode(data));
+    }
   }
 
   public sendKeepalive() {
     if (!this.isActive) return;
-    // Use standard SSE comment format for keepalive
-    this.controller.enqueue(this.encoder.encode(": keepalive\n\n"));
+    
+    if (this.responseFormat === ClientFormat.SSE) {
+      // Use standard SSE comment format for keepalive (existing behavior)
+      this.controller.enqueue(this.encoder.encode(": keepalive\n\n"));
+    } else {
+      // JSON format for mini-program keepalive
+      this.controller.enqueue(this.encoder.encode(JSON.stringify({ type: "keepalive" })));
+    }
   }
 
   public close() {
