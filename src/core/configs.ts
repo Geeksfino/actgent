@@ -54,7 +54,9 @@ export interface CommunicationConfig {
   httpPort?: number;
   grpcPort?: number;
   streamPort?: number;
+  wsPort?: number;
   enableStreaming?: boolean;
+  enableWebSocket?: boolean;
 }
 
 export interface InboxConfig {
