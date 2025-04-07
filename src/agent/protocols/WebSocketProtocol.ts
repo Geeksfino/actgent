@@ -424,7 +424,7 @@ export class WebSocketProtocol extends BaseCommunicationProtocol {
     // Headings are atomic but single line
     if (/^#{1,6}\s+.+/.test(line)) {
       return {
-        content: line + '\n',
+        content: line,
         complete: true,
         type: 'heading'
       };
@@ -437,7 +437,7 @@ export class WebSocketProtocol extends BaseCommunicationProtocol {
     
     // Empty lines can be streamed immediately
     return {
-      content: line + '\n',
+      content: line,
       complete: true,
       type: 'text'
     };
@@ -458,9 +458,9 @@ export class WebSocketProtocol extends BaseCommunicationProtocol {
       currentLine++;
     }
     
-    // Only add newline if it's a complete paragraph
+    // Do not add any extra newlines
     return {
-      content: result.join('\n') + (complete ? '\n' : ''),
+      content: result.join('\n'),
       complete,
       type: 'paragraph'
     };
@@ -485,9 +485,9 @@ export class WebSocketProtocol extends BaseCommunicationProtocol {
       }
     }
     
-    // Only add newline for complete code blocks
+    // Do not add any extra newlines
     return {
-      content: result.join('\n') + (complete ? '\n' : ''),
+      content: result.join('\n'),
       complete,
       type: 'code'
     };
@@ -499,7 +499,7 @@ export class WebSocketProtocol extends BaseCommunicationProtocol {
       state.inTable = true;
       state.tableHeaderSeen = false;
       return {
-        content: line,  // No newline for header until separator
+        content: line,  // No newline for header
         complete: false,
         type: 'table_header'
       };
@@ -509,7 +509,7 @@ export class WebSocketProtocol extends BaseCommunicationProtocol {
       // Table header separator - complete the header
       state.tableHeaderSeen = true;
       return {
-        content: line + '\n',
+        content: line,
         complete: true,
         type: 'table_header'
       };
@@ -522,7 +522,7 @@ export class WebSocketProtocol extends BaseCommunicationProtocol {
     }
     
     return {
-      content: line + (isEndOfTable ? '\n' : ''),
+      content: line,
       complete: true,
       type: 'table_row'
     };
@@ -555,7 +555,7 @@ export class WebSocketProtocol extends BaseCommunicationProtocol {
         }
         
         return {
-          content: line + '\n',
+          content: line,
           complete: true,
           type: 'list_item'
         };
@@ -573,7 +573,7 @@ export class WebSocketProtocol extends BaseCommunicationProtocol {
           if (nextIndent > state.listIndentLevel || nextIsListMarker) {
             // List continues
             return {
-              content: line + '\n',
+              content: line,
               complete: true,
               type: 'list_item'
             };
@@ -583,7 +583,7 @@ export class WebSocketProtocol extends BaseCommunicationProtocol {
         // List ends
         state.inList = false;
         return {
-          content: line + '\n',
+          content: line,
           complete: true,
           type: 'list_item'
         };
@@ -620,7 +620,7 @@ export class WebSocketProtocol extends BaseCommunicationProtocol {
         }
         
         return {
-          content: line + '\n',
+          content: line,
           complete: true,
           type: 'list_item'
         };
@@ -655,7 +655,7 @@ export class WebSocketProtocol extends BaseCommunicationProtocol {
     }
     
     return {
-      content: line + (isEndOfBlockquote ? '\n' : ''),
+      content: line,
       complete: isEndOfBlockquote,
       type: 'blockquote'
     };
@@ -772,57 +772,30 @@ export class WebSocketProtocol extends BaseCommunicationProtocol {
       
       // Handle standalone newlines and whitespace-only content
       if (content.trim() === '') {
-        logger.debug(`[WebSocketProtocol] Received whitespace-only content, buffering`);
-        let buffer = this.markdownBuffers.get(sessionId) || '';
-        buffer += content;
-        this.markdownBuffers.set(sessionId, buffer);
+        logger.debug(`[WebSocketProtocol] Received whitespace-only content, passing through`);
+        const formattedMessage = this.createFormattedMessage(content, sessionId);
+        for (const conn of connections) {
+          conn.send(formattedMessage);
+        }
         return;
       }
       
-      // Get or create buffer for this session
-      let buffer = this.markdownBuffers.get(sessionId) || '';
-      buffer += content;
+      // Simply pass through the content as-is without attempting to analyze markdown structure
+      // This preserves the exact formatting from the LLM
+      const formattedMessage = this.createFormattedMessage(content, sessionId);
       
-      // Log the current buffer state
-      logger.debug(`[WebSocketProtocol] Current buffer (${buffer.length} chars):`);
-      logger.debug(`[WebSocketProtocol] ---BEGIN BUFFER---`);
-      logger.debug(JSON.stringify(buffer));
-      logger.debug(`[WebSocketProtocol] ---END BUFFER---`);
+      // Log the formatted message being sent to client
+      logger.debug(`[WebSocketProtocol] Sending formatted message to client:`);
+      logger.debug(`[WebSocketProtocol] ---BEGIN FORMATTED MESSAGE---`);
+      logger.debug(formattedMessage);
+      logger.debug(`[WebSocketProtocol] ---END FORMATTED MESSAGE---`);
       
-      // Analyze the buffer to find complete markdown blocks
-      const { completeBlocks, remainingContent } = this.analyzeMarkdownBlocks(buffer);
-      
-      // Log the analysis results
-      logger.debug(`[WebSocketProtocol] Complete blocks (${completeBlocks.length} chars):`);
-      logger.debug(`[WebSocketProtocol] ---BEGIN COMPLETE BLOCKS---`);
-      logger.debug(JSON.stringify(completeBlocks));
-      logger.debug(`[WebSocketProtocol] ---END COMPLETE BLOCKS---`);
-      
-      logger.debug(`[WebSocketProtocol] Remaining content (${remainingContent.length} chars):`);
-      logger.debug(`[WebSocketProtocol] ---BEGIN REMAINING CONTENT---`);
-      logger.debug(JSON.stringify(remainingContent));
-      logger.debug(`[WebSocketProtocol] ---END REMAINING CONTENT---`);
-      
-      // Update the buffer with remaining content
-      this.markdownBuffers.set(sessionId, remainingContent);
-      
-      // Only send if we have complete blocks
-      if (completeBlocks) {
-        const formattedMessage = this.createFormattedMessage(completeBlocks, sessionId);
-        
-        // Log the formatted message being sent to client
-        logger.debug(`[WebSocketProtocol] Sending formatted message to client:`);
-        logger.debug(`[WebSocketProtocol] ---BEGIN FORMATTED MESSAGE---`);
-        logger.debug(formattedMessage);
-        logger.debug(`[WebSocketProtocol] ---END FORMATTED MESSAGE---`);
-        
-        for (const conn of connections) {
-          conn.send(formattedMessage);
-          logger.trace(`[WebSocketProtocol] Sent markdown blocks to session ${sessionId}`);
-        }
+      for (const conn of connections) {
+        conn.send(formattedMessage);
+        logger.trace(`[WebSocketProtocol] Sent content to session ${sessionId}`);
       }
     } catch (error) {
-      logger.error(`[WebSocketProtocol] Error processing markdown content: ${error}`);
+      logger.error(`[WebSocketProtocol] Error processing content: ${error}`);
       
       // Fallback to original behavior on error
       for (const conn of connections) {
@@ -838,19 +811,7 @@ export class WebSocketProtocol extends BaseCommunicationProtocol {
   public sendResponseComplete(sessionId: string): void {
     logger.debug(`[WebSocketProtocol] Sending response complete for session ${sessionId}`);
     try {
-      // First, flush any remaining buffered content
-      const remainingContent = this.markdownBuffers.get(sessionId);
-      if (remainingContent) {
-        const formattedMessage = this.createFormattedMessage(remainingContent, sessionId);
-        this.sessionConnections.get(sessionId)?.forEach(conn => {
-          conn.send(formattedMessage);
-        });
-        
-        // Clear the buffer
-        this.markdownBuffers.delete(sessionId);
-      }
-      
-      // Then send completion message
+      // Send completion message
       const completionMessage = JSON.stringify({
         type: "completion",
         reason: "stop",
