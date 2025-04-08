@@ -123,11 +123,12 @@ export class WebSocketProtocol extends BaseCommunicationProtocol {
   private createWebSocketHandler(): WebSocketHandler {
     return {
       open: (ws: ServerWebSocket) => {
-        const connId = Math.random().toString(36).substring(7);
-        this.connections.set(connId, ws);
-        // Set connection data using type assertion since data is 'any' type
+        const connId = crypto.randomUUID();
+        logger.debug(`[WebSocketProtocol] Connection opened: ${connId}`);
+        logger.debug(`[WebSocketProtocol] Remote address: ${ws.remoteAddress}`);
         ws.data = { connId, sessionId: null } as any;
-        logger.debug(`[WebSocketProtocol] New connection opened: ${connId}`);
+        this.connections.set(connId, ws);
+        logger.debug(`[WebSocketProtocol] Active connections: ${this.connections.size}`);
       },
       
       message: async (ws: ServerWebSocket, message: string | Buffer) => {
@@ -135,21 +136,50 @@ export class WebSocketProtocol extends BaseCommunicationProtocol {
           const connId = (ws.data as any).connId;
           logger.debug(`[WebSocketProtocol] Received message from connection ${connId}`);
           
+          // Log raw message for debugging
+          logger.debug(`[WebSocketProtocol] Raw message content: ${message.toString().substring(0, 200)}${message.toString().length > 200 ? '...' : ''}`);
+          
           // Parse the message
-          const data = JSON.parse(message.toString()) as WebSocketMessage;
+          let data;
+          try {
+            data = JSON.parse(message.toString()) as WebSocketMessage;
+            logger.debug(`[WebSocketProtocol] Successfully parsed message: ${JSON.stringify(data, null, 2)}`);
+          } catch (error) {
+            logger.error(`[WebSocketProtocol] Failed to parse message as JSON: ${error}`);
+            logger.error(`[WebSocketProtocol] Message content: ${message.toString()}`);
+            ws.send(JSON.stringify({
+              type: 'error',
+              error: 'Invalid JSON message'
+            }));
+            return;
+          }
+          
+          // Log message type
+          logger.debug(`[WebSocketProtocol] Message type: ${data.type || 'unknown'}`);
           
           // Handle different message types
           switch (data.type) {
             case 'createSession': {
+              logger.debug('[WebSocketProtocol] *** ENTERING createSession case ***');
+              logger.debug(`[WebSocketProtocol] createSession data: ${JSON.stringify(data, null, 2)}`);
               logger.trace('[WebSocketProtocol] Processing createSession request');
-              const { owner, description, enhancePrompt = false, message } = data;
+              const { description, enhancePrompt = false } = data;
+              const owner = 'user'; // Always use 'user' as the owner for WebSocket sessions
+              
+              logger.debug(`[WebSocketProtocol] Creating session with owner: ${owner}, description length: ${description ? description.length : 0}`);
+              if (description) {
+                logger.debug(`[WebSocketProtocol] Description preview: ${description.substring(0, 50)}${description.length > 50 ? '...' : ''}`);
+              }
               
               try {
-                // Create a new session
-                // If an initial message is provided, use it as the description
-                // This ensures the message is processed once through createSession
-                const actualDescription = message || description;
-                const session = await this.handler.onCreateSession(owner, actualDescription, enhancePrompt);
+                // Create a new session with the description as the initial message
+                logger.debug(`[WebSocketProtocol] Creating session with description: ${description}`);
+                logger.debug(`[WebSocketProtocol] Calling handler.onCreateSession with owner: ${owner}`);
+                const startTime = Date.now();
+                const session = await this.handler.onCreateSession(owner, description, enhancePrompt);
+                const timeElapsed = Date.now() - startTime;
+                logger.debug(`[WebSocketProtocol] handler.onCreateSession completed in ${timeElapsed}ms`);
+                logger.debug(`[WebSocketProtocol] Session created with ID: ${session.sessionId}`);
                 (ws.data as any).sessionId = session.sessionId;
                 
                 // Add connection to session map
@@ -195,12 +225,15 @@ export class WebSocketProtocol extends BaseCommunicationProtocol {
                 eventEmitter.on('agent:response', eventListener);
                 
                 // Send success response
-                ws.send(JSON.stringify({
+                const responseMsg = JSON.stringify({
                   type: 'sessionCreated',
                   sessionId: session.sessionId
-                }));
+                });
+                logger.debug(`[WebSocketProtocol] Sending sessionCreated response: ${responseMsg}`);
+                ws.send(responseMsg);
                 
                 logger.debug(`[WebSocketProtocol] Session created with ID: ${session.sessionId}`);
+                logger.debug('[WebSocketProtocol] *** EXITING createSession case ***');
               } catch (error) {
                 logger.error(`[WebSocketProtocol] Failed to create session: ${error}`);
                 ws.send(JSON.stringify({
@@ -212,8 +245,15 @@ export class WebSocketProtocol extends BaseCommunicationProtocol {
             }
             
             case 'chat': {
+              logger.debug('[WebSocketProtocol] *** ENTERING chat case ***');
+              logger.debug(`[WebSocketProtocol] Chat message data: ${JSON.stringify(data, null, 2)}`);
               logger.trace('[WebSocketProtocol] Processing chat request');
               const { sessionId, message } = data;
+              
+              logger.debug(`[WebSocketProtocol] Chat message for session ${sessionId}, message length: ${message ? message.length : 0}`);
+              if (message) {
+                logger.debug(`[WebSocketProtocol] Message preview: ${message.substring(0, 50)}${message.length > 50 ? '...' : ''}`);
+              }
               
               if (!sessionId) {
                 ws.send(JSON.stringify({
@@ -272,15 +312,22 @@ export class WebSocketProtocol extends BaseCommunicationProtocol {
                 }
                 
                 // Process the chat message
+                logger.debug(`[WebSocketProtocol] Calling handler.onChat with sessionId: ${sessionId}`);
+                const startTime = Date.now();
                 await this.handler.onChat(sessionId, message);
+                const timeElapsed = Date.now() - startTime;
+                logger.debug(`[WebSocketProtocol] handler.onChat completed in ${timeElapsed}ms`);
                 
                 // Send acknowledgment
-                ws.send(JSON.stringify({
+                const ackMsg = JSON.stringify({
                   type: 'messageSent',
                   sessionId
-                }));
+                });
+                logger.debug(`[WebSocketProtocol] Sending messageSent response: ${ackMsg}`);
+                ws.send(ackMsg);
                 
                 logger.debug(`[WebSocketProtocol] Chat message processed for session ${sessionId}`);
+                logger.debug('[WebSocketProtocol] *** EXITING chat case ***');
               } catch (error) {
                 logger.error(`[WebSocketProtocol] Failed to process chat for session ${sessionId}: ${error}`);
                 ws.send(JSON.stringify({
