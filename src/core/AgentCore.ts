@@ -338,19 +338,19 @@ export class AgentCore {
       // Store tool_calls array for OpenAI format compatibility
       metadataMap.set('tool_calls', message.metadata.context.tool_calls);
       
-      // For messages with tool calls, content can be empty string per OpenAI convention
-      if (message.metadata.context.tool_calls.length > 0) {
-        metadataMap.set('content', content);
-        // Don't set content to empty string here as we still want to store the original content
-      }
+      // When tool_calls is present, content should be omitted per OpenAI convention
+      metadataMap.delete('content');
     }
     
     // Handle tool responses
     if (sender === 'tool' && message.metadata?.context?.tool_call_id) {
       metadataMap.set('tool_call_id', message.metadata.context.tool_call_id);
       
-      // No need for complex content handling anymore since we fixed the root cause
-      // The content should already be properly formatted
+      // Ensure tool_call_id is properly formatted as a string
+      const toolCallId = metadataMap.get('tool_call_id');
+      if (toolCallId) {
+        metadataMap.set('tool_call_id', String(toolCallId));
+      }
     }
     
     await this.memories.remember(content, undefined, metadataMap);
@@ -422,10 +422,7 @@ export class AgentCore {
           
           // For tool messages
           if (message.role === 'tool' && message.tool_call_id) {
-            mapped.tool_call_id = message.tool_call_id;
-            
-            // No need for complex content handling anymore since we fixed the root cause
-            // The content should already be properly formatted
+            mapped.tool_call_id = String(message.tool_call_id);
           }
           
           return mapped as OpenAI.Chat.Completions.ChatCompletionMessageParam;
