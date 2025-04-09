@@ -25,7 +25,7 @@ const rl = readline.createInterface({
 });
 McpAgent.run(loggerConfig);
 McpAgent.registerStreamCallback((delta: string) => {
-    process.stdout.write(".");
+    process.stdout.write(delta);
 });
 
 

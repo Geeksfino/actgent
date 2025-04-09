@@ -14,6 +14,7 @@ export class McpClient {
   private transport: McpClientTransport;
   private logger: Logger;
   private connected: boolean = false;
+  private _serverName: string;
 
   /**
    * Creates a new MCP client
@@ -23,6 +24,7 @@ export class McpClient {
   constructor(config: McpClientConfig, transport: McpClientTransport) {
     this.logger = config.logger || mcpLoggers.client;
     this.transport = transport;
+    this._serverName = config.name || 'unnamed-server';
     
     // Import dynamically to avoid module resolution issues
     const { Client } = require("@modelcontextprotocol/sdk/client/index.js");
@@ -40,6 +42,22 @@ export class McpClient {
         }
       }
     );
+  }
+
+  /**
+   * Get the server name
+   * @returns The name of the MCP server
+   */
+  get serverName(): string {
+    return this._serverName;
+  }
+
+  /**
+   * Set the server name
+   * @param name The name of the MCP server
+   */
+  set serverName(name: string) {
+    this._serverName = name;
   }
 
   /**
@@ -139,10 +157,41 @@ export class McpClient {
    */
   async callTool(name: string, args: Record<string, any>): Promise<any> {
     this.ensureConnected();
-    return this.client.callTool({
-      name,
-      arguments: args
+    
+    // Add detailed debug logging for tool calls
+    this.logger.debug(`Calling MCP tool: ${name} on server: ${this._serverName}`, {
+      toolName: name,
+      serverName: this._serverName,
+      argsKeys: Object.keys(args),
+      timestamp: new Date().toISOString()
     });
+    
+    console.log(`📡 MCP CLIENT SENDING REQUEST: ${name} to server: ${this._serverName}`);
+    
+    try {
+      const result = await this.client.callTool({
+        name,
+        arguments: args
+      });
+      
+      this.logger.debug(`MCP tool call successful: ${name}`, {
+        toolName: name,
+        serverName: this._serverName,
+        resultType: typeof result,
+        timestamp: new Date().toISOString()
+      });
+      
+      return result;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Error calling MCP tool ${name}: ${errorMessage}`, {
+        toolName: name,
+        serverName: this._serverName,
+        error: errorMessage
+      });
+      console.log(`❌ MCP CLIENT ERROR: Failed to call tool ${name}: ${errorMessage}`);
+      throw error;
+    }
   }
 
   /**

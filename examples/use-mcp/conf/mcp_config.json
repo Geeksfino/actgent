@@ -9,12 +9,13 @@
           "/Users/cliang/Downloads"
         ]
       },
-      "echo-server": {
-        "command": "/Users/cliang/repos/mygithub/embedding-mcp-server/.venv/bin/python",
+      "finclip_stock_mcp": {
+        "command": "npx",
         "args": [
-          "/Users/cliang/repos/mygithub/embedding-mcp-server/test/echo-mcp/simple_echo.py"
-        ],
-        "cwd": "/Users/cliang/repos/mygithub/embedding-mcp-server"
+          "-y",
+          "mcp-remote@latest",
+          "https://mcp.finclip.com/sse"
+        ]
       }
     }
   }
