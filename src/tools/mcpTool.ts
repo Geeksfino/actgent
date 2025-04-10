@@ -289,8 +289,29 @@ export class McpTool extends Tool<McpToolInput, StringOutput> {
         }))
       });
       
+      // Extract the text content from the MCP standard format to avoid nested content issues
+      let finalOutput: string;
+      
+      if (formattedResult && Array.isArray(formattedResult.content) && formattedResult.content.length > 0) {
+        // Extract text items from the content array
+        const textItems = formattedResult.content
+          .filter(item => item.type === 'text' && item.text)
+          .map(item => item.text);
+        
+        if (textItems.length > 0) {
+          // Join all text items with newlines for a clean output
+          finalOutput = textItems.join('\n');
+        } else {
+          // Fallback to JSON if no text items found
+          finalOutput = JSON.stringify(formattedResult);
+        }
+      } else {
+        // Use the full formatted result if it doesn't match expected structure
+        finalOutput = JSON.stringify(formattedResult);
+      }
+      
       // Return the result as a StringOutput
-      return new StringOutput(JSON.stringify(formattedResult));
+      return new StringOutput(finalOutput);
     } catch (error) {
       // Format errors according to MCP protocol
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -312,7 +333,28 @@ export class McpTool extends Tool<McpToolInput, StringOutput> {
         errorOutput
       });
       
-      return new StringOutput(JSON.stringify(errorOutput));
+      // Extract text from error output using the same approach as success case
+      let finalErrorOutput: string;
+      
+      if (errorOutput && Array.isArray(errorOutput.content) && errorOutput.content.length > 0) {
+        // Extract text items from the content array
+        const textItems = errorOutput.content
+          .filter(item => item.type === 'text' && item.text)
+          .map(item => item.text);
+        
+        if (textItems.length > 0) {
+          // Join all text items with newlines for a clean output
+          finalErrorOutput = textItems.join('\n');
+        } else {
+          // Fallback to JSON if no text items found
+          finalErrorOutput = JSON.stringify(errorOutput);
+        }
+      } else {
+        // Use the full error output if it doesn't match expected structure
+        finalErrorOutput = JSON.stringify(errorOutput);
+      }
+      
+      return new StringOutput(finalErrorOutput);
     }
   }
 }

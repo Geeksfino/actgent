@@ -44,6 +44,8 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
     arguments?: any;
     originalToolCalls?: Array<any>;
   } {
+    logger.debug(`Extracting tool call info from response==>: ${response}`);
+
     try {
       const parsed = JSON.parse(response);
       
@@ -138,8 +140,52 @@ export abstract class AbstractClassifier<T extends readonly ClassificationTypeCo
         });
       }
 
-      // Check if the response is a tool call
-      if (toolCallInfo.id) {
+      // Check if the response contains tool calls
+      if (toolCallInfo.originalToolCalls && Array.isArray(toolCallInfo.originalToolCalls)) {
+        // Process all tool calls in parallel
+        const toolCalls = toolCallInfo.originalToolCalls;
+        
+        // If there are tool calls, trigger handlers for each one
+        if (toolCalls.length > 0) {
+          // Process each tool call in parallel
+          toolCalls.forEach(toolCall => {
+            if (toolCall.id && toolCall.function && toolCall.function.name) {
+              // Parse arguments if they're a string
+              let toolArguments = toolCall.function.arguments;
+              
+              if (typeof toolArguments === 'string') {
+                try {
+                  // Try to parse the arguments if they're a JSON string
+                  toolArguments = JSON.parse(toolArguments);
+                } catch {
+                  // If parsing fails, keep the original string
+                  logger.debug('Failed to parse tool arguments as JSON, using as-is');
+                }
+              }
+              
+              const categorizedResponse = {
+                type: ResponseType.TOOL_CALL,
+                id: toolCall.id,
+                name: toolCall.function.name,
+                arguments: toolArguments,
+                originalToolCalls: [toolCall],
+                structuredData: {
+                  id: toolCall.id,
+                  name: toolCall.function.name,
+                  arguments: toolArguments,
+                  originalToolCalls: [toolCall]
+                },
+                messageType: 'TOOL_INVOCATION'
+              };
+              
+              session.triggerToolCallsHandlers(categorizedResponse);
+            }
+          });
+          
+          return ResponseType.TOOL_CALL;
+        }
+      } else if (toolCallInfo.id) {
+        // Backward compatibility for single tool call
         const categorizedResponse = {
           type: ResponseType.TOOL_CALL,
           id: toolCallInfo.id,

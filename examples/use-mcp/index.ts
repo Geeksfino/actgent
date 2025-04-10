@@ -105,7 +105,39 @@ function setupResponseHandler(session: any) {
 
     session.onConversation((response: any) => {
         process.stdout.write(`\n${McpAgent.getName()}: `);
-        process.stdout.write(JSON.stringify(response, null, 2));
+        if (typeof response === 'string') {
+            // Display string responses directly
+            process.stdout.write(response);
+        } else if (response && typeof response === 'object') {
+            // If it's an object with content property (common MCP response format)
+            if (response.content) {
+                if (Array.isArray(response.content)) {
+                    // Handle MCP standard content array format
+                    for (const item of response.content) {
+                        if (item.type === 'text' && item.text) {
+                            process.stdout.write(item.text);
+                        } else if (item.type === 'image' && item.data) {
+                            process.stdout.write(`[Image data available]`);
+                        } else {
+                            process.stdout.write(JSON.stringify(item, null, 2));
+                        }
+                    }
+                } else if (typeof response.content === 'string') {
+                    process.stdout.write(response.content);
+                } else {
+                    process.stdout.write(JSON.stringify(response.content, null, 2));
+                }
+            } else {
+                // Fall back to JSON stringification for other object formats
+                process.stdout.write(JSON.stringify(response, null, 2));
+            }
+        } else if (response === null || response === undefined) {
+            // Handle empty responses
+            process.stdout.write("I processed your request but don't have additional information to provide.");
+        } else {
+            // Handle any other type of response
+            process.stdout.write(String(response));
+        }
         process.stdout.write(`\n\n${defaultPrompt}`);
     });
 }

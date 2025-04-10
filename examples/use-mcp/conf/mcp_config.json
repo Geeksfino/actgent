@@ -8,14 +8,6 @@
           "/Users/cliang/Desktop",
           "/Users/cliang/Downloads"
         ]
-      },
-      "finclip_stock_mcp": {
-        "command": "npx",
-        "args": [
-          "-y",
-          "mcp-remote@latest",
-          "https://mcp.finclip.com/sse"
-        ]
       }
     }
   }

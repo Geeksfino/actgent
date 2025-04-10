@@ -23,5 +23,4 @@ const McpAgent = new AgentBuilder(agentConfig, svcConfig)
     .withMcpTools(mcpConfigPath)
     .create(BareClassifier, BarePromptTemplate);
 
-
 export { McpAgent };

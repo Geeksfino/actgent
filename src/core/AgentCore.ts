@@ -436,27 +436,27 @@ export class AgentCore {
       const systemPrompt = await this.promptManager.getSystemPrompt(sessionContext);
       const assistantPrompt = await this.promptManager.getAssistantPrompt(sessionContext);
 
+      // Construct messages array, filtering out empty assistant messages which can cause issues with DeepSeek API
       const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
         { role: "system", content: systemPrompt },
-        { role: "assistant", content: assistantPrompt },
-        ...history,
-        // {
-        //   role: "user",
-        //   content: this.promptManager.getUserPrompt(
-        //     sessionContext,
-        //     message.payload.input,
-        //     context
-        //   ),
-        // },
       ];
+      
+      // Only add assistant prompt if it's not empty
+      if (assistantPrompt && assistantPrompt.trim().length > 0) {
+        messages.push({ role: "assistant", content: assistantPrompt });
+      }
+      
+      // Add history
+      messages.push(...history);
 
       // Split into separate configs for streaming and non-streaming
       const baseConfig = {
         model: this.llmConfig?.model || "gpt-4",
         messages,
         tools: unmappedTools.length > 0 ? unmappedTools : undefined,
+        ...(unmappedTools.length > 0 ? { tool_choice: "auto" as const } : {}),
       };
-
+      this.logger.debug('LLM prompt config:', JSON.stringify(baseConfig, null, 2));
       // Variable to track if we detected tool calls during streaming
       let toolCallsInProgress = false;
       

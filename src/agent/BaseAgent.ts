@@ -208,23 +208,31 @@ export abstract class BaseAgent<
         try {
           const parsed = JSON.parse(rawContent);
           if (parsed && typeof parsed === 'object' && parsed.content) {
-            // If the output already has a content field, use the raw content instead
-            // to avoid nesting issues
-            rawContent = JSON.stringify(parsed.content);
+            // If the output already has a content field, use the content directly
+            // to avoid nesting issues and double stringification
+            content = typeof parsed.content === 'string' ? 
+              parsed.content : JSON.stringify(parsed.content);
+          } else {
+            // Use the parsed object directly to avoid double stringification
+            content = typeof parsed === 'string' ? parsed : JSON.stringify(parsed);
           }
         } catch (e) {
           // If parsing fails, use the original content
+          content = rawContent;
         }
-        
-        content = rawContent;
       } else if (typeof result.data === 'object' && result.data !== null) {
         // For regular objects, check if they have a content field to avoid nesting
         if (result.data.content) {
-          content = JSON.stringify(result.data.content);
+          // Use the content directly if it's a string, otherwise stringify it once
+          content = typeof result.data.content === 'string' ? 
+            result.data.content : JSON.stringify(result.data.content);
         } else {
-          content = JSON.stringify(result.data);
+          // Use the data directly if it's a string, otherwise stringify it once
+          content = typeof result.data === 'string' ? 
+            result.data : JSON.stringify(result.data);
         }
       } else {
+        // For primitive values, convert to string directly
         content = String(result.data);
       }
       
