@@ -456,7 +456,7 @@ export class AgentCore {
         tools: unmappedTools.length > 0 ? unmappedTools : undefined,
         ...(unmappedTools.length > 0 ? { tool_choice: "auto" as const } : {}),
       };
-      this.logger.debug('LLM prompt config:', JSON.stringify(baseConfig, null, 2));
+      this.logger.trace('LLM prompt config:', JSON.stringify(baseConfig, null, 2));
       // Variable to track if we detected tool calls during streaming
       let toolCallsInProgress = false;
       

@@ -1,13 +1,12 @@
 {
     "mcpServers": {
-      "filesystem": {
+      "finclip_stock_mcp": {
         "command": "npx",
         "args": [
           "-y",
-          "@modelcontextprotocol/server-filesystem",
-          "/Users/cliang/Desktop",
-          "/Users/cliang/Downloads"
+          "mcp-remote@latest",
+          "https://mcp.finclip.com/sse"
         ]
       }
     }
-  }
+}
