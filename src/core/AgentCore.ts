@@ -409,7 +409,8 @@ export class AgentCore {
       }
     }
     
-    await this.memories.remember(content, undefined, metadataMap);
+    // Pass sessionId to the remember method to enable proper session isolation
+    await this.memories.remember(content, undefined, metadataMap, message.sessionId);
   }
 
   public async getOrCreateSessionContext(message: Message): Promise<Session> {
@@ -460,7 +461,8 @@ export class AgentCore {
           .map(tool => tool.name)
       });
 
-      const messageRecords = await this.memories.recallRecentMessages();
+      // Pass the session ID to ensure we only get messages for this specific session
+    const messageRecords = await this.memories.recallRecentMessages(message.sessionId);
       const history: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
         ...messageRecords.map((message) => {
           // Create a basic message structure

@@ -82,10 +82,22 @@ export class AgentMemorySystem {
      * where and how to store it based on its characteristics.
      * All input first goes to ephemeral memory, then gets processed by memory handlers
      * based on events from MemoryTransitionManager.
+     * @param content The content to remember
+     * @param schema Optional schema for the content
+     * @param metadata Optional metadata for the content
+     * @param sessionId Optional session ID to associate with the memory
      */
-    public async remember<C>(content: C | string, schema?: z.ZodSchema<C>, metadata?: Map<string, any>): Promise<void> {
+    public async remember<C>(content: C | string, schema?: z.ZodSchema<C>, metadata?: Map<string, any>, sessionId?: string): Promise<void> {
         if (metadata?.get('role') === 'user' || metadata?.get('role') === 'assistant' || metadata?.get('role') === 'tool') {
-            const memoryUnit = this.ephemeralMemory.createMemoryUnit(content, schema, metadata);
+            // Make a copy of the metadata to avoid modifying the original
+            const metadataCopy = new Map(metadata);
+            
+            // Add sessionId to metadata if provided
+            if (sessionId) {
+                metadataCopy.set('sessionId', sessionId);
+            }
+            
+            const memoryUnit = this.ephemeralMemory.createMemoryUnit(content, schema, metadataCopy);
             await this.ephemeralMemory.store(memoryUnit);
         }
     }
@@ -246,12 +258,22 @@ export class AgentMemorySystem {
 
     /**
      * Recall recent messages in OpenAI chat completion format
+     * @param sessionId Optional session ID to filter messages by
      * @param limit Optional number of messages to return
      * @returns Array of messages in OpenAI format {role, content}
      */
-    public async recallRecentMessages(limit?: number): Promise<Array<any>> {
+    public async recallRecentMessages(sessionId?: string, limit?: number): Promise<Array<any>> {
+        // Prepare filter to get messages for the specific session
+        const filter: MemoryFilter = { limit };
+        
+        // If sessionId is provided, filter messages by sessionId using metadataFilters
+        if (sessionId) {
+            const sessionIdFilter = new Map<string, any>([['sessionId', sessionId]]);
+            filter.metadataFilters = [sessionIdFilter];
+        }
+        
         // Get messages in FIFO order
-        const memories = await this.ephemeralMemory.query({ limit });
+        const memories = await this.ephemeralMemory.query(filter);
         
         // Convert to OpenAI format
         return memories.map(memory => {
