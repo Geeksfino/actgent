@@ -4,6 +4,7 @@ import { MultiLevelClassifier, MultiLevelPromptTemplate } from "@finogeek/actgen
 import { BarePromptTemplate, BareClassifier } from "@finogeek/actgent/agent";
 import { createRuntime } from "@finogeek/actgent/runtime";
 import { McpKnowledgePreProcessor } from "./McpKnowledgePreProcessor";
+import { FileConversationHandler } from "./FileConversationHandler";
 
 const runtime = createRuntime();
 
@@ -19,6 +20,11 @@ const svcConfig = await AgentServiceConfigurator.getAgentConfiguration(__dirname
 
 const TechSupportAgent = new AgentBuilder(agentConfig, svcConfig)
     .create(BareClassifier, BarePromptTemplate);
+
+// Register the file conversation handler
+const conversationLogPath = process.env.CONVERSATION_LOG_PATH || "/tmp/tech-support-conversations.log";
+TechSupportAgent.registerConversationDataHandler(new FileConversationHandler(conversationLogPath));
+console.log(`Registered file conversation handler. Logs will be saved to: ${conversationLogPath}`);
 
 // Initialize MCP preprocessor
 (async () => {

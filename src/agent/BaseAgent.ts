@@ -2,6 +2,7 @@ import { AgentCoreConfig, QueryPreProcessor, AgentServiceConfig, Instruction  } 
 import { Communication } from './Communication';
 import { AgentRegistry } from './AgentRegistry';
 import { AgentCore } from '../core/AgentCore';
+import { ConversationDataHandler } from '../core/ConversationDataHandler';
 import { IAgentPromptTemplate } from '../core/IPromptTemplate';
 import { ClassificationTypeConfig, IClassifier} from '../core/IClassifier';
 import { ExecutionContext } from '../core/ExecutionContext';
@@ -390,6 +391,23 @@ export abstract class BaseAgent<
 
   public getSession(sessionId: string): Session | undefined {
     return this.core.getSessionContext(sessionId).getSession();
+  }
+
+  /**
+   * Register a conversation data handler
+   * @param handler The handler to register
+   */
+  public registerConversationDataHandler(handler: ConversationDataHandler): void {
+    this.core.registerConversationDataHandler(handler);
+  }
+
+  /**
+   * Unregister a conversation data handler
+   * @param handler The handler to unregister
+   * @returns Whether the handler was found and removed
+   */
+  public unregisterConversationDataHandler(handler: ConversationDataHandler): boolean {
+    return this.core.unregisterConversationDataHandler(handler);
   }   
 
   private async findHelperAgent(subtask: string): Promise<AgentCore | null> {

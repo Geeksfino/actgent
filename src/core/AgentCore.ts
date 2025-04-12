@@ -16,6 +16,7 @@ import { LLMErrorHandler } from './LLMErrorHandler';
 import { coreLoggers } from './logging';
 import { getEventEmitter } from "./observability/AgentEventEmitter";
 import { ResponseType } from "./ResponseTypes";
+import { ConversationDataHandler } from "./ConversationDataHandler";
 
 import { AgentMemorySystem } from "./memory/AgentMemorySystem";
 
@@ -53,6 +54,7 @@ export class AgentCore {
   private promptManager: PromptManager;
   private sessionContextManager: { [sessionId: string]: SessionContext } = {};
   private classifier: IClassifier<any>;
+  private conversationHandlers: ConversationDataHandler[] = [];
 
   private shutdownSubject: Subject<void> = new Subject<void>();
 
@@ -136,6 +138,51 @@ export class AgentCore {
 
   public getInstructionByName(name: string): Instruction | undefined {
     return this.instructions.find((instruction) => instruction.name === name);
+  }
+
+  /**
+   * Register a conversation data handler
+   * @param handler The handler to register
+   */
+  public registerConversationDataHandler(handler: ConversationDataHandler): void {
+    this.conversationHandlers.push(handler);
+    
+    // Sort handlers by priority (if specified)
+    this.conversationHandlers.sort((a, b) => 
+      (a.priority ?? Number.MAX_SAFE_INTEGER) - (b.priority ?? Number.MAX_SAFE_INTEGER)
+    );
+    
+    this.logger.info('Registered conversation data handler');
+  }
+
+  /**
+   * Unregister a conversation data handler
+   * @param handler The handler to unregister
+   * @returns Whether the handler was found and removed
+   */
+  public unregisterConversationDataHandler(handler: ConversationDataHandler): boolean {
+    const initialLength = this.conversationHandlers.length;
+    this.conversationHandlers = this.conversationHandlers.filter(h => h !== handler);
+    return initialLength > this.conversationHandlers.length;
+  }
+
+  /**
+   * Process message through all registered conversation handlers
+   * @param message The message to process
+   * @private
+   */
+  private async processConversationHandlers(message: Message): Promise<void> {
+    if (this.conversationHandlers.length === 0) return;
+    
+    // Run each handler in the chain
+    for (const handler of this.conversationHandlers) {
+      try {
+        await handler.handleMessage(message, this.id);
+      } catch (error) {
+        // Log error but continue the chain
+        this.logger.error(`Error in conversation handler: ${error}`);
+      }
+    }
   }
 
   public handleInstructionWithTool(
@@ -246,6 +293,9 @@ export class AgentCore {
   }
 
   private async processMessage(message: Message): Promise<void> {
+    // Process message through conversation handlers
+    await this.processConversationHandlers(message);
+
     const sessionContext = this.sessionContextManager[message.sessionId];
 
     // Set current agent and session in event emitter
@@ -310,6 +360,12 @@ export class AgentCore {
   }
 
   private async remember(message: Message) {
+    // Process message through conversation handlers if it's from assistant or tool
+    // (user messages are already processed in processMessage)
+    if (message.metadata?.sender === 'assistant' || message.metadata?.sender === 'tool') {
+      await this.processConversationHandlers(message);
+    }
+    
     // Convert object metadata to Map
     let sender;
     if (message.metadata?.sender === 'user') {

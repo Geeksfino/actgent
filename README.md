@@ -70,8 +70,102 @@ Actgent is built around several key concepts that work together to create powerf
 8. **PromptManager**: Manages and organizes multiple prompt templates.
 9. **AgentCore**: The central logic and decision-making component of an agent, putting all of the above together.
 10. **Agent**: The high-level abstraction that combines all these components into a functional entity.
+11. **ConversationDataHandler**: An interface for processing conversation messages for various purposes such as persistence, monitoring, or forwarding.
 
-These components work together to create a flexible and powerful agent system. For example, an Agent uses its Classifier to categorize incoming Messages, then uses the appropriate PromptTemplate to generate a response, which is sent back through the Mailbox.
+These components work together to create a flexible and powerful agent system. For example, an Agent uses its Classifier to categorize incoming Messages, then uses the appropriate PromptTemplate to generate a response, which is sent back through the Mailbox. Additionally, ConversationDataHandlers can process all messages flowing through the system for monitoring, storage, or integration with external systems.
+
+## Conversation Data Handling
+
+Actgent provides a flexible system for processing conversation data through the `ConversationDataHandler` interface. This feature allows agent developers to implement custom handlers for various purposes:
+
+- **Persistence**: Store conversation messages in databases or log files
+- **Monitoring**: Track specific content or patterns in conversations
+- **Forwarding**: Send conversation data to external systems or other agents
+- **Analytics**: Collect metrics and insights from conversations
+- **Compliance**: Implement audit logging and regulatory requirements
+
+### How It Works
+
+The conversation data handling system is designed to be minimally invasive and highly flexible:
+
+1. **Simple Interface**: Handlers implement a single method `handleMessage(message: Message, agentId: string)`
+2. **Priority-Based Chain**: Multiple handlers can be registered with priority ordering
+3. **Error Isolation**: Errors in one handler don't affect others in the chain
+4. **Single Hook Point**: Messages are processed exactly once at entry into the message flow
+
+### Implementation Example
+
+```typescript
+// Example MongoDB persistence handler
+import { ConversationDataHandler, Message } from 'actgent';
+import { MongoClient } from 'mongodb';
+
+export class MongoDBHandler implements ConversationDataHandler {
+  priority = 10; // Optional priority (lower executes first)
+  private client: MongoClient;
+  private dbName: string;
+  private collection: string;
+  
+  constructor(uri: string, dbName: string, collection: string) {
+    this.client = new MongoClient(uri);
+    this.dbName = dbName;
+    this.collection = collection;
+  }
+  
+  async handleMessage(message: Message, agentId: string): Promise<void> {
+    try {
+      await this.client.connect();
+      const db = this.client.db(this.dbName);
+      const coll = db.collection(this.collection);
+      
+      await coll.insertOne({
+        agentId,
+        sessionId: message.sessionId,
+        timestamp: new Date(),
+        sender: message.metadata?.sender,
+        content: message.payload.input,
+        metadata: message.metadata
+      });
+    } catch (error) {
+      console.error('Error persisting message:', error);
+    } finally {
+      await this.client.close();
+    }
+  }
+}
+
+// Register the handler with an agent
+const mongoHandler = new MongoDBHandler(
+  process.env.MONGODB_URI || 'mongodb://localhost:27017',
+  'actgent',
+  'conversations'
+);
+agent.registerConversationDataHandler(mongoHandler);
+```
+
+### Use Cases
+
+1. **Conversation Monitoring**
+   - Detect specific keywords or patterns in conversations
+   - Send alerts when critical topics are discussed
+   - Forward relevant conversations to specialized agents
+
+2. **Compliance and Auditing**
+   - Maintain complete conversation histories for regulatory requirements
+   - Track agent behavior and responses for quality assurance
+   - Implement data retention policies
+
+3. **Analytics and Improvement**
+   - Collect metrics on conversation topics and patterns
+   - Analyze user satisfaction and agent performance
+   - Identify areas for agent improvement
+
+4. **Multi-Agent Communication**
+   - Share relevant conversation data between agents
+   - Implement agent swarms with shared knowledge
+   - Create specialized monitoring agents
+
+The conversation data handling system provides a powerful extension point for agent developers to implement custom processing logic without modifying the core agent functionality.
 
 ## Key Strength: Structured Outputs
 

@@ -14,6 +14,7 @@ export { PromptManager } from './PromptManager';
 // Message handling
 export { Message, PayloadType } from './Message';
 export { PriorityInbox } from './PriorityInbox';
+export { ConversationDataHandler } from './ConversationDataHandler';
 
 // Session management
 export { Session } from './Session';
