@@ -66,7 +66,7 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
     const responseFormat = isMiniProgram ? ClientFormat.RAW_JSON : ClientFormat.SSE;
 
     // Set appropriate Content-Type based on client type
-    const contentType = isMiniProgram ? "application/json" : "text/event-stream";
+    const contentType = isMiniProgram ? "application/json" : "text/event-stream; charset=utf-8";
 
     // Define headers with index signature to allow dynamic properties
     const headers: Record<string, string> = {
