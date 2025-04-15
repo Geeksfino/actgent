@@ -598,6 +598,10 @@ export class AgentCore {
           this.processStreamBuffer(true, message.sessionId);
         }
 
+        if (chunks.length === 0) {
+          this.logger.error('[promptLLM] No chunks received from LLM stream; aborting response handling.', withTags(['error', 'llm-api']));
+          return '[ERROR] No response chunks received from LLM stream.';
+        }
         const lastChunk = chunks[chunks.length - 1];
         const finishReason = lastChunk.choices[0]?.finish_reason;
         
