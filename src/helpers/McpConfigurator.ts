@@ -43,6 +43,44 @@ export interface McpServersConfig {
 }
 
 /**
+ * Centralized MCP client cleanup manager
+ */
+class McpCleanupManager {
+  private static trackedClients: Set<McpClient> = new Set();
+  private static handlersRegistered = false;
+
+  public static addClient(client: McpClient) {
+    this.trackedClients.add(client);
+    this.registerHandlersIfNeeded();
+  }
+
+  private static async performCleanup() {
+    if (this.trackedClients.size === 0) return;
+    console.log(`[MCP CLEANUP] Cleaning up ${this.trackedClients.size} MCP clients...`);
+    const disconnects = Array.from(this.trackedClients).map(client =>
+      client.disconnect().catch(e => {
+        console.error(`[MCP CLEANUP] Error disconnecting MCP client:`, e);
+      })
+    );
+    await Promise.allSettled(disconnects);
+    this.trackedClients.clear();
+    console.log(`[MCP CLEANUP] Cleanup complete.`);
+  }
+
+  private static registerHandlersIfNeeded() {
+    if (this.handlersRegistered) return;
+    const cleanupAndExit = async (exitCode = 0) => {
+      await this.performCleanup();
+      process.exit(exitCode);
+    };
+    process.once('SIGINT', () => cleanupAndExit(0));
+    process.once('SIGTERM', () => cleanupAndExit(0));
+    process.once('exit', () => { this.performCleanup(); });
+    this.handlersRegistered = true;
+  }
+}
+
+/**
  * Helper class for loading MCP tools from configuration
  */
 export class McpConfigurator {
@@ -130,6 +168,8 @@ export class McpConfigurator {
           }
           
           const mcpClient = await McpConnector.connect(connectionParams);
+          // Register MCP client for cleanup
+          McpCleanupManager.addClient(mcpClient);
           
           // Run diagnostics on the MCP server if no tools are found
           const serverTools = await McpToolsHelper.listTools(mcpClient, serverName);
