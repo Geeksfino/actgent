@@ -311,12 +311,14 @@ export class AgentCore {
 
     await this.remember(message);
 
+    let preprocessResult = null;
     let processedInput = message;
     if (this.queryPreProcessor && message.metadata?.sender === "user") {
-      const processed = await this.queryPreProcessor.process(processedInput.payload.input, message.sessionId);
-      processedInput.payload.input = processed;
+      preprocessResult = await this.queryPreProcessor.process(processedInput.payload.input, message.sessionId);
+      // Only store the user message in memory (already done above)
+      // Do NOT overwrite processedInput.payload.input here, as LLM prompt should be built with synthetic system message
     }
-    const response = await this.promptLLM(processedInput);
+    const response = await this.promptLLM(processedInput, preprocessResult ?? undefined);
 
     // Handle the response based on message type
     const cleanedResponse = this.cleanLLMResponse(response);
@@ -424,7 +426,7 @@ export class AgentCore {
     return this.sessionContextManager[message.sessionId].getSession();
   }
 
-  private async promptLLM(message: Message): Promise<string> {
+  private async promptLLM(message: Message, preprocessResult?: { user: string; systemContext?: string }): Promise<string> {
     //this.log(`System prompt: ${this.promptManager.getSystemPrompt()}`);
     const sessionContext = this.sessionContextManager[message.sessionId];
 
@@ -487,14 +489,10 @@ export class AgentCore {
         }),
       ];
 
-      // Pretty print the history
-      const formattedHistory = AgentCore.formatHistory(history);
-      this.promptLogger.debug(`History:\n${formattedHistory}`);
-
       const systemPrompt = await this.promptManager.getSystemPrompt(sessionContext);
       const assistantPrompt = await this.promptManager.getAssistantPrompt(sessionContext);
 
-      // Construct messages array, filtering out empty assistant messages which can cause issues with DeepSeek API
+      // Construct messages array
       const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
         { role: "system", content: systemPrompt },
       ];
@@ -504,8 +502,40 @@ export class AgentCore {
         messages.push({ role: "assistant", content: assistantPrompt });
       }
       
+      // Inject synthetic system message for knowledge base context if present (not stored in memory)
+      if (preprocessResult && preprocessResult.systemContext) {
+        messages.push({ role: "system", content: `Context: ${preprocessResult.systemContext}` });
+      }
+      
       // Add history
       messages.push(...history);
+
+      // Pretty print the actual messages sent to the LLM (system, assistant, context, and history) with improved readability
+      this.promptLogger.debug('[LLM PROMPT] Actual messages sent to LLM:\n' +
+        messages.map((m, idx) => {
+          // Label role, highlight context
+          let isContext = false;
+          if (m.role === 'system' && typeof m.content === 'string' && m.content.startsWith('Context:')) {
+            isContext = true;
+          }
+          const roleLabel = `[${m.role}${isContext ? '/context' : ''}]`;
+          // Try to parse content if it's JSON, else print as-is
+          let content = m.content;
+          if (typeof content === 'string') {
+            try {
+              const parsed = JSON.parse(content);
+              content = JSON.stringify(parsed, null, 2);
+            } catch {}
+          } else if (Array.isArray(content)) {
+            content = JSON.stringify(content, null, 2);
+          }
+          // Compact for short text, pretty for objects/tool calls
+          let extra = '';
+          if ('tool_calls' in m && m.tool_calls) extra += `\n  tool_calls: ${JSON.stringify(m.tool_calls, null, 2)}`;
+          if ('tool_call_id' in m && m.tool_call_id) extra += `\n  tool_call_id: ${m.tool_call_id}`;
+          return `${roleLabel}\n  ${content ?? ''}${extra}`;
+        }).join('\n\n')
+      );
 
       // Split into separate configs for streaming and non-streaming
       const baseConfig = {

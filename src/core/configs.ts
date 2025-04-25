@@ -39,8 +39,13 @@ export interface LLMConfig {
  * Takes the original query and session ID, returns the processed query
  * The original query is still stored in memory
  */
+export interface PreprocessResult {
+  user: string;              // The original user query (or minimally processed)
+  systemContext?: string;    // The knowledge base/system context (optional)
+}
+
 export interface QueryPreProcessor {
-  process: (query: string, sessionId: string) => Promise<string>;
+  process: (query: string, sessionId: string) => Promise<PreprocessResult>;
 }
 
 export interface MemoryConfig {

@@ -43,53 +43,45 @@ export class McpKnowledgePreProcessor implements QueryPreProcessor {
    * @param sessionId The session ID
    * @returns The enhanced query
    */
-  async process(query: string, sessionId: string): Promise<string> {
+  async process(query: string, sessionId: string): Promise<{ user: string; systemContext?: string }> {
     if (!this.mcpTool) {
       console.warn('MCP tool not initialized for query preprocessing, returning original query');
-      return query;
+      return { user: query };
     }
-    
     try {
       // Execute the retrieve_context tool with the query as input
       const result = await this.mcpTool.run({ 
         query,
         messageType: 'text' 
       });
-      
       // result is a StringOutput object, extract the content
       const content = result.getContent();
-      
-      // If we have content, try to parse it and add to the query
       if (content && content.trim()) {
         try {
           // The content is likely a JSON string from McpTool's execute method
           const parsedContent = JSON.parse(content);
-          
           if (parsedContent.content && Array.isArray(parsedContent.content)) {
             // Extract text from standard MCP format
             const textContent = parsedContent.content
               .filter((item: any) => item.type === 'text' && item.text)
               .map((item: any) => item.text)
               .join('\n');
-              
             if (textContent) {
-              return `${query}\n\nKnowledge Base: ${textContent}`;
+              return { user: query, systemContext: textContent };
             }
           }
-          
           // If we can't extract from the standard format, use the whole content
-          return `${query}\n\nKnowledge Base: ${JSON.stringify(parsedContent)}`;
+          return { user: query, systemContext: JSON.stringify(parsedContent) };
         } catch (e) {
           // If it's not parseable JSON, use as plain text
-          return `${query}\n\nKnowledge Base: ${content}`;
+          return { user: query, systemContext: content };
         }
       }
-      
-      // If no useful content was returned, use the original query
-      return query;
+      // If no useful content was returned, just return the user query
+      return { user: query };
     } catch (error) {
       console.error(`Error in query preprocessing: ${error}`);
-      return query; // Fall back to original query
+      return { user: query };
     }
   }
 }
