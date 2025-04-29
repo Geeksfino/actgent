@@ -64,6 +64,10 @@ class EphemeralMemory implements IMemory<EphemeralMemoryUnit> {
             `Storing new item in ephemeral memory (current size: ${currentSize}/${this.maxItems})`,
             withTags([Tags.Ephemeral], { size: currentSize, maxSize: this.maxItems })
         );
+        // DEBUG: Print sessionId and content for every store
+        const debugSessionId = item.metadata?.get ? item.metadata.get('sessionId') : undefined;
+        const debugContent = item.content;
+        this.logger.debug('[DEBUG] EphemeralMemory.store', { sessionId: debugSessionId, content: debugContent });
         
         // Instead of throwing, try to make space first
         if (currentSize >= this.maxItems) {
@@ -170,8 +174,21 @@ class EphemeralMemory implements IMemory<EphemeralMemoryUnit> {
 
     async query(filter: MemoryFilter): Promise<EphemeralMemoryUnit[]> {
         this.purgeExpired();
+        let items = Object.values(this.items).map(entry => entry.item);
+
+        // Apply metadataFilters if present (e.g., for sessionId isolation)
+        if (filter.metadataFilters && filter.metadataFilters.length > 0) {
+            for (const metaFilter of filter.metadataFilters) {
+                items = items.filter(item => {
+                    for (const [key, value] of metaFilter.entries()) {
+                        if (item.metadata.get(key) !== value) return false;
+                    }
+                    return true;
+                });
+            }
+        }
+
         // Just return items in their natural order (FIFO)
-        const items = Object.values(this.items).map(entry => entry.item);
         return filter.limit ? items.slice(0, filter.limit) : items;
     }
 

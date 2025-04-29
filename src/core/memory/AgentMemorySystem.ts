@@ -88,6 +88,11 @@ export class AgentMemorySystem {
      * @param sessionId Optional session ID to associate with the memory
      */
     public async remember<C>(content: C | string, schema?: z.ZodSchema<C>, metadata?: Map<string, any>, sessionId?: string): Promise<void> {
+        this.logger.debug('[DEBUG] AgentMemorySystem.remember called', {
+            sessionId,
+            content,
+            metadata: metadata ? Object.fromEntries(metadata.entries()) : undefined
+        });
         if (metadata?.get('role') === 'user' || metadata?.get('role') === 'assistant' || metadata?.get('role') === 'tool') {
             // Make a copy of the metadata to avoid modifying the original
             const metadataCopy = new Map(metadata);
