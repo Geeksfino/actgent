@@ -4,6 +4,7 @@
 
 import { fetch } from "bun";
 import OpenAI from "openai";
+import { logger as actgentLogger, LogLevel, Logger } from "../src/core/Logger";
 
 // --- CLI ARGUMENT PARSING ---
 function parseArgs() {
@@ -34,6 +35,27 @@ const NUM_ROUNDS = Number(args["num-rounds"] || 5);
 const TEST_SCENARIO = args["scenario"] || "You are a user testing the agent's ability to answer questions about diabetes.";
 const USER_MAX_TOKENS = Number(args["user-max-tokens"] || 128);
 const USER_TEMPERATURE = Number(args["user-temperature"] || 0.8);
+const LOG_LEVEL = args["log-level"] ? args["log-level"].toUpperCase() : "INFO";
+
+// Set logger level if specified
+if (LOG_LEVEL && typeof actgentLogger.setLevel === "function") {
+  actgentLogger.setLevel(Logger.parseLogLevel(LOG_LEVEL));
+}
+
+function printSimUserTurn(user: string) {
+  const simUserHeader = '\n\x1b[1;96;107m═════════════════════════════════════════\x1b[0m\n' +
+    '\x1b[1;96m      🟦 SimUser 🟦\x1b[0m' +
+    '\n\x1b[1;96;107m═════════════════════════════════════════\x1b[0m';
+  console.log(`${simUserHeader}\n${user.trim()}\n`);
+}
+
+function printAgentHeader() {
+  const agentHeader = '\n\x1b[1;95;107m═════════════════════════════════════════\x1b[0m\n' +
+    '\x1b[1;95m      🟪 Agent 🟪\x1b[0m' +
+    '\n\x1b[1;95;107m═════════════════════════════════════════\x1b[0m';
+  console.log(agentHeader);
+}
+
 
 function printUsageAndExit() {
   console.error(`\nUsage: bun run test-agent.ts \\
@@ -78,11 +100,11 @@ async function generateUserMessage(
   // --- DEBUG LOGGING ---
   const openaiConfig = (openai as any).baseURL ? { baseURL: (openai as any).baseURL } : {};
   const maskedKey = LLM_API_KEY ? (LLM_API_KEY.slice(0, 5) + '...' + LLM_API_KEY.slice(-4)) : '';
-  console.log("[DEBUG] OpenAI LLM call:");
-  console.log("  Endpoint:", LLM_URL);
-  console.log("  Model:", LLM_MODEL);
-  console.log("  API Key:", maskedKey);
-  console.log("  Payload:", JSON.stringify({
+  actgentLogger.debug("OpenAI LLM call:");
+  actgentLogger.debug("  Endpoint:", LLM_URL);
+  actgentLogger.debug("  Model:", LLM_MODEL);
+  actgentLogger.debug("  API Key:", maskedKey);
+  actgentLogger.debug("  Payload:", JSON.stringify({
     model: LLM_MODEL,
     messages: prompt,
     max_tokens: maxTokens,
@@ -100,9 +122,9 @@ async function generateUserMessage(
     return msg ? msg.trim() : "[No response]";
   } catch (err) {
     // Log and return fallback
-    console.error("LLM API error:", err);
+    actgentLogger.error("LLM API error:", err);
     if (err && typeof err === 'object' && 'status' in err && (err as any).status === 400) {
-      console.error("400 Bad Request: Check your LLM URL, model, and API key. This often means the endpoint is not OpenAI-compatible or the request format is wrong.");
+      actgentLogger.error("400 Bad Request: Check your LLM URL, model, and API key. This often means the endpoint is not OpenAI-compatible or the request format is wrong.");
     }
     return "[LLM error]";
   }
@@ -116,10 +138,12 @@ async function main() {
   let userMsg = await generateUserMessage(history, TEST_SCENARIO, USER_MAX_TOKENS, USER_TEMPERATURE);
   // Fallback if LLM fails to generate a valid message
   if (!userMsg || userMsg.trim() === "" || userMsg.startsWith("[LLM error]")) {
-    console.warn('[DEBUG] LLM failed to generate a valid first user message. Falling back to "Hello".');
+    actgentLogger.warn('[DEBUG] LLM failed to generate a valid first user message. Falling back to "Hello".');
     userMsg = "Hello";
   }
-  console.log('[DEBUG] First user message to agent /createSession:', userMsg);
+  actgentLogger.debug('[DEBUG] First user message to agent /createSession:', userMsg);
+  printSimUserTurn(userMsg);
+
 
   // --- WebSocket Setup (pure WebSocket protocol) ---
   const ws = new WebSocket(TARGET_AGENT_WS_URL);
@@ -134,7 +158,45 @@ async function main() {
   let awaitingSessionCreated: ((id: string) => void) | null = null;
   let awaitingAgentResponse: ((msg: string) => void) | null = null;
   let streamingBuffer = '';
+  let spinner: ReturnType<typeof setInterval> | null = null;
+  let spinner2: ReturnType<typeof setInterval> | null = null;
 
+  ws.onclose = () => {
+    if (spinner !== null) {
+      clearInterval(spinner);
+      spinner = null;
+      process.stdout.write("\r" + " ".repeat(40) + "\r");
+    }
+    if (spinner2 !== null) {
+      clearInterval(spinner2);
+      spinner2 = null;
+      process.stdout.write("\r" + " ".repeat(40) + "\r");
+    }
+    if (awaitingAgentResponse) {
+      awaitingAgentResponse('[Connection closed]');
+      awaitingAgentResponse = null;
+    }
+  };
+
+  ws.onerror = (err) => {
+    if (spinner !== null) {
+      clearInterval(spinner);
+      spinner = null;
+      process.stdout.write("\r" + " ".repeat(40) + "\r");
+    }
+    if (spinner2 !== null) {
+      clearInterval(spinner2);
+      spinner2 = null;
+      process.stdout.write("\r" + " ".repeat(40) + "\r");
+    }
+    if (awaitingAgentResponse) {
+      awaitingAgentResponse('[Connection error]');
+      awaitingAgentResponse = null;
+    }
+  };
+
+
+  let isStreamingAgentResponse = false;
   ws.onmessage = (event) => {
     let data: any;
     try {
@@ -144,13 +206,12 @@ async function main() {
       } else if (event.data instanceof ArrayBuffer) {
         text = new TextDecoder().decode(event.data);
       } else {
-        // Fallback: try to coerce to string
         text = String(event.data);
       }
-      console.debug("[DEBUG] Raw agent WS message:", text);
+      actgentLogger.debug("[DEBUG] Raw agent WS message:", text);
       data = JSON.parse(text);
     } catch (e) {
-      console.error("[DEBUG] Failed to parse agent WS message:", e, event.data);
+      actgentLogger.error("[DEBUG] Failed to parse agent WS message:", e, event.data);
       return;
     }
     // Handle session creation
@@ -169,24 +230,43 @@ async function main() {
         awaitingSessionCreated = null;
       }
       if (awaitingAgentResponse) {
+        if (isStreamingAgentResponse) {
+          isStreamingAgentResponse = false;
+        }
         awaitingAgentResponse('[Agent error: ' + (data.error || 'unknown') + ']');
         awaitingAgentResponse = null;
       }
       return;
     }
     // Handle completion (either explicit or OpenAI-style finish_reason)
+    // Only process the first completion per turn and ignore empty completions
     if (data.type === 'completion' || (data.choices && data.choices[0]?.finish_reason)) {
       if (awaitingAgentResponse) {
-        const msg = streamingBuffer;
+        // Defensive: only process non-empty completions
+        const trimmed = streamingBuffer.trim();
+        if (trimmed.length > 0) {
+          if (spinner !== null) {
+            clearInterval(spinner);
+            spinner = null;
+            process.stdout.write("\r" + " ".repeat(40) + "\r");
+          }
+          if (spinner2 !== null) {
+            clearInterval(spinner2);
+            spinner2 = null;
+            process.stdout.write("\r" + " ".repeat(40) + "\r");
+          }
+          printAgentHeader();
+          process.stdout.write('\n');
+          process.stdout.write(trimmed + '\n');
+          awaitingAgentResponse(trimmed);
+        }
         streamingBuffer = '';
-        // Print a newline after the full response
-        process.stdout.write('\n');
-        awaitingAgentResponse(msg);
+        isStreamingAgentResponse = false;
         awaitingAgentResponse = null;
       }
       return;
     }
-    // Handle streamed chunk (accumulate and print immediately)
+    // Handle streamed chunk (accumulate only, do not print)
     let content = '';
     if (data.choices && data.choices[0]) {
       if (data.choices[0].delta && data.choices[0].delta.content)
@@ -196,37 +276,41 @@ async function main() {
     }
     if (content) {
       streamingBuffer += content;
-      process.stdout.write(content); // Print chunk as it arrives
     }
   };
 
   function wsCreateSession(description: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      awaitingSessionCreated = resolve;
-      ws.send(JSON.stringify({ type: 'createSession', description }));
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         if (awaitingSessionCreated) {
           awaitingSessionCreated('');
           awaitingSessionCreated = null;
           reject(new Error('Timeout waiting for sessionCreated'));
         }
       }, 10000);
+      awaitingSessionCreated = (sessionId: string) => {
+        clearTimeout(timeoutId);
+        resolve(sessionId);
+      };
+      ws.send(JSON.stringify({ type: 'createSession', description }));
     });
   }
 
   function wsSendChat(sessionId: string, message: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      awaitingAgentResponse = resolve;
-      ws.send(JSON.stringify({ type: 'chat', sessionId, message }));
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         if (awaitingAgentResponse) {
-          awaitingAgentResponse('[Timeout waiting for agent response]');
           awaitingAgentResponse = null;
           reject(new Error('Timeout waiting for agent response'));
-      }
-    }, 60000);
-  });
-}
+        }
+      }, 60000);
+      awaitingAgentResponse = (msg: string) => {
+        clearTimeout(timeoutId);
+        resolve(msg);
+      };
+      ws.send(JSON.stringify({ type: 'chat', sessionId, message }));
+    });
+  }
 
 // 2. Create session via WebSocket (first user message)
 sessionId = await wsCreateSession(userMsg);
@@ -236,14 +320,29 @@ if (!sessionId) throw new Error('Failed to create session via WebSocket');
 // For consistency, we simulate the first round just like the conversation loop
 // Record the LLM's output as 'assistant' (LLM always generates as 'assistant')
 history.push({ role: 'assistant', content: userMsg });
+// Show progressive indicator while waiting for the agent's first response
+let dots = 0;
+spinner = setInterval(() => {
+  process.stdout.write("\rWaiting for agent response" + ".".repeat(dots % 4) + "   ");
+  dots++;
+}, 400);
+
 // Wait for the agent's first response before proceeding
 agentMsg = await new Promise<string>((resolve) => {
-  awaitingAgentResponse = resolve;
+  awaitingAgentResponse = (msg: string) => {
+    if (spinner !== null) {
+      clearInterval(spinner);
+      spinner = null;
+      process.stdout.write("\r" + " ".repeat(40) + "\r"); // Erase spinner
+    }
+    resolve(msg);
+  };
+  ws.send(JSON.stringify({ type: 'createSession', description: userMsg }));
 });
 if (!agentMsg) agentMsg = '[No response]';
 // Record the agent's output as 'user' (anything sent to LLM is 'user')
 history.push({ role: 'user', content: agentMsg });
-console.log(`SimUser: ${userMsg}\nAgent: ${agentMsg}\n`);
+
 
 // Conversation loop for subsequent rounds
 for (let i = 1; i < NUM_ROUNDS; i++) {
@@ -251,15 +350,36 @@ for (let i = 1; i < NUM_ROUNDS; i++) {
   const llmAssistantMsg = await generateUserMessage(history, TEST_SCENARIO, USER_MAX_TOKENS, USER_TEMPERATURE);
   // Record LLM output as 'assistant'
   history.push({ role: 'assistant', content: llmAssistantMsg });
-  // Send to agent as user message
-  agentMsg = await wsSendChat(sessionId, llmAssistantMsg);
+  // Print SimUser message immediately
+  printSimUserTurn(llmAssistantMsg);
+    // Show progressive indicator while waiting for agent response
+  let dots2 = 0;
+  spinner2 = setInterval(() => {
+    process.stdout.write("\rWaiting for agent response" + ".".repeat(dots2 % 4) + "   ");
+    dots2++;
+  }, 400);
+  // Send to agent as user message and await response
+  agentMsg = await new Promise<string>((resolve) => {
+    awaitingAgentResponse = (msg: string) => {
+      if (spinner2 !== null) {
+        clearInterval(spinner2);
+        spinner2 = null;
+        process.stdout.write("\r" + " ".repeat(40) + "\r"); // Erase spinner
+      }
+      resolve(msg);
+    };
+    ws.send(JSON.stringify({ type: 'chat', sessionId, message: llmAssistantMsg }));
+  });
   if (!agentMsg) agentMsg = '[No response]';
-  // Record agent output as 'user' (anything sent to LLM is 'user')
+  // Do NOT print agentMsg here (already streamed)
+  // Only push to history
   history.push({ role: 'user', content: agentMsg });
-  console.log(`SimUser: ${llmAssistantMsg}\nAgent: ${agentMsg}\n`);
+
 }
 
 ws.close();
+// Force exit after a short grace period in case of lingering intervals/callbacks
+setTimeout(() => process.exit(0), 1000);
 }
 
 main().catch(err => {
