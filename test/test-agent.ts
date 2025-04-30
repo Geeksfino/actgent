@@ -42,16 +42,21 @@ if (LOG_LEVEL && typeof actgentLogger.setLevel === "function") {
   actgentLogger.setLevel(Logger.parseLogLevel(LOG_LEVEL));
 }
 
-function printSimUserTurn(user: string) {
+// Track round number globally for use in ws.onmessage and printing
+let currentRoundNum = 1;
+
+function printSimUserTurn(user: string, roundNum?: number) {
+  const roundStr = roundNum !== undefined ? `  (Round ${roundNum})` : '';
   const simUserHeader = '\n\x1b[1;96;107m═════════════════════════════════════════\x1b[0m\n' +
-    '\x1b[1;96m      🟦 SimUser 🟦\x1b[0m' +
+    `\x1b[1;96m      🟦 SimUser 🟦${roundStr}\x1b[0m` +
     '\n\x1b[1;96;107m═════════════════════════════════════════\x1b[0m';
   console.log(`${simUserHeader}\n${user.trim()}\n`);
 }
 
-function printAgentHeader() {
+function printAgentHeader(roundNum?: number) {
+  const roundStr = roundNum !== undefined ? `  (Round ${roundNum})` : '';
   const agentHeader = '\n\x1b[1;95;107m═════════════════════════════════════════\x1b[0m\n' +
-    '\x1b[1;95m      🟪 Agent 🟪\x1b[0m' +
+    `\x1b[1;95m      🟪 Agent 🟪${roundStr}\x1b[0m` +
     '\n\x1b[1;95;107m═════════════════════════════════════════\x1b[0m';
   console.log(agentHeader);
 }
@@ -88,7 +93,7 @@ async function generateUserMessage(
   let prompt: {role: "system"|"user"|"assistant", content: string}[] = [
     { role: "system", content: scenario + "\nYou are simulating a human user in a conversation. Generate the next user message in this context." },
     // Instead of an empty user message, mimic a greeting from the agent
-    { role: "user", content: "Hello! How can I assist you today?" },
+    { role: "assistant", content: "Hello! How can I assist you today?" },
     ...history.map(m => ({
       // Always preserve correct roles: 'user' for agent responses, 'assistant' for LLM completions
       role: m.role as "user" | "assistant" | "system",
@@ -142,7 +147,8 @@ async function main() {
     userMsg = "Hello";
   }
   actgentLogger.debug('[DEBUG] First user message to agent /createSession:', userMsg);
-  printSimUserTurn(userMsg);
+  currentRoundNum = 1;
+printSimUserTurn(userMsg, currentRoundNum);
 
 
   // --- WebSocket Setup (pure WebSocket protocol) ---
@@ -255,7 +261,7 @@ async function main() {
             spinner2 = null;
             process.stdout.write("\r" + " ".repeat(40) + "\r");
           }
-          printAgentHeader();
+          printAgentHeader(currentRoundNum);
           process.stdout.write('\n');
           process.stdout.write(trimmed + '\n');
           awaitingAgentResponse(trimmed);
@@ -318,8 +324,8 @@ if (!sessionId) throw new Error('Failed to create session via WebSocket');
 // Wait for the agent's response to the /createSession (first user message)
 // The agent's response will be handled in ws.onmessage and should resolve awaitingAgentResponse if protocol supports it
 // For consistency, we simulate the first round just like the conversation loop
-// Record the LLM's output as 'assistant' (LLM always generates as 'assistant')
-history.push({ role: 'assistant', content: userMsg });
+// Record the SimUser's output as 'user'
+history.push({ role: 'user', content: userMsg });
 // Show progressive indicator while waiting for the agent's first response
 let dots = 0;
 spinner = setInterval(() => {
@@ -340,18 +346,19 @@ agentMsg = await new Promise<string>((resolve) => {
   ws.send(JSON.stringify({ type: 'createSession', description: userMsg }));
 });
 if (!agentMsg) agentMsg = '[No response]';
-// Record the agent's output as 'user' (anything sent to LLM is 'user')
-history.push({ role: 'user', content: agentMsg });
+// Record the agent's output as 'assistant'
+history.push({ role: 'assistant', content: agentMsg });
 
 
 // Conversation loop for subsequent rounds
 for (let i = 1; i < NUM_ROUNDS; i++) {
+  currentRoundNum = i + 1; // round 2, 3, ...
   // LLM generates the next simulated user message (always as 'assistant')
   const llmAssistantMsg = await generateUserMessage(history, TEST_SCENARIO, USER_MAX_TOKENS, USER_TEMPERATURE);
   // Record LLM output as 'assistant'
   history.push({ role: 'assistant', content: llmAssistantMsg });
   // Print SimUser message immediately
-  printSimUserTurn(llmAssistantMsg);
+  printSimUserTurn(llmAssistantMsg, currentRoundNum);
     // Show progressive indicator while waiting for agent response
   let dots2 = 0;
   spinner2 = setInterval(() => {
