@@ -135,17 +135,8 @@ export class Communication {
       // Broadcast to WebSocket protocol if available
       // WebSocket is auto-enabled when streaming is enabled
       if (this._webSocketProtocol && sessionId) {
-        try {
-          // Parse data to ensure it's valid JSON before sending
-          const jsonData = typeof data === 'string' ? JSON.parse(data) : data;
-          
-          // Send to WebSocket clients for this session
-          this._webSocketProtocol.sendToSession(sessionId, JSON.stringify(jsonData));
-        } catch (wsError) {
-          // If parsing fails, send as is
-          this._webSocketProtocol.sendToSession(sessionId, data);
-          //logger.debug('[Communication] Error parsing data for WebSocket broadcast:', wsError);
-        }
+        // Always send the string as-is; let the receiver decide how to parse it
+        this._webSocketProtocol.sendToSession(sessionId, data);
       }
       
       if (!this._streamingProtocol && !this._webSocketProtocol) {
