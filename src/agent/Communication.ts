@@ -144,7 +144,7 @@ export class Communication {
         } catch (wsError) {
           // If parsing fails, send as is
           this._webSocketProtocol.sendToSession(sessionId, data);
-          logger.debug('[Communication] Error parsing data for WebSocket broadcast:', wsError);
+          //logger.debug('[Communication] Error parsing data for WebSocket broadcast:', wsError);
         }
       }
       
