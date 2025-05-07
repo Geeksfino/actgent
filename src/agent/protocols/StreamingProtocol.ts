@@ -100,7 +100,6 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
         return this.handleObservabilityStream(req, headers, isMiniProgram ? ClientFormat.RAW_JSON : ClientFormat.SSE);
       default:
         // Check for session endpoint pattern
-        // Check for session endpoint pattern
         const sessionMatch = url.pathname.match(/^\/session\/([^\/]+)$/);
         if (sessionMatch) {
           const sessionId = sessionMatch[1];
@@ -316,28 +315,61 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
   public broadcast(data: string, sessionId?: string): void {
     const timestamp = new Date().toISOString();
     logger.debug(`[StreamingProtocol] Broadcast called at ${timestamp} with${sessionId ? ' sessionId: ' + sessionId : ' no sessionId'}`);
+
+    let processedData: string;
+
+    try {
+      // Step 1: Basic sanitization - remove NUL characters ( ), as they can break JSON parsing
+      // and cause "unterminated string" errors if they appear within a JSON string value.
+      const sanitizedData = data.replace(/\u0000/g, '');
+
+      // Step 2: Attempt to parse if it looks like a JSON object.
+      // LLM responses are often streamed as JSON objects or JSON-like strings.
+      if (sanitizedData.trim().startsWith('{') && sanitizedData.trim().endsWith('}')) {
+        try {
+          let jsonData = JSON.parse(sanitizedData);
+
+          // Ensure sessionId is included if this is session-specific data and jsonData is an object
+          if (sessionId && typeof jsonData === 'object' && jsonData !== null && !jsonData.sessionId) {
+            jsonData.sessionId = sessionId;
+          }
+          
+          // Re-stringify to ensure it's canonical and to include any modifications (like sessionId)
+          processedData = JSON.stringify(jsonData);
+          logger.debug(`[StreamingProtocol] Successfully parsed and processed JSON data: ${processedData.substring(0, 100)}...`);
+        } catch (parseError) {
+          // Parsing failed. This means the string was not valid JSON.
+          logger.warn(`[StreamingProtocol] Failed to parse data as JSON. Error: ${parseError}. Original (sanitized) data snippet: ${sanitizedData.substring(0, 100)}...`);
+          // Fallback: Send a structured error message as valid JSON.
+          processedData = JSON.stringify({
+            type: "error",
+            event: "data_parse_error",
+            message: "Received malformed data that could not be parsed by the agent.",
+            original_snippet: sanitizedData.substring(0, 200), // Include a snippet for debugging
+            sessionId: sessionId
+          });
+        }
+      } else {
+        // It doesn't look like a JSON object, or it's not intended to be.
+        // Use the sanitized string directly. This could be plain text or other non-JSON data.
+        processedData = sanitizedData;
+        logger.debug(`[StreamingProtocol] Data is not a JSON object or not intended to be: ${processedData.substring(0, 50)}...`);
+      }
+    } catch (e) {
+      // Catch any other unexpected errors during initial processing/sanitization.
+      logger.error(`[StreamingProtocol] Unexpected error processing data before broadcast. Error: ${e}. Original data snippet: ${data.substring(0,100)}`);
+      processedData = JSON.stringify({
+        type: "error",
+        event: "broadcast_processing_error",
+        message: "An unexpected error occurred while preparing data for broadcast.",
+        sessionId: sessionId
+      });
+    }
     
     // If sessionId is provided, also send to session-specific streams
     if (sessionId) {
       logger.debug(`[StreamingProtocol] Broadcasting to session ${sessionId}`);
       
-      // First try to parse the data to see if it's JSON
-      let jsonData: any = null;
-      try {
-        jsonData = JSON.parse(data);
-        // Ensure sessionId is included in the data
-        if (!jsonData.sessionId) {
-          jsonData.sessionId = sessionId;
-          // Use the modified JSON with sessionId
-          data = JSON.stringify(jsonData);
-        }
-        logger.debug(`[StreamingProtocol] Parsed JSON data: ${JSON.stringify(jsonData).substring(0, 100)}...`);
-      } catch (e) {
-        // Not JSON, continue with original data
-        logger.debug(`[StreamingProtocol] Data is not JSON: ${data.substring(0, 50)}...`);
-      }
-
-      // Count session streams for this session
       let sessionStreamCount = 0;
       for (const stream of this.streams) {
         if (stream.type === StreamType.SESSION && stream.sessionId === sessionId) {
@@ -346,11 +378,10 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
       }
       logger.debug(`[StreamingProtocol] Found ${sessionStreamCount} streams for session ${sessionId}`);
 
-      // Send to session-specific streams
       for (const stream of this.streams) {
         if (stream.type === StreamType.SESSION && stream.sessionId === sessionId) {
-          logger.debug(`[StreamingProtocol] Sending data to session stream ${stream.id}`);
-          stream.enqueue(data);
+          logger.debug(`[StreamingProtocol] Sending processed data to session stream ${stream.id}`);
+          stream.enqueue(processedData); // Use processedData
         }
       }
     }
@@ -363,16 +394,13 @@ export class StreamingProtocol extends BaseCommunicationProtocol {
       if (stream.type === StreamType.RAW) {
         rawStreamCount++;
         
-        // If this raw stream has a sessionId filter
         if (stream.sessionId) {
-          // Only send if the broadcast sessionId matches the stream's filter
           if (sessionId === stream.sessionId) {
             filteredRawStreamCount++;
-            stream.enqueue(data);
+            stream.enqueue(processedData); // Use processedData
           }
         } else {
-          // No filter, send to all unfiltered raw streams
-          stream.enqueue(data);
+          stream.enqueue(processedData); // Use processedData
         }
       }
     }
@@ -464,28 +492,61 @@ class StreamController {
   public enqueue(data: string) {
     if (!this.isActive) return;
     
-    if (this.responseFormat === ClientFormat.SSE) {
-      // Format as SSE data for web clients (existing behavior)
-      const message = data.split('\n')
-        .map(line => `data: ${line}`)
-        .join('\n') + '\n\n';
-      
-      this.controller.enqueue(this.encoder.encode(message));
-    } else {
-      // Raw JSON format for mini-programs - no SSE formatting
-      this.controller.enqueue(this.encoder.encode(data));
+    try {
+      // Data should ideally be pre-sanitized and validated before reaching here (e.g., in broadcast).
+      // This is a final safeguard.
+      if (this.responseFormat === ClientFormat.SSE) {
+        // Format as SSE data for web clients (existing behavior)
+        const message = data.split('\n')
+          .map(line => `data: ${line}`)
+          .join('\n') + '\n\n';
+        
+        this.controller.enqueue(this.encoder.encode(message));
+      } else {
+        // Raw JSON format for mini-programs - no SSE formatting
+        // Ensure data is a string before encoding. If it's an object, it should have been stringified earlier.
+        this.controller.enqueue(this.encoder.encode(typeof data === 'string' ? data : JSON.stringify(data)));
+      }
+    } catch (error) {
+      logger.error(`[StreamingProtocol] Error in StreamController.enqueue: ${error}. Data snippet: ${String(data).substring(0,100)}`);
+      // Attempt to send a standardized error message to the client, if the stream is still active.
+      if (this.isActive) {
+        try {
+          const errorPayload = JSON.stringify({
+            type: "error",
+            event: "stream_enqueue_error",
+            message: "Error preparing data for client stream."
+          });
+          if (this.responseFormat === ClientFormat.SSE) {
+            this.controller.enqueue(this.encoder.encode(`data: ${errorPayload}\n\n`));
+          } else {
+            this.controller.enqueue(this.encoder.encode(errorPayload));
+          }
+        } catch (fallbackError) {
+          logger.error(`[StreamingProtocol] Critical error: Failed to send fallback error message to client: ${fallbackError}`);
+          // At this point, the stream might be unusable. Consider closing it.
+          // this.close(); // Or let the cleanupConnection handle it if the error propagates
+        }
+      }
     }
   }
 
   public sendKeepalive() {
     if (!this.isActive) return;
     
-    if (this.responseFormat === ClientFormat.SSE) {
-      // Use standard SSE comment format for keepalive (existing behavior)
-      this.controller.enqueue(this.encoder.encode(": keepalive\n\n"));
-    } else {
-      // JSON format for mini-program keepalive
-      this.controller.enqueue(this.encoder.encode(JSON.stringify({ type: "keepalive" })));
+    try {
+      if (this.responseFormat === ClientFormat.SSE) {
+        // Use standard SSE comment format for keepalive (existing behavior)
+        this.controller.enqueue(this.encoder.encode(": keepalive\n\n"));
+      } else {
+        // JSON format for mini-program keepalive
+        // Safely stringify the keepalive object.
+        this.controller.enqueue(this.encoder.encode(JSON.stringify({ type: "keepalive" })));
+      }
+    } catch (error) {
+      logger.error(`[StreamingProtocol] Error in StreamController.sendKeepalive: ${error}`);
+      // If keepalive fails, it's usually not critical enough to send an error to the client,
+      // but logging is important.
     }
   }
 

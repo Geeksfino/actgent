@@ -220,9 +220,14 @@ export class WebSocketProtocol extends BaseCommunicationProtocol {
                   }
                 };
                 
-                // Store the listener reference for cleanup
+                // Defensive: Remove any previous listener before adding a new one
+                const prevListener = (ws.data as any).eventListener;
+                if (prevListener) {
+                  eventEmitter.off('agent:response', prevListener);
+                }
                 (ws.data as any).eventListener = eventListener;
                 eventEmitter.on('agent:response', eventListener);
+                logger.debug(`[WebSocketProtocol] agent:response listener count: ${eventEmitter.listenerCount('agent:response')}`);
                 
                 // Send success response
                 const responseMsg = JSON.stringify({
@@ -377,6 +382,8 @@ export class WebSocketProtocol extends BaseCommunicationProtocol {
         if (eventListener) {
           const eventEmitter = getEventEmitter();
           eventEmitter.off('agent:response', eventListener);
+          (ws.data as any).eventListener = undefined;
+          logger.debug(`[WebSocketProtocol] agent:response listener count: ${eventEmitter.listenerCount('agent:response')}`);
         }
         
         logger.debug(`[WebSocketProtocol] Connection closed: ${connId}`);
