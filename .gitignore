@@ -196,3 +196,4 @@ generated-agents/
 model_cache/
 models/bge/
 **/onnx/
+preproc-mcp.json
