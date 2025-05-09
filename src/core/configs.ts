@@ -28,10 +28,14 @@ export interface AgentServiceConfig {
 }
 
 export interface LLMConfig {
+  // Existing fields
+
   apiKey: string;
   model: string;
   baseURL?: string;
   streamMode?: boolean;
+  maxTokens?: number;
+  temperature?: number;
 }
 
 /**

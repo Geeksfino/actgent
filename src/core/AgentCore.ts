@@ -318,7 +318,33 @@ export class AgentCore {
       // Only store the user message in memory (already done above)
       // Do NOT overwrite processedInput.payload.input here, as LLM prompt should be built with synthetic system message
     }
-    const response = await this.promptLLM(processedInput, preprocessResult ?? undefined);
+    // Robust retry logic for LLM call (rate limit, transient errors)
+    const MAX_RETRIES = 5;
+    let attempts = 0;
+    let handled = false;
+    let response: string | undefined = undefined;
+    while (!handled && attempts < MAX_RETRIES) {
+      try {
+        response = await this.promptLLM(processedInput, preprocessResult ?? undefined);
+        handled = true;
+      } catch (err: any) {
+        if (this.isRecoverableLLMError(err) && attempts < MAX_RETRIES - 1) {
+          attempts++;
+          const delay = this.calculateBackoff(attempts);
+          this.logger.warn(`LLM error (retry ${attempts}): ${err?.message || err}. Retrying in ${delay}ms.`);
+          await this.sleep(delay);
+        } else {
+          this.logger.error(`Unrecoverable LLM error or max retries reached: ${err?.message || err}`);
+          this.escalateLLMErrorToUser(message, err, attempts);
+          handled = true;
+          return;
+        }
+      }
+    }
+    if (!response) {
+      this.logger.error(`Exited LLM retry loop without a response for message ${message.id}.`);
+      return;
+    }
 
     // Handle the response based on message type
     const cleanedResponse = this.cleanLLMResponse(response);
@@ -359,6 +385,41 @@ export class AgentCore {
       const toolCallMessage = session.createMessage("", "assistant", { tool_calls: JSON.parse(cleanedResponse) });
       await this.remember(toolCallMessage);
     }
+  }
+
+  // Helper: Detect recoverable LLM errors (rate limit, network, 5xx)
+  private isRecoverableLLMError(err: any): boolean {
+    if (!err) return false;
+    // OpenAI API: err.status for HTTP, err.code for network
+    if (err.status === 429 || err.status === 502 || err.status === 503 || err.status === 504) return true;
+    if (typeof err.message === 'string' && (
+      err.message.includes('429') ||
+      err.message.includes('rate limit') ||
+      err.message.includes('timeout') ||
+      err.message.includes('temporarily unavailable')
+    )) return true;
+    // Add more cases as needed for your LLM provider
+    return false;
+  }
+
+  // Helper: Exponential backoff with jitter
+  private calculateBackoff(attempt: number): number {
+    const base = 1000; // 1s
+    const max = 10000; // 10s
+    const backoff = Math.min(base * Math.pow(2, attempt), max);
+    return backoff + Math.floor(Math.random() * 200); // jitter
+  }
+
+  // Helper: Sleep utility
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  // Helper: Escalate to user or log (customize as needed)
+  private escalateLLMErrorToUser(message: Message, err: any, attempts: number) {
+    // Optionally send a user-facing message or log
+    this.logger.error(`Escalating LLM error after ${attempts} attempts for message ${message.id}: ${err?.message || err}`);
+    // TODO: Implement user notification if desired
   }
 
   private async remember(message: Message) {
@@ -543,6 +604,8 @@ export class AgentCore {
         messages,
         tools: unmappedTools.length > 0 ? unmappedTools : undefined,
         ...(unmappedTools.length > 0 ? { tool_choice: "auto" as const } : {}),
+        ...(this.llmConfig?.maxTokens ? { max_tokens: this.llmConfig.maxTokens } : {}),
+        ...(this.llmConfig?.temperature ? { temperature: this.llmConfig.temperature } : {}),
       };
       this.logger.trace('LLM prompt config:', JSON.stringify(baseConfig, null, 2));
       // Variable to track if we detected tool calls during streaming

@@ -34,6 +34,10 @@ export class WebSocketProtocol extends BaseCommunicationProtocol {
   private markdownBuffers: Map<string, string> = new Map();
 
   constructor(handler: AgentRequestHandler, port: number = 3002, host: string = "localhost") {
+    // Increase the max listeners for the AgentEventEmitter to avoid memory leak warnings when many sessions are active.
+    // Each WebSocket session adds an 'agent:response' listener; with many concurrent sessions, the default (10) is exceeded.
+    const eventEmitter = getEventEmitter();
+    eventEmitter.setMaxListeners(50);
     super(handler);
     this.port = port;
     this.host = host;

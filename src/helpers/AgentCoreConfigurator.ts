@@ -78,6 +78,17 @@ export class AgentCoreConfigurator {
       }
     }
 
+    // Attach LLM config from environment variables if present
+    const llmConfig: any = {};
+    if (process.env.LLM_API_KEY) llmConfig.apiKey = process.env.LLM_API_KEY;
+    if (process.env.LLM_MODEL) llmConfig.model = process.env.LLM_MODEL;
+    if (process.env.LLM_PROVIDER_URL) llmConfig.baseURL = process.env.LLM_PROVIDER_URL;
+    if (process.env.LLM_STREAM_MODE) llmConfig.streamMode = process.env.LLM_STREAM_MODE === 'true';
+    if (process.env.LLM_MAX_TOKENS) llmConfig.maxTokens = Number(process.env.LLM_MAX_TOKENS);
+    if (process.env.LLM_TEMPERATURE) llmConfig.temperature = Number(process.env.LLM_TEMPERATURE);
+    if (Object.keys(llmConfig).length > 0) {
+      (config as any).llmConfig = llmConfig;
+    }
     return config;
   }
 
