@@ -40,7 +40,7 @@ console.log(`Registered file conversation handler. Logs will be saved to: ${conv
       TechSupportAgent.setQueryPreProcessor(preprocessor);
       console.log('MCP Knowledge preprocessor initialized and set up with the agent');
     } else {
-      console.warn('Failed to initialize MCP Knowledge preprocessor');
+      console.info('No MCP Knowledge preprocessor in use');
     }
   } catch (error) {
     console.error('Error setting up MCP Knowledge preprocessor:', error);
